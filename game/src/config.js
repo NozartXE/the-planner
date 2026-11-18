@@ -32,11 +32,11 @@ export const PALETTE = {
   parkPath: '#2c2f28',
   treeDark: '#24382a',
   treeLight: '#314d36',
-  roofA: '#2a2e38',
-  roofB: '#323642',
-  roofC: '#262a33',
-  wallLight: '#3d434f',
-  wallDark: '#22252d',
+  roofA: '#3a404e',
+  roofB: '#454b5c',
+  roofC: '#343a46',
+  wallLight: '#4a5160',
+  wallDark: '#2b2f38',
   lampGlow: 'rgba(255,196,110,0.55)',
   lampCore: '#ffd9a0',
   headlight: 'rgba(255,240,200,0.5)',
@@ -51,6 +51,33 @@ export const PALETTE = {
   money: '#8fd18b',
   danger: '#e5484d',
 };
+// Districts: four quadrants of the 8x8 block grid, each with its own roof family,
+// wall tints, window warmth/density and neon bias, so neighbourhoods read as
+// different places at a squint, without reading a single label.
+// index = (bx >= 4 ? 1 : 0) + (by >= 4 ? 2 : 0) — NW, NE, SW (port), SE.
+export const DISTRICTS = [
+  { // NW — Old Town around Gazette Plaza: warm brick and terracotta, dense warm windows, little neon.
+    roofs: ['#57453a', '#5f4c3e', '#4e3f35'],
+    wallLight: '#6b5a48', wallDark: '#3d332a',
+    windowColor: 'rgba(255,206,128,0.72)', windowThreshold: 0.42, neonChance: 0.10,
+  },
+  { // NE — Neon Uptown around the tower and hotel: cool slate-teal, pale windows, neon everywhere.
+    roofs: ['#38525c', '#3f5c66', '#324a54'],
+    wallLight: '#546e78', wallDark: '#2a3a42',
+    windowColor: 'rgba(178,224,238,0.66)', windowThreshold: 0.52, neonChance: 0.46,
+  },
+  { // SW — Port Meridian industrial: olive-grey sheds and rust, sparse dim windows.
+    roofs: ['#54543e', '#5c5c44', '#4a4a38'],
+    wallLight: '#62624c', wallDark: '#36362a',
+    windowColor: 'rgba(255,186,102,0.62)', windowThreshold: 0.60, neonChance: 0.16,
+  },
+  { // SE — Southside residential: dusky plum roofs, soft warm windows.
+    roofs: ['#4d4763', '#554f6e', '#443f59'],
+    wallLight: '#615a78', wallDark: '#332f47',
+    windowColor: 'rgba(255,216,170,0.64)', windowThreshold: 0.50, neonChance: 0.22,
+  },
+];
+export function districtIndexFor(bx, by) { return (bx >= 4 ? 1 : 0) + (by >= 4 ? 2 : 0); }
 export const PLACES = {
   port: { name: 'Port Meridian', x: 516, y: 3336 },
   neonTower: { name: 'Neon Tower', x: 3336, y: 516 },

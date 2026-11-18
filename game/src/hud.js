@@ -63,12 +63,15 @@ export function drawHud(ctx, game) {
   ctx.fillStyle = game.player.hp > 30 ? '#7fc97f' : PALETTE.danger;
   ctx.fillRect(26, VIEW_H - 38, 184 * clamp(game.player.hp / 100, 0, 1), 10);
   if (game.player.inCar && game.player.car) {
+    // Speed lives on the VEHICLE label line (right-aligned); the bar owns its own line
+    // at full panel width, so text and bar can never overlap.
     panel(ctx, 14, VIEW_H - 116, 208, 48);
-    ctx.fillStyle = PALETTE.hudMuted; ctx.fillText('VEHICLE', 26, VIEW_H - 108);
-    ctx.fillStyle = '#3a3e46'; ctx.fillRect(26, VIEW_H - 92, 120, 10);
-    ctx.fillStyle = '#8ecae6'; ctx.fillRect(26, VIEW_H - 92, 120 * clamp(game.player.car.hp / game.player.car.maxHp, 0, 1), 10);
-    ctx.fillStyle = PALETTE.hudText; ctx.font = '700 14px system-ui, sans-serif'; ctx.textAlign = 'right';
-    ctx.fillText(Math.round(Math.abs(game.player.car.speed) * 0.62) + ' km/h', 210, VIEW_H - 96);
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('VEHICLE', 26, VIEW_H - 108);
+    ctx.fillStyle = PALETTE.hudText; ctx.font = '700 13px system-ui, sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(Math.round(Math.abs(game.player.car.speed) * 0.62) + ' km/h', 210, VIEW_H - 109);
+    ctx.fillStyle = '#3a3e46'; ctx.fillRect(26, VIEW_H - 92, 184, 10);
+    ctx.fillStyle = '#8ecae6'; ctx.fillRect(26, VIEW_H - 92, 184 * clamp(game.player.car.hp / game.player.car.maxHp, 0, 1), 10);
   }
   // Control hints for the first seconds of play.
   if (game.playTime < 9 && game.screen === 'play') {

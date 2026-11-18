@@ -2,13 +2,13 @@
 import { VIEW_W, VIEW_H, WORLD_SEED, PLACES, PLAYER_SPEED_WALK, PLAYER_SPEED_SPRINT, WORLD_SIZE } from './config.js';
 import { makeRng, clamp, dist } from './rng.js';
 import { generateCity, buildMinimapBase, collideCircleBuildings } from './city.js';
+import { makePedestrians, updatePedestrians } from './people.js';
+import { Missions } from './missions.js';
 import { Input } from './input.js';
 import { sfx } from './audio.js';
 import { loadSave, writeSave } from './save.js';
 import { populateTraffic, updateTraffic } from './traffic.js';
 import { Police } from './police.js';
-import { makePedestrians, updatePedestrians } from './people.js';
-import { Missions } from './missions.js';
 import { Fx } from './fx.js';
 import { makeCar } from './cars.js';
 import { makeCamera, updateCamera, renderGame } from './render.js';
@@ -28,7 +28,7 @@ export function createGame() {
   const city = generateCity(WORLD_SEED);
   city.minimap = buildMinimapBase(city);
   const saveData = loadSave();
-  const player = { x: PLACES.hospital.x, y: PLACES.hospital.y, angle: -Math.PI / 2, hp: 100, inCar: false, car: null, vx: 0, vy: 0, shootCd: 0 };
+  const player = { x: PLACES.hospital.x, y: PLACES.hospital.y, angle: -Math.PI / 2, hp: 100, inCar: false, car: null, vx: 0, vy: 0, shootCd: 0, walkPhase: 0 };
   const game = {
     rng, city, saveData, player,
     money: saveData.money,
@@ -143,6 +143,7 @@ function updatePlayerOnFoot(game, dt) {
     const len = Math.sqrt(ix * ix + iy * iy);
     vx = (ix / len) * speed; vy = (iy / len) * speed;
     p.angle = Math.atan2(vy, vx);
+    p.walkPhase = (p.walkPhase || 0) + dt * 6.4 * (speed / PLAYER_SPEED_WALK);
   }
   p.vx = vx; p.vy = vy;
   const fixed = collideCircleBuildings(game.city, p.x + vx * dt, p.y + vy * dt, 8);

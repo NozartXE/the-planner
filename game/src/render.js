@@ -93,13 +93,17 @@ function drawWorld(ctx, game, cam) {
     ctx.fillStyle = ctx.strokeStyle;
     ctx.beginPath(); ctx.arc(marker.x, marker.y, 7, 0, Math.PI * 2); ctx.fill();
   }
-  // Place labels for story locations when nearby.
+  // Place labels for story locations when nearby. The plate is clamped fully inside the
+  // visible view rect (the plate shifts, never the place) so no label can clip at an edge.
   ctx.font = '600 13px system-ui, sans-serif'; ctx.textAlign = 'center';
+  const vx0 = cam.x - hw, vx1 = cam.x + hw, vy0 = cam.y - hh, vy1 = cam.y + hh;
   for (const key of Object.keys(game.places)) {
     const pl = game.places[key];
     if (pl.x < x0 || pl.x > x1 || pl.y < y0 || pl.y > y1) continue;
-    ctx.fillStyle = 'rgba(10,12,16,0.55)'; ctx.fillRect(pl.x - 62, pl.y - 58, 124, 19);
-    ctx.fillStyle = '#cfd3da'; ctx.fillText(pl.name, pl.x, pl.y - 44);
+    const px = clamp(pl.x - 62, vx0 + 4, Math.max(vx0 + 4, vx1 - 128));
+    const py = clamp(pl.y - 58, vy0 + 4, Math.max(vy0 + 4, vy1 - 23));
+    ctx.fillStyle = 'rgba(10,12,16,0.55)'; ctx.fillRect(px, py, 124, 19);
+    ctx.fillStyle = '#cfd3da'; ctx.fillText(pl.name, px + 62, py + 14);
   }
   // Buildings: pseudo-depth — walls extruded away from the camera focus, then the roof.
   const focusX = cam.x, focusY = cam.y + 260;
@@ -108,12 +112,12 @@ function drawWorld(ctx, game, cam) {
     if (b.x + b.w < x0 - 80 || b.x > x1 + 80 || b.y + b.h < y0 - 80 || b.y > y1 + 80) continue;
     const ox = clamp((b.x + b.w / 2 - focusX) * 0.0016 * b.height, -26, 26);
     const oy = clamp((b.y + b.h / 2 - focusY) * 0.0016 * b.height, -26, 26) - b.height * 0.16;
-    ctx.fillStyle = PALETTE.wallDark;
+    ctx.fillStyle = b.wallDark || PALETTE.wallDark;
     ctx.beginPath();
     ctx.moveTo(b.x, b.y + b.h); ctx.lineTo(b.x + b.w, b.y + b.h);
     ctx.lineTo(b.x + b.w + ox, b.y + b.h + oy); ctx.lineTo(b.x + ox, b.y + b.h + oy);
     ctx.closePath(); ctx.fill();
-    ctx.fillStyle = PALETTE.wallLight;
+    ctx.fillStyle = b.wallLight || PALETTE.wallLight;
     ctx.beginPath();
     ctx.moveTo(b.x + b.w, b.y); ctx.lineTo(b.x + b.w, b.y + b.h);
     ctx.lineTo(b.x + b.w + ox, b.y + b.h + oy); ctx.lineTo(b.x + b.w + ox, b.y + oy);
@@ -121,13 +125,46 @@ function drawWorld(ctx, game, cam) {
     ctx.fillStyle = b.color;
     ctx.fillRect(b.x + ox, b.y + oy, b.w, b.h);
     ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1; ctx.strokeRect(b.x + ox, b.y + oy, b.w, b.h);
-    // Sparse lit windows.
-    ctx.fillStyle = 'rgba(255,205,120,0.62)';
+    // Parapet: a lighter lip inside the roof edge so the slab reads as a built roof, not a tile.
+    ctx.strokeStyle = 'rgba(255,255,255,0.13)'; ctx.lineWidth = 2;
+    ctx.strokeRect(b.x + ox + 3, b.y + oy + 3, b.w - 6, b.h - 6);
+    ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = 1;
+    ctx.strokeRect(b.x + ox + 7, b.y + oy + 7, b.w - 14, b.h - 14);
+    // Rooftop props stored at generation: AC boxes, vents, water-tower silhouettes.
+    if (b.props) {
+      for (const pr of b.props) {
+        const rx = b.x + ox + pr.dx, ry = b.y + oy + pr.dy;
+        if (pr.kind === 'ac') {
+          ctx.fillStyle = 'rgba(255,255,255,0.09)'; ctx.fillRect(rx, ry, pr.w, pr.h);
+          ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 1; ctx.strokeRect(rx, ry, pr.w, pr.h);
+          ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+          ctx.beginPath(); ctx.moveTo(rx + 2, ry + pr.h / 2); ctx.lineTo(rx + pr.w - 2, ry + pr.h / 2); ctx.stroke();
+        } else if (pr.kind === 'vent') {
+          ctx.fillStyle = 'rgba(255,255,255,0.08)';
+          ctx.beginPath(); ctx.arc(rx, ry, pr.w / 2, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(rx, ry, pr.w / 2, 0, Math.PI * 2); ctx.stroke();
+        } else {
+          // Water tower: legs, a tank and a shallow cone cap.
+          ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.moveTo(rx + 1, ry + pr.h + 7); ctx.lineTo(rx + 3, ry + 4);
+          ctx.moveTo(rx + pr.w - 1, ry + pr.h + 7); ctx.lineTo(rx + pr.w - 3, ry + 4);
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(12,13,18,0.55)'; ctx.fillRect(rx, ry, pr.w, pr.h);
+          ctx.fillStyle = 'rgba(255,255,255,0.10)';
+          ctx.beginPath(); ctx.moveTo(rx - 1, ry); ctx.lineTo(rx + pr.w / 2, ry - 4); ctx.lineTo(rx + pr.w + 1, ry); ctx.closePath(); ctx.fill();
+        }
+      }
+    }
+    // Lit windows in the district's warmth and density.
+    ctx.fillStyle = b.windowColor || 'rgba(255,205,120,0.62)';
     const step = 24;
+    const wth = typeof b.windowThreshold === 'number' ? b.windowThreshold : 0.55;
     for (let wx = b.x + ox + 10; wx < b.x + ox + b.w - 8; wx += step) {
       for (let wy = b.y + oy + 10; wy < b.y + oy + b.h - 8; wy += step) {
         const h = Math.sin(wx * 12.9898 + wy * 78.233) * 43758.5453;
-        if ((h - Math.floor(h)) > 0.55) ctx.fillRect(wx, wy, 5, 3);
+        if ((h - Math.floor(h)) > wth) ctx.fillRect(wx, wy, 5, 3);
       }
     }
     if (b.neon) {
@@ -146,9 +183,15 @@ function drawWorld(ctx, game, cam) {
   for (const car of game.traffic) drawCar(ctx, car, game.time);
   for (const cop of game.police.cops) drawCar(ctx, cop, game.time);
   if (game.markedCarRef) drawCar(ctx, game.markedCarRef, game.time);
-  for (const ped of game.peds) if (!ped.dead) drawFigure(ctx, ped.x, ped.y, ped.angle, ped.shirt, ped.skin, false);
+  for (const ped of game.peds) drawFigure(ctx, ped.x, ped.y, ped.angle, ped.shirt, ped.skin, false, {
+    scale: 1, phase: ped.walkPhase || 0, gait: ped.gait, hairColor: ped.hairColor,
+    hairStyle: ped.hairStyle, pants: ped.pants, dead: ped.dead,
+  });
   const p = game.player;
-  if (!p.inCar) drawFigure(ctx, p.x, p.y, p.angle, PALETTE.playerShirt, PALETTE.playerSkin, true);
+  if (!p.inCar) drawFigure(ctx, p.x, p.y, p.angle, PALETTE.playerShirt, PALETTE.playerSkin, true, {
+    scale: 1.12, phase: p.walkPhase || 0, gait: 'upright', hairColor: '#241a12',
+    hairStyle: 0, pants: '#2e3440', idle: !(p.vx || p.vy),
+  });
   else if (p.car) drawCar(ctx, p.car, game.time);
   // A small floating marker so the player always reads at a glance, on foot or driving.
   const bob = Math.sin(game.time * 3.4) * 2.2;
@@ -157,7 +200,7 @@ function drawWorld(ctx, game, cam) {
   ctx.moveTo(p.x, p.y - 24 + bob); ctx.lineTo(p.x - 6, p.y - 33 + bob); ctx.lineTo(p.x + 6, p.y - 33 + bob);
   ctx.closePath(); ctx.fill();
   ctx.strokeStyle = '#f5d76a'; ctx.lineWidth = 2;
-  for (const b of game.bullets) { ctx.beginPath(); ctx.moveTo(b.x - Math.cos(b.angle) * 6, b.y - Math.sin(b.angle) * 6); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+  for (const b of game.bullets) { ctx.beginPath(); ctx.moveTo(b.x - Math.cos(b.angle) * 12, b.y - Math.sin(b.angle) * 12); ctx.lineTo(b.x + Math.cos(b.angle) * 2, b.y + Math.sin(b.angle) * 2); ctx.stroke(); }
   game.fx.draw(ctx);
 }
 function drawLighting(ctx, game, cam) {
@@ -168,7 +211,7 @@ function drawLighting(ctx, game, cam) {
   const toScreen = (wx, wy) => ({ x: (wx - cam.x) * cam.zoom + VIEW_W / 2, y: (wy - cam.y) * cam.zoom + VIEW_H / 2 });
   g.globalCompositeOperation = 'source-over';
   g.clearRect(0, 0, VIEW_W, VIEW_H);
-  g.fillStyle = 'rgba(6,8,18,0.72)';
+  g.fillStyle = 'rgba(6,8,18,0.60)';
   g.fillRect(0, 0, VIEW_W, VIEW_H);
   g.globalCompositeOperation = 'destination-out';
   const hole = (wx, wy, r, strength) => {

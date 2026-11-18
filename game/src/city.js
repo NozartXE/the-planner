@@ -1,5 +1,5 @@
 // city.js — seeded generation of the Meridian street grid: blocks, buildings with heights, parks, lamps and collision.
-import { BLOCK_PITCH, BLOCKS_PER_SIDE, ROAD_W, WORLD_SIZE, PALETTE } from './config.js';
+import { BLOCK_PITCH, BLOCKS_PER_SIDE, ROAD_W, WORLD_SIZE, PALETTE, DISTRICTS, districtIndexFor } from './config.js';
 import { makeRng, clamp } from './rng.js';
 
 export function roadCenters() {
@@ -30,9 +30,9 @@ export function generateCity(seed) {
   const parks = [];
   const trees = [];
   const lamps = [];
-  const roofPalette = [PALETTE.roofA, PALETTE.roofB, PALETTE.roofC];
   for (let by = 0; by < BLOCKS_PER_SIDE; by++) {
     for (let bx = 0; bx < BLOCKS_PER_SIDE; bx++) {
+      const district = DISTRICTS[districtIndexFor(bx, by)];
       const ox = bx * BLOCK_PITCH + ROAD_W;
       const oy = by * BLOCK_PITCH + ROAD_W;
       const inner = BLOCK_PITCH - ROAD_W;
@@ -51,11 +51,28 @@ export function generateCity(seed) {
           const inset = rng.range(10, 18);
           const bw = plot - inset * 2;
           const bh = plot - inset * 2;
-          const hasNeon = rng.chance(0.26);
+          const bw2 = ox + px * plot + inset, bh2 = oy + py * plot + inset;
+          const hasNeon = rng.chance(district.neonChance);
+          // Sparse rooftop props, fixed at generation so every frame (and screenshot) agrees.
+          const props = [];
+          const nProps = rng.int(0, 2);
+          for (let pi = 0; pi < nProps; pi++) {
+            const kind = rng.pick(['ac', 'ac', 'vent', 'tower']);
+            props.push({
+              kind,
+              dx: rng.range(12, Math.max(13, bw - 26)), dy: rng.range(12, Math.max(13, bh - 26)),
+              w: kind === 'ac' ? rng.range(11, 17) : kind === 'tower' ? 13 : 7,
+              h: kind === 'ac' ? rng.range(8, 12) : kind === 'tower' ? 11 : 7,
+            });
+          }
           buildings.push({
-            x: ox + px * plot + inset, y: oy + py * plot + inset, w: bw, h: bh,
+            x: bw2, y: bh2, w: bw, h: bh,
             height: rng.range(18, 64),
-            color: rng.pick(roofPalette),
+            color: rng.pick(district.roofs),
+            wallLight: district.wallLight, wallDark: district.wallDark,
+            windowColor: district.windowColor, windowThreshold: district.windowThreshold,
+            district: districtIndexFor(bx, by),
+            props,
             neon: hasNeon, neonColor: rng.pick(PALETTE.neonColors),
           });
         }
@@ -126,8 +143,7 @@ export function buildMinimapBase(city) {
     g.fillRect(0, size - ROAD_W * s, size, ROAD_W * s);
     g.fillStyle = '#1d2b22';
     for (const p of city.parks) g.fillRect(p.x * s, p.y * s, p.w * s, p.h * s);
-    g.fillStyle = '#3a3f4a';
-    for (const b of city.buildings) g.fillRect(b.x * s, b.y * s, Math.max(2, b.w * s), Math.max(2, b.h * s));
+    for (const b of city.buildings) { g.fillStyle = b.color || '#3a3f4a'; g.fillRect(b.x * s, b.y * s, Math.max(2, b.w * s), Math.max(2, b.h * s)); }
     return c;
   } catch (e) { return null; }
 }
