@@ -4,36 +4,37 @@ import { WORLD_W, WORLD_H, RIVER_Y } from './config.js';
 import { AVENUES, STREETS } from './city.js';
 
 export const MM = { w: 232, h: 174, pad: 14 };
+export const MM_SMALL = { w: 164, h: 123 };
 
-export function drawMinimap(ctx, world, x, y) {
-  const sx = MM.w / WORLD_W, sy = MM.h / WORLD_H;
+export function drawMinimap(ctx, world, x, y, w = MM.w, h = MM.h) {
+  const sx = w / WORLD_W, sy = h / WORLD_H;
   ctx.save();
-  ctx.fillStyle = 'rgba(12,16,28,0.88)';
-  ctx.fillRect(x, y, MM.w, MM.h);
-  ctx.strokeStyle = '#ffd60a'; ctx.lineWidth = 2; ctx.strokeRect(x, y, MM.w, MM.h);
+  ctx.fillStyle = '#0c101c';
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = '#ff71ce'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
   // Water + land.
-  ctx.fillStyle = '#274156'; ctx.fillRect(x, y, MM.w, RIVER_Y * sy);
-  ctx.fillStyle = '#1e7fb8'; ctx.fillRect(x, y + RIVER_Y * sy, MM.w, MM.h - RIVER_Y * sy);
+  ctx.fillStyle = '#274156'; ctx.fillRect(x, y, w, RIVER_Y * sy);
+  ctx.fillStyle = '#1e7fb8'; ctx.fillRect(x, y + RIVER_Y * sy, w, h - RIVER_Y * sy);
   // Roads.
   ctx.strokeStyle = '#8b93a3'; ctx.lineWidth = 2;
-  for (const a of AVENUES) { ctx.beginPath(); ctx.moveTo(x + a.x * sx, y); ctx.lineTo(x + a.x * sx, y + MM.h); ctx.stroke(); }
-  for (const s of STREETS) { ctx.beginPath(); ctx.moveTo(x, y + s.y * sy); ctx.lineTo(x + MM.w, y + s.y * sy); ctx.stroke(); }
+  for (const a of AVENUES) { ctx.beginPath(); ctx.moveTo(x + a.x * sx, y); ctx.lineTo(x + a.x * sx, y + h); ctx.stroke(); }
+  for (const s of STREETS) { ctx.beginPath(); ctx.moveTo(x, y + s.y * sy); ctx.lineTo(x + w, y + s.y * sy); ctx.stroke(); }
   const blip = (wx, wy, color, r = 3.5) => { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x + wx * sx, y + wy * sy, r, 0, Math.PI * 2); ctx.fill(); };
   // Garages + safehouse.
-  for (const g of world.garages) blip(g.x, g.y, '#fb8500', 3);
-  blip(world.safehouse.x, world.safehouse.y, '#2ec4b6', 4);
+  for (const g of world.garages) blip(g.x, g.y, '#ffb27a', 3);
+  blip(world.safehouse.x, world.safehouse.y, '#01cdfe', 4);
   // Mission markers.
   if (world.mission) {
     const m = world.mission;
-    blip(m.building.x + m.building.w / 2, m.building.y + m.building.h / 2, '#ef476f', 6);
-    if (world.getawayCar && m.phase === 'escape') blip(world.getawayCar.x, world.getawayCar.y, '#06d6a0', 5);
+    blip(m.building.x + m.building.w / 2, m.building.y + m.building.h / 2, '#ff6b81', 6);
+    if (world.getawayCar && m.phase === 'escape') blip(world.getawayCar.x, world.getawayCar.y, '#01cdfe', 5);
   }
   // Activities.
   const a = world.activities;
   if (a) {
     if (a.race) { const cp = a.race.checkpoints[a.race.idx]; if (cp) blip(cp.x, cp.y, '#ffd60a', 5); }
-    if (a.fare) blip(a.fare.picked ? a.fare.destX : a.fare.ped.x, a.fare.picked ? a.fare.destY : a.fare.ped.y, '#f72585', 5);
-    if (a.chop) blip(a.chop.car.x, a.chop.car.y, '#4cc9f0', 5);
+    if (a.fare) blip(a.fare.picked ? a.fare.destX : a.fare.ped.x, a.fare.picked ? a.fare.destY : a.fare.ped.y, '#ff71ce', 5);
+    if (a.chop) blip(a.chop.car.x, a.chop.car.y, '#01cdfe', 5);
   }
   // Crew.
   for (const c of world.crewMembers) blip(c.x, c.y, c.def.color, 3);

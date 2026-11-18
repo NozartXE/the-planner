@@ -30,6 +30,24 @@ function shade(hex, f) {
 // Muted ground tones per city block: mostly varied greens, some paved yards.
 const BLOCK_TONES = ['#3d8f4e', '#357f45', '#47975a', '#3a7d4c', '#418a52', '#6f7268', '#7a7d72'];
 
+// Screen-space HUD chrome (top-down framing: on foot, so the minimap is the
+// small top-left variant hud.js draws). World-space labels whose screen
+// rect intersects any of these are culled — a label half-covered by HUD
+// chrome reads worse than no label.
+export const HUD_RECTS = [
+  { x: 14, y: 12, w: 218, h: 64 },     // cash / REP panel
+  { x: 210, y: 12, w: 860, h: 44 },   // objective banner (max width)
+  { x: 14, y: 84, w: 164, h: 123 },   // minimap (on-foot small)
+  { x: 14, y: 682, w: 218, h: 44 },   // health panel
+  { x: 1016, y: 724, w: 242, h: 54 }, // gadget strip
+];
+export function labelCulled(sx, sy, w, h) {
+  for (const r of HUD_RECTS) {
+    if (sx - w / 2 < r.x + r.w + 4 && sx + w / 2 > r.x - 4 && sy - h / 2 < r.y + r.h + 4 && sy + h / 2 > r.y - 4) return true;
+  }
+  return false;
+}
+
 export function computeCamera(world) {
   const shakeX = world.shakeAmt ? Math.sin(world.time * 61) * world.shakeAmt * 0.6 : 0;
   const shakeY = world.shakeAmt ? Math.cos(world.time * 53) * world.shakeAmt * 0.6 : 0;
@@ -61,8 +79,8 @@ function drawCar(ctx, car, time, night, dusk) {
     ctx.fillStyle = '#2f6fed'; ctx.fillRect(-4, -Wd / 2, 10, Wd);
     // Light bar flashing.
     const on = Math.floor(time * 6) % 2 === 0;
-    ctx.fillStyle = on ? '#ef476f' : '#4cc9f0'; ctx.fillRect(-6, -7, 12, 5);
-    ctx.fillStyle = on ? '#4cc9f0' : '#ef476f'; ctx.fillRect(-6, 2, 12, 5);
+    ctx.fillStyle = on ? '#ff6b81' : '#01cdfe'; ctx.fillRect(-6, -7, 12, 5);
+    ctx.fillStyle = on ? '#01cdfe' : '#ff6b81'; ctx.fillRect(-6, 2, 12, 5);
   }
   // Cabin + windows.
   ctx.fillStyle = 'rgba(16,24,40,0.9)';
@@ -83,8 +101,8 @@ function drawCar(ctx, car, time, night, dusk) {
   const dmg = carDamageLevel(car);
   if (dmg >= 1) { ctx.fillStyle = 'rgba(20,20,26,0.55)'; ctx.fillRect(-L / 2 + 2, -6, 9, 12); }
   if (dmg >= 2) { ctx.fillStyle = 'rgba(20,20,26,0.6)'; ctx.fillRect(L / 2 - 11, -8, 9, 16); }
-  if (car.getaway) { ctx.strokeStyle = '#06d6a0'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.roundRect(-L / 2 - 3, -Wd / 2 - 3, L + 6, Wd + 6, 8); ctx.stroke(); }
-  if (car.chopMarked) { ctx.strokeStyle = '#4cc9f0'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.roundRect(-L / 2 - 3, -Wd / 2 - 3, L + 6, Wd + 6, 8); ctx.stroke(); }
+  if (car.getaway) { ctx.strokeStyle = '#01cdfe'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.roundRect(-L / 2 - 3, -Wd / 2 - 3, L + 6, Wd + 6, 8); ctx.stroke(); }
+  if (car.chopMarked) { ctx.strokeStyle = '#ff71ce'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.roundRect(-L / 2 - 3, -Wd / 2 - 3, L + 6, Wd + 6, 8); ctx.stroke(); }
   ctx.restore();
   // Smoke handled by particle system via world loop; draw a wisp if heavily damaged.
   if (car.smokeT > 0.4 && !car.disabled) {
@@ -116,7 +134,7 @@ function drawPerson(ctx, x, y, angle, shirt, opts = {}) {
   ctx.restore();
   if (opts.bag) {
     ctx.save(); ctx.translate(x + 13, y + 10);
-    ctx.fillStyle = '#06d6a0'; ctx.fillRect(-10, -7, 20, 14);
+    ctx.fillStyle = '#01cdfe'; ctx.fillRect(-10, -7, 20, 14);
     ctx.strokeStyle = 'rgba(10,10,16,0.6)'; ctx.lineWidth = 2; ctx.strokeRect(-10, -7, 20, 14);
     ctx.fillStyle = '#ffd60a'; ctx.font = '900 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('$', 0, 5);
     ctx.restore();
@@ -225,11 +243,6 @@ export function drawWorld(ctx, world, cam) {
     ctx.fillStyle = h < 0.45 ? 'rgba(245,215,110,0.45)' : '#f5d76e';
     ctx.fillRect(x, s.y - 2, 24, 4);
   }
-  // Street name labels at crossings.
-  ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = '800 15px system-ui, sans-serif'; ctx.textAlign = 'center';
-  for (const a of AVENUES) for (const s of STREETS) {
-    if (a.x > vx - 100 && a.x < vx + vw + 100 && s.y > vy - 60 && s.y < vy + vh + 60) ctx.fillText(a.name + ' × ' + s.name, a.x, s.y - ROAD_W / 2 - 14);
-  }
   // Props.
   for (const pr of world.city.props) {
     if (pr.x < vx || pr.x > vx + vw || pr.y < vy || pr.y > vy + vh) continue;
@@ -246,7 +259,7 @@ export function drawWorld(ctx, world, cam) {
       }
       ctx.fillStyle = night ? '#ffd60a' : '#ffe9a8'; ctx.beginPath(); ctx.arc(pr.x, pr.y - 20, 5, 0, Math.PI * 2); ctx.fill();
     } else if (pr.kind === 'crate') { ctx.fillStyle = '#a9713f'; ctx.fillRect(pr.x - 9, pr.y - 9, 18, 18); ctx.strokeStyle = '#7a4a21'; ctx.strokeRect(pr.x - 9, pr.y - 9, 18, 18); }
-    else if (pr.kind === 'barrier') { ctx.fillStyle = '#e9ecef'; ctx.fillRect(pr.x - 13, pr.y - 5, 26, 10); ctx.fillStyle = '#ef476f'; ctx.fillRect(pr.x - 13, pr.y - 5, 8, 10); ctx.fillRect(pr.x + 5, pr.y - 5, 8, 10); }
+    else if (pr.kind === 'barrier') { ctx.fillStyle = '#e9ecef'; ctx.fillRect(pr.x - 13, pr.y - 5, 26, 10); ctx.fillStyle = '#ff6b81'; ctx.fillRect(pr.x - 13, pr.y - 5, 8, 10); ctx.fillRect(pr.x + 5, pr.y - 5, 8, 10); }
     else if (pr.kind === 'bench') { ctx.fillStyle = '#6c4a2f'; ctx.fillRect(pr.x - 12, pr.y - 4, 24, 8); }
     else { ctx.fillStyle = '#d90429'; ctx.fillRect(pr.x - 4, pr.y - 8, 8, 14); ctx.fillStyle = '#e9ecef'; ctx.fillRect(pr.x - 4, pr.y - 8, 8, 4); }
   }
@@ -292,50 +305,72 @@ export function drawWorld(ctx, world, cam) {
       for (let ax = b.x + b.w * 0.3 + 6; ax < b.x + b.w * 0.7; ax += 12) ctx.fillRect(ax, b.y + b.h - 44, 3, 12);
     }
     // Sign band + neon glow at night (clubs/casinos glow their own colour).
-    const neon = (b.kind === 'club' || b.kind === 'casino') ? '#f72585' : '#ffd60a';
-    if (night) { ctx.fillStyle = neon === '#f72585' ? 'rgba(247,37,133,0.20)' : 'rgba(255,214,10,0.16)'; ctx.fillRect(b.x - 4, b.y + b.h - 34, b.w + 8, 38); }
-    ctx.fillStyle = 'rgba(8,10,18,0.88)'; ctx.fillRect(b.x, b.y + b.h - 30, b.w, 30);
-    ctx.fillStyle = night ? neon : '#ffffff';
-    ctx.font = '900 16px system-ui, sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText(b.name, b.x + b.w / 2, b.y + b.h - 10);
-    ctx.font = '700 10px system-ui, sans-serif'; ctx.fillStyle = '#9fd8ef';
-    ctx.fillText(b.sign, b.x + b.w / 2, b.y + 14);
+    // The name plate is a fully opaque dark chip with light text so it
+    // stays legible on the pastel bodies; name + sign are culled when HUD
+    // chrome would cover them (never half-hidden).
+    const neon = (b.kind === 'club' || b.kind === 'casino') ? '#ff71ce' : '#ffd60a';
+    if (night) { ctx.fillStyle = neon === '#ff71ce' ? 'rgba(255,113,206,0.20)' : 'rgba(255,214,10,0.16)'; ctx.fillRect(b.x - 4, b.y + b.h - 34, b.w + 8, 38); }
+    ctx.fillStyle = '#0a0e16'; ctx.fillRect(b.x, b.y + b.h - 30, b.w, 30);
+    const plateCulled = labelCulled(b.x + b.w / 2 - cam.x, b.y + b.h - 15 - cam.y, b.w, 30);
+    if (!plateCulled) {
+      ctx.fillStyle = night ? neon : '#ffffff';
+      ctx.font = '900 16px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(b.name, b.x + b.w / 2, b.y + b.h - 10);
+      ctx.font = '700 10px system-ui, sans-serif'; ctx.fillStyle = '#7deeff';
+      ctx.fillText(b.sign, b.x + b.w / 2, b.y + 14);
+    }
     // Door marker.
     ctx.fillStyle = '#ffd60a'; ctx.fillRect(b.doorX - 7, b.doorY - 8, 14, 8);
   }
+  // Street name labels at crossings, drawn AFTER the buildings so a
+  // label is never half-buried under a roof edge: dark backing plate,
+  // clamped fully inside the frame, and culled when HUD chrome would
+  // cover them — every street name that appears is fully readable.
+  ctx.font = '800 15px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const a of AVENUES) for (const s of STREETS) {
+    if (!(a.x > vx - 100 && a.x < vx + vw + 100 && s.y > vy - 60 && s.y < vy + vh + 60)) continue;
+    const label = a.name + ' × ' + s.name;
+    const tw = ctx.measureText(label).width;
+    let sx = a.x - cam.x;
+    const sy = s.y - ROAD_W / 2 - 14 - cam.y;
+    sx = Math.max(tw / 2 + 8, Math.min(VIEW_W - tw / 2 - 8, sx));
+    if (labelCulled(sx, sy, tw + 12, 22)) continue;
+    ctx.fillStyle = 'rgba(8,10,18,0.78)';
+    ctx.fillRect(cam.x + sx - tw / 2 - 6, cam.y + sy - 11, tw + 12, 22);
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillText(label, cam.x + sx, cam.y + sy + 1);
+  }
+  ctx.textBaseline = 'alphabetic';
   // Garages / bribes / spikes / roadblock markers.
-  for (const g of world.garages) { ctx.fillStyle = '#fb8500'; ctx.beginPath(); ctx.arc(g.x, g.y, 15, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#14161c'; ctx.font = '900 15px system-ui'; ctx.textAlign = 'center'; ctx.fillText('G', g.x, g.y + 5); }
-  for (const br of world.bribes) { ctx.fillStyle = '#06d6a0'; ctx.beginPath(); ctx.arc(br.x, br.y, 14, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#0b2e23'; ctx.font = '900 15px system-ui'; ctx.textAlign = 'center'; ctx.fillText('$', br.x, br.y + 5); }
+  for (const g of world.garages) { ctx.fillStyle = '#ffb27a'; ctx.beginPath(); ctx.arc(g.x, g.y, 15, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#14161c'; ctx.font = '900 15px system-ui'; ctx.textAlign = 'center'; ctx.fillText('G', g.x, g.y + 5); }
+  for (const br of world.bribes) { ctx.fillStyle = '#01cdfe'; ctx.beginPath(); ctx.arc(br.x, br.y, 14, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#0b2e23'; ctx.font = '900 15px system-ui'; ctx.textAlign = 'center'; ctx.fillText('$', br.x, br.y + 5); }
   for (const s of world.spikes) { ctx.fillStyle = '#22242c'; ctx.fillRect(s.x - 20, s.y - 4, 40, 8); ctx.fillStyle = '#e9ecef'; for (let i = -16; i <= 16; i += 8) { ctx.beginPath(); ctx.moveTo(s.x + i, s.y - 4); ctx.lineTo(s.x + i + 4, s.y - 11); ctx.lineTo(s.x + i + 8, s.y - 4); ctx.fill(); } }
   // Mission entry marker + loot ring.
   if (world.mission) {
     const m = world.mission;
     const pulse = 1 + Math.sin(world.time * 5) * 0.12;
-    ctx.strokeStyle = '#ef476f'; ctx.lineWidth = 4;
+    ctx.strokeStyle = '#ff6b81'; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.arc(m.entryX, m.entryY, 30 * pulse, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = '#ef476f'; ctx.font = '900 15px system-ui'; ctx.textAlign = 'center';
+    ctx.fillStyle = '#ff6b81'; ctx.font = '900 15px system-ui'; ctx.textAlign = 'center';
     ctx.fillText(m.phase === 'approach' ? 'ENTRY' : m.heist.sign || 'TARGET', m.entryX, m.entryY - 40);
     if (m.phase === 'grab') {
-      // Loot progress ring at the door.
-      const cx = m.building.doorX, cy = m.building.doorY - 16;
+      // Loot progress ring offset from the door so the TARGET ring and the
+      // $ amount read cleanly — no in-world alarm bar (the countdown lives
+      // in the HUD banner) and no stacked plates at the target.
+      const cx = m.building.doorX + 84, cy = m.building.doorY - 52;
       ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 8;
-      ctx.beginPath(); ctx.arc(cx, cy, 30, 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = '#06d6a0';
-      ctx.beginPath(); ctx.arc(cx, cy, 30, -Math.PI / 2, -Math.PI / 2 + (m.lootGrabbed / m.lootTotal) * Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy, 26, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#01cdfe';
+      ctx.beginPath(); ctx.arc(cx, cy, 26, -Math.PI / 2, -Math.PI / 2 + (m.lootGrabbed / m.lootTotal) * Math.PI * 2); ctx.stroke();
       ctx.fillStyle = '#fff'; ctx.font = '900 16px system-ui';
       ctx.fillText('$' + Math.floor(m.lootGrabbed), cx, cy + 5);
-      // Alarm timer bar.
-      ctx.fillStyle = 'rgba(10,12,22,0.8)'; ctx.fillRect(cx - 60, cy - 66, 120, 16);
-      ctx.fillStyle = m.alarmT < 12 ? '#ef476f' : '#ffd60a';
-      ctx.fillRect(cx - 57, cy - 63, 114 * Math.max(0, m.alarmT) / m.stats.alarm, 10);
-      ctx.fillStyle = '#fff'; ctx.font = '800 12px system-ui'; ctx.fillText('ALARM ' + Math.max(0, Math.ceil(m.alarmT)) + 's', cx, cy - 76);
     }
   }
   // Activity markers.
   const act = world.activities;
   if (act) {
     if (act.race) { const cp = act.race.checkpoints[act.race.idx]; if (cp) { ctx.strokeStyle = '#ffd60a'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(cp.x, cp.y, 40 + Math.sin(world.time * 5) * 5, 0, Math.PI * 2); ctx.stroke(); } }
-    if (act.chop) { ctx.fillStyle = '#4cc9f0'; ctx.font = '900 15px system-ui'; ctx.textAlign = 'center'; ctx.fillText('CHOP TARGET', act.chop.car.x, act.chop.car.y - 34); }
+    if (act.chop) { ctx.fillStyle = '#ff71ce'; ctx.font = '900 15px system-ui'; ctx.textAlign = 'center'; ctx.fillText('CHOP TARGET', act.chop.car.x, act.chop.car.y - 34); }
   }
   // Skid marks: bigger, darker, they sell the chase.
   ctx.fillStyle = 'rgba(15,15,20,0.55)';
@@ -349,7 +384,7 @@ export function drawWorld(ctx, world, cam) {
   for (const ped of world.peds) {
     if (ped.x < vx || ped.x > vx + vw || ped.y < vy || ped.y > vy + vh) continue;
     if (ped.down > 0) { ctx.save(); ctx.translate(ped.x, ped.y); ctx.rotate(Math.PI / 2); ctx.fillStyle = ped.shirt; ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI * 2); ctx.fill(); ctx.restore(); continue; }
-    if (ped.fare && !ped.fare.picked) { ctx.fillStyle = '#f72585'; ctx.font = '900 20px system-ui'; ctx.textAlign = 'center'; ctx.fillText('!', ped.x, ped.y - 22); }
+    if (ped.fare && !ped.fare.picked) { ctx.fillStyle = '#ff71ce'; ctx.font = '900 20px system-ui'; ctx.textAlign = 'center'; ctx.fillText('!', ped.x, ped.y - 22); }
     drawPerson(ctx, ped.x, ped.y, ped.angle, ped.shirt, { phase: ped.walkPhase });
   }
   // Crew.
@@ -430,7 +465,12 @@ export function drawWorld(ctx, world, cam) {
     ctx.fillStyle = world.powerCut ? 'rgba(3,5,16,0.55)' : phase.tint;
     if (world.powerCut || dark > 0) ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
-  // Street name caption bottom-centre.
-  ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = '800 15px system-ui'; ctx.textAlign = 'center';
-  ctx.fillText(streetNameAt(world.camera.x, world.camera.y) + ' · MERIDIAN', VIEW_W / 2, VIEW_H - 12);
+  // Street name caption bottom-centre, on a dark backing plate.
+  ctx.font = '800 15px system-ui'; ctx.textAlign = 'center';
+  const caption = streetNameAt(world.camera.x, world.camera.y) + ' · MERIDIAN';
+  const capW = ctx.measureText(caption).width;
+  ctx.fillStyle = 'rgba(8,10,18,0.72)';
+  ctx.fillRect(VIEW_W / 2 - capW / 2 - 8, VIEW_H - 30, capW + 16, 24);
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.fillText(caption, VIEW_W / 2, VIEW_H - 12);
 }

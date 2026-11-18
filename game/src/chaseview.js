@@ -51,10 +51,10 @@ function mix(a, b, t) {
 // Per time-of-day look: sky gradient, fog colour, ambient light, how many
 // windows are lit, and where the sun (or moon) hangs.
 const SKIES = {
-  day:   { top: [58, 120, 205], hor: [178, 224, 242], fog: [178, 224, 242], amb: 1.0,  lit: 0.06, sunAz: 0.9,  sunEl: 0.62, sun: [255, 244, 200], glow: 60 },
-  dawn:  { top: [74, 66, 140],  hor: [242, 166, 90],  fog: [226, 150, 96],  amb: 0.86, lit: 0.30, sunAz: 0.0,  sunEl: 0.10, sun: [255, 196, 110], glow: 150 },
-  dusk:  { top: [46, 34, 92],   hor: [255, 140, 90],  fog: [214, 116, 84],  amb: 0.80, lit: 0.48, sunAz: Math.PI, sunEl: 0.07, sun: [255, 178, 84], glow: 190 },
-  night: { top: [5, 8, 24],     hor: [26, 40, 74],    fog: [20, 30, 56],    amb: 0.46, lit: 0.62, sunAz: 2.2,  sunEl: 0.42, sun: [214, 226, 245], glow: 26 },
+  day:   { top: [64, 138, 208], hor: [190, 232, 240], fog: [190, 232, 240], amb: 1.0,  lit: 0.06, sunAz: 0.9,  sunEl: 0.62, sun: [255, 244, 200], glow: 60 },
+  dawn:  { top: [104, 72, 150], hor: [255, 166, 122], fog: [238, 150, 122], amb: 0.86, lit: 0.30, sunAz: 0.0,  sunEl: 0.10, sun: [255, 196, 110], glow: 150 },
+  dusk:  { top: [92, 44, 138],  hor: [255, 138, 118], fog: [216, 138, 172], amb: 0.80, lit: 0.48, sunAz: Math.PI, sunEl: 0.07, sun: [255, 178, 84], glow: 190 },
+  night: { top: [16, 12, 44],   hor: [62, 34, 88],    fog: [40, 26, 66],    amb: 0.46, lit: 0.62, sunAz: 2.2,  sunEl: 0.42, sun: [214, 226, 245], glow: 26 },
 };
 const GRASS = ['#3d8f4e', '#357f45', '#47975a', '#3a7d4c', '#418a52', '#6f7268', '#7a7d72'].map(rgb);
 const ASPHALT = [50, 53, 61], SIDEWALK = [140, 147, 154], DASH = [245, 215, 110];
@@ -132,8 +132,8 @@ function carSprite(color, police, front, disabled) {
     g.fillStyle = '#eef1f5'; g.fillRect(8, 48, 84, 13);
     g.fillStyle = '#16233d'; g.font = '900 10px system-ui, sans-serif'; g.textAlign = 'center';
     g.fillText('POLICE', 50, 58);
-    g.fillStyle = '#ff3355'; g.fillRect(52, 6, 22, 7);
-    g.fillStyle = '#3388ff'; g.fillRect(74, 6, 22, 7);
+    g.fillStyle = '#ff6b81'; g.fillRect(52, 6, 22, 7);
+    g.fillStyle = '#01cdfe'; g.fillRect(74, 6, 22, 7);
   }
   if (front) {
     g.fillStyle = '#fff3b0';
@@ -190,10 +190,10 @@ function propSprite(kind, lit) {
     g.fillStyle = lit ? '#ffe9a8' : '#cfd6dd'; g.beginPath(); g.arc(23, 23, 4, 0, Math.PI * 2); g.fill();
   } else if (kind === 'palm') {
     c = makeCanvas(96, 132); const g = c.getContext('2d');
-    g.strokeStyle = '#7a5c38'; g.lineWidth = 7; g.beginPath(); g.moveTo(40, 130); g.quadraticCurveTo(46, 84, 54, 44); g.stroke();
-    g.strokeStyle = '#2e8b47'; g.lineWidth = 5;
+    g.strokeStyle = '#241a36'; g.lineWidth = 7; g.beginPath(); g.moveTo(40, 130); g.quadraticCurveTo(46, 84, 54, 44); g.stroke();
+    g.strokeStyle = '#1c1428'; g.lineWidth = 5;
     for (let i = 0; i < 6; i++) { const a = -0.25 - i * 0.5; g.beginPath(); g.moveTo(54, 42); g.quadraticCurveTo(54 + Math.cos(a) * 26, 42 + Math.sin(a) * 20 - 8, 54 + Math.cos(a) * 44, 42 + Math.sin(a) * 34 + 12); g.stroke(); }
-    g.fillStyle = '#5d8143'; g.beginPath(); g.arc(50, 46, 5, 0, Math.PI * 2); g.arc(59, 47, 5, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#241a36'; g.beginPath(); g.arc(50, 46, 5, 0, Math.PI * 2); g.arc(59, 47, 5, 0, Math.PI * 2); g.fill();
   } else if (kind === 'crate') {
     c = makeCanvas(46, 42); const g = c.getContext('2d');
     g.fillStyle = '#8a6b3a'; g.beginPath(); g.moveTo(4, 14); g.lineTo(14, 5); g.lineTo(42, 5); g.lineTo(32, 14); g.closePath(); g.fill(); // top
@@ -204,7 +204,7 @@ function propSprite(kind, lit) {
     c = makeCanvas(70, 46); const g = c.getContext('2d');
     g.fillStyle = '#33373f'; g.fillRect(7, 26, 5, 18); g.fillRect(58, 26, 5, 18);
     g.fillStyle = '#eef1f5'; g.fillRect(2, 8, 66, 17);
-    g.fillStyle = '#ff7b1c'; for (let i = 0; i < 4; i++) { g.beginPath(); g.moveTo(6 + i * 17, 25); g.lineTo(15 + i * 17, 8); g.lineTo(22 + i * 17, 8); g.lineTo(13 + i * 17, 25); g.closePath(); g.fill(); }
+    g.fillStyle = '#ff9e64'; for (let i = 0; i < 4; i++) { g.beginPath(); g.moveTo(6 + i * 17, 25); g.lineTo(15 + i * 17, 8); g.lineTo(22 + i * 17, 8); g.lineTo(13 + i * 17, 25); g.closePath(); g.fill(); }
     g.fillStyle = '#22262e'; g.fillRect(2, 25, 66, 3);
   } else if (kind === 'bench') {
     c = makeCanvas(62, 40); const g = c.getContext('2d');
@@ -224,7 +224,7 @@ const PROP_W = { lamp: 8, palm: 36, crate: 17, barrier: 27, bench: 23, hydrant: 
 // Render-only kerb-parked cars, derived deterministically from the road
 // grid (seeded hashes): they densify the chase frame without touching the
 // simulation's car list, speeds or behaviour in any way.
-const PARKED_COLORS = ['#c0c6ce', '#7a4a2b', '#33566e', '#6e3333', '#3f6e46', '#8c8f57', '#4a3f66', '#b8b0a4'];
+const PARKED_COLORS = ['#e8d5c4', '#d9a08a', '#8fb8c8', '#d8a8b8', '#a8c8a0', '#e6d9a8', '#b8aed8', '#f0e6d8'];
 let parkedCache = null;
 function parkedCars() {
   if (parkedCache) return parkedCache;
@@ -593,7 +593,7 @@ export function drawChaseView(ctx, world) {
     const winOff = hash01(bid * 47) * colW;
     const neonOn = hash01(bid * 53 + 1) < 0.42;
     const neonU = hash01(bid * 59) * 150;
-    const neonC = hash01(bid * 61) < 0.5 ? [255, 64, 170] : [64, 220, 255];
+    const neonC = hash01(bid * 61) < 0.5 ? [255, 113, 206] : [1, 205, 254];
     const winColSeed = Math.floor((u + winOff) / colW);
     for (let y = topRow; y <= botRow; y++) {
       const z = CAM_H + (HORIZON - y) * bestT / PLANE; // world height at this row
@@ -731,6 +731,10 @@ export function drawChaseView(ctx, world) {
     if (p && p.dist < MAX_DIST) sprites.push({ kind: 'car', obj: other, p });
   }
   for (const pc of parkedCars()) {
+    // Kerb dressing never overlaps a live vehicle: a parked car is
+    // skipped while any simulated car is right at its spot, so the two
+    // can never be drawn interpenetrating each other.
+    if (world.cars.some((c) => Math.abs(c.x - pc.x) < 80 && Math.abs(c.y - pc.y) < 80)) continue;
     const p = project(pc.x, pc.y, 0);
     if (p && p.dist < MAX_DIST) sprites.push({ kind: 'car', obj: pc, p });
   }
@@ -766,7 +770,7 @@ export function drawChaseView(ctx, world) {
       drawBillboard(ctx, spr, s.p.sx, s.p.row, wPix, s.p.dist, zbuf, flip);
       // Siren flashers washing the road around a live police car.
       if (c.police && !c.disabled && s.p.dist < 420) {
-        const flash = Math.sin(world.time * 11 + c.id) > 0 ? 'rgba(255,51,85,0.20)' : 'rgba(51,136,255,0.20)';
+        const flash = Math.sin(world.time * 11 + c.id) > 0 ? 'rgba(255,107,129,0.20)' : 'rgba(1,205,254,0.20)';
         ctx.fillStyle = flash;
         ctx.beginPath();
         ctx.ellipse(s.p.sx * SCALE, s.p.row * SCALE, wPix * SCALE * 0.75, wPix * SCALE * 0.2, 0, 0, Math.PI * 2);
@@ -780,12 +784,12 @@ export function drawChaseView(ctx, world) {
       if (s.p.sx < -wPix || s.p.sx > COLS + wPix) continue;
       drawBillboard(ctx, spr, s.p.sx, s.p.row, wPix, s.p.dist, zbuf, false);
     } else if (s.kind === 'ped' || s.kind === 'crew') {
-      const shirt = s.kind === 'ped' ? s.obj.shirt : '#06d6a0';
+      const shirt = s.kind === 'ped' ? s.obj.shirt : '#7deeff';
       const wPix = (9.5 * PLANE) / s.p.dist;
       if (s.p.sx < -wPix || s.p.sx > COLS + wPix) continue;
       drawBillboard(ctx, pedSprite(shirt), s.p.sx, s.p.row, wPix, s.p.dist, zbuf, false);
       if (s.kind === 'crew' && s.obj.hasBag) {
-        ctx.fillStyle = '#06d6a0';
+        ctx.fillStyle = '#01cdfe';
         const bw = Math.max(3, wPix * SCALE * 0.5);
         ctx.fillRect(s.p.sx * SCALE + bw * 0.4, (s.p.row * SCALE) - wPix * SCALE * (110 / 44) * 0.55, bw, bw * 0.8);
       }

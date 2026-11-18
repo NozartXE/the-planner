@@ -15,8 +15,14 @@ function panel(ctx, x, y, w, h, title, accent = '#ffd60a') {
     ctx.fillText(title, x + 16, y + 24);
   }
 }
+// Vice City UI accents: pink/cyan primaries, gold kept semantic-only.
+// Planning categories each keep their OWN active fill so a selection in
+// one category never reads as a selection in another.
+const VC_PINK = '#ff71ce', VC_PINK_TEXT = '#ff9de2', VC_CYAN = '#01cdfe', VC_CYAN_TEXT = '#7deeff';
+const VC_CYAN_PANEL = '#67e8f9', VC_GOLD = '#ffd60a', VC_RED = '#ff6b81', VC_ORANGE = '#ff9e64';
+
 function btn(ctx, rects, id, x, y, w, h, label, opts = {}) {
-  ctx.fillStyle = opts.active ? '#ffd60a' : opts.disabled ? 'rgba(60,64,78,0.9)' : 'rgba(28,34,52,0.95)';
+  ctx.fillStyle = opts.active ? (opts.fill || VC_PINK) : opts.disabled ? 'rgba(60,64,78,0.9)' : 'rgba(28,34,52,0.95)';
   ctx.fillRect(x, y, w, h);
   ctx.strokeStyle = opts.active ? '#fff' : '#5b6478'; ctx.lineWidth = 1.5; ctx.strokeRect(x, y, w, h);
   ctx.fillStyle = opts.active ? '#14161c' : opts.disabled ? '#8b93a3' : '#eef1f5';
@@ -28,7 +34,7 @@ function btn(ctx, rects, id, x, y, w, h, label, opts = {}) {
 
 export function drawTitle(ctx, W, H, save, time) {
   const grad = ctx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, '#14213d'); grad.addColorStop(0.55, '#7b2d8b'); grad.addColorStop(1, '#e76f51');
+  grad.addColorStop(0, '#2e1a5e'); grad.addColorStop(0.35, '#7a2a72'); grad.addColorStop(0.62, '#ff71ce'); grad.addColorStop(0.82, '#ff9e64'); grad.addColorStop(1, '#4a1a6b');
   ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
   // Skyline silhouettes along the bottom, lit windows inside each tower.
   const heights = [180, 260, 150, 300, 210, 340, 170, 280, 200, 320, 160, 240];
@@ -52,8 +58,8 @@ export function drawTitle(ctx, W, H, save, time) {
   INTRO_LINES.forEach((line, i) => ctx.fillText(line, W / 2, 226 + i * 24));
   // Scope strip.
   ctx.fillStyle = 'rgba(10,12,22,0.9)'; ctx.fillRect(W / 2 - 430, 316, 860, 44);
-  ctx.strokeStyle = '#06d6a0'; ctx.strokeRect(W / 2 - 430, 316, 860, 44);
-  ctx.fillStyle = '#06d6a0'; ctx.font = '900 20px system-ui, sans-serif';
+  ctx.strokeStyle = VC_CYAN; ctx.strokeRect(W / 2 - 430, 316, 860, 44);
+  ctx.fillStyle = VC_CYAN_TEXT; ctx.font = '900 20px system-ui, sans-serif';
   ctx.fillText('8 HEISTS · 40+ VEHICLES · 5-STAR HEAT · FULL CAMPAIGN', W / 2, 339);
   const rects = [];
   const bw = 340, bx = W / 2 - bw / 2;
@@ -78,7 +84,7 @@ export function drawTitle(ctx, W, H, save, time) {
 export function drawPlanning(ctx, W, H, board, world) {
   const rects = [];
   ctx.fillStyle = '#10131f'; ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = '#ffd60a'; ctx.font = '900 34px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = VC_PINK_TEXT; ctx.font = '900 34px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   ctx.fillText('PLANNING BOARD', 28, 36);
   ctx.fillStyle = '#e9ecef'; ctx.font = '700 16px system-ui, sans-serif';
   ctx.fillText(`${FIXER.name} — ${FIXER.title}`, 30, 66);
@@ -88,56 +94,66 @@ export function drawPlanning(ctx, W, H, board, world) {
     btn(ctx, rects, 'heist:' + i, 28 + i * 152, 84, 144, 40, locked ? '🔒 ' + (i + 1) : (i + 1) + ' ' + h.name.split(' ')[0], { active: i === board.heistIndex, disabled: locked, size: 12.5 });
   });
   // Briefing.
-  panel(ctx, 28, 138, 560, 92, 'BRIEFING', '#4cc9f0');
+  panel(ctx, 28, 138, 560, 92, 'BRIEFING', VC_CYAN_PANEL);
   ctx.fillStyle = '#e9ecef'; ctx.font = '600 16.5px system-ui, sans-serif'; ctx.textAlign = 'left';
   wrapText(ctx, board.heist.brief, 44, 188, 528, 21);
-  ctx.fillStyle = '#ffd60a'; ctx.font = '800 15px system-ui, sans-serif';
-  ctx.fillText('Best grade: ' + (board.save.bestGrades[board.heist.id] || '—'), 380, 152);
+  // Best grade: the settled-grade table first, else the best grade this
+  // heist already earned in Run History (same save data the results
+  // screen prints) — the board must not claim "—" for a graded heist.
+  const GRADE_ORDER = { S: 4, A: 3, B: 2, C: 1 };
+  let bestGrade = board.save.bestGrades[board.heist.id];
+  if (!bestGrade) {
+    for (const hh of board.save.history) {
+      if (hh.name === board.heist.name && (GRADE_ORDER[hh.grade] || 0) > (GRADE_ORDER[bestGrade] || 0)) bestGrade = hh.grade;
+    }
+  }
+  ctx.fillStyle = VC_GOLD; ctx.font = '800 15px system-ui, sans-serif';
+  ctx.fillText('Best grade: ' + (bestGrade || '—'), 380, 152);
   // Map panel with escape route.
-  panel(ctx, 28, 244, 560, 400, 'DISTRICT MAP — ESCAPE ROUTE', '#06d6a0');
+  panel(ctx, 28, 244, 560, 400, 'DISTRICT MAP — ESCAPE ROUTE', VC_PINK_TEXT);
   drawBoardMap(ctx, 44, 286, 528, 330, board, world);
   // Live stats.
   const s = board.stats;
-  panel(ctx, 28, 658, 560, 116, 'LIVE PLAN STATS', '#ffd60a');
+  panel(ctx, 28, 658, 560, 116, 'LIVE PLAN STATS', VC_GOLD);
   ctx.font = '900 19px system-ui, sans-serif'; ctx.textAlign = 'left';
-  ctx.fillStyle = '#06d6a0'; ctx.fillText(`LOOT ≈ ${formatMoney(s.loot)}`, 44, 706);
-  ctx.fillStyle = '#ffd60a'; ctx.fillText(`ALARM ${s.alarm}s`, 300, 706);
-  ctx.fillStyle = '#ef476f'; ctx.fillText(`HEAT FORECAST ${'★'.repeat(Math.round(s.heat))}${'☆'.repeat(5 - Math.round(s.heat))}`, 44, 736);
-  ctx.fillStyle = '#4cc9f0'; ctx.fillText(`ESCAPE WINDOW ${s.escape}s`, 330, 736);
+  ctx.fillStyle = VC_CYAN_TEXT; ctx.fillText(`LOOT ≈ ${formatMoney(s.loot)}`, 44, 706);
+  ctx.fillStyle = VC_GOLD; ctx.fillText(`ALARM ${s.alarm}s`, 300, 706);
+  ctx.fillStyle = VC_RED; ctx.fillText(`HEAT FORECAST ${'★'.repeat(Math.round(s.heat))}${'☆'.repeat(5 - Math.round(s.heat))}`, 44, 736);
+  ctx.fillStyle = VC_CYAN_TEXT; ctx.fillText(`ESCAPE WINDOW ${s.escape}s`, 330, 736);
   ctx.fillStyle = '#e9ecef'; ctx.font = '700 14px system-ui, sans-serif';
   ctx.fillText(`Grab rate $${s.grabRate}/s · crew cut ${s.totalCut}% · crew skill ${s.avgSkill}`, 44, 762);
   // Right column: entry / crew / gear / getaway / time.
   let y = 138;
-  panel(ctx, 612, y, 640, 108, 'ENTRY POINT  (E)', '#f72585');
-  board.heist.entries.forEach((e, i) => btn(ctx, rects, 'entry:' + i, 628 + i * 202, y + 44, 190, 44, e, { active: board.plan.entry === i, size: 13 }));
+  panel(ctx, 612, y, 640, 108, 'ENTRY POINT  (E)', VC_PINK_TEXT);
+  board.heist.entries.forEach((e, i) => btn(ctx, rects, 'entry:' + i, 628 + i * 202, y + 44, 190, 44, e, { active: board.plan.entry === i, size: 13, fill: VC_PINK }));
   y += 122;
-  panel(ctx, 612, y, 640, 150, 'CREW — PICK UP TO 3  (keys 1-6)', '#ffd60a');
+  panel(ctx, 612, y, 640, 150, 'CREW — PICK UP TO 3  (keys 1-6)', VC_GOLD);
   CREW_POOL.forEach((c, i) => {
     const cx = 628 + (i % 3) * 208, cy = y + 40 + Math.floor(i / 3) * 52;
-    btn(ctx, rects, 'crew:' + c.id, cx, cy, 196, 44, `${c.name.split(' ')[0]} ${c.role} ${c.skill} · ${c.cut}%`, { active: board.plan.crew.includes(c.id), size: 12 });
+    btn(ctx, rects, 'crew:' + c.id, cx, cy, 196, 44, `${c.name.split(' ')[0]} ${c.role} ${c.skill} · ${c.cut}%`, { active: board.plan.crew.includes(c.id), size: 12, fill: VC_GOLD });
   });
   y += 164;
-  panel(ctx, 612, y, 640, 150, 'GEAR — 3 SLOTS', '#4cc9f0');
+  panel(ctx, 612, y, 640, 150, 'GEAR — 3 SLOTS', VC_CYAN_PANEL);
   GEAR_POOL.forEach((g, i) => {
     const cx = 628 + (i % 5) * 124, cy = y + 40 + Math.floor(i / 5) * 52;
-    btn(ctx, rects, 'gear:' + g.id, cx, cy, 116, 44, g.name, { active: board.plan.gear.includes(g.id), size: 10.5 });
+    btn(ctx, rects, 'gear:' + g.id, cx, cy, 116, 44, g.name, { active: board.plan.gear.includes(g.id), size: 10.5, fill: VC_CYAN });
   });
   const selGear = GEAR_POOL.find((g) => board.plan.gear.includes(g.id));
-  ctx.fillStyle = '#9fd8ef'; ctx.font = '600 13px system-ui, sans-serif'; ctx.textAlign = 'right';
+  ctx.fillStyle = VC_CYAN_TEXT; ctx.font = '600 13px system-ui, sans-serif'; ctx.textAlign = 'right';
   if (selGear) ctx.fillText(selGear.desc, 1236, y + 24);
   ctx.textAlign = 'left';
   y += 164;
-  panel(ctx, 612, y, 640, 108, 'GETAWAY + TIME  (G / T)', '#06d6a0');
+  panel(ctx, 612, y, 640, 108, 'GETAWAY + TIME  (G / T)', VC_ORANGE);
   GETAWAY_CHOICES.forEach((id, i) => {
     const owned = board.save.garage.includes(id);
-    btn(ctx, rects, 'getaway:' + id, 628 + i * 104, y + 44, 98, 44, CAR_CLASSES[id].name.split(' ')[1] + (owned ? '' : ' 🔒'), { active: board.plan.getaway === id, disabled: !owned && id !== 'compact', size: 12 });
+    btn(ctx, rects, 'getaway:' + id, 628 + i * 104, y + 44, 98, 44, CAR_CLASSES[id].name.split(' ')[1] + (owned ? '' : ' 🔒'), { active: board.plan.getaway === id, disabled: !owned && id !== 'compact', size: 12, fill: VC_ORANGE });
   });
-  ['dawn', 'day', 'dusk', 'night'].forEach((t, i) => btn(ctx, rects, 'time:' + t, 1058 + i * 50, y + 44, 46, 44, t.toUpperCase(), { active: board.plan.timeOfDay === t, size: 10.5 }));
-  // Execute / back.
-  btn(ctx, rects, 'execute', 612, 694, 400, 62, 'EXECUTE THE PLAN →', { active: true, size: 21, bold: true });
-  btn(ctx, rects, 'back', 1028, 694, 224, 62, 'BACK (Esc)', { size: 17 });
+  ['dawn', 'day', 'dusk', 'night'].forEach((t, i) => btn(ctx, rects, 'time:' + t, 1050 + i * 48, y + 44, 42, 44, t.toUpperCase(), { active: board.plan.timeOfDay === t, size: 10.5, fill: '#c3a6e0' }));
+  // Execute / back (y 710: clear of the GETAWAY panel border above).
+  btn(ctx, rects, 'execute', 612, 710, 400, 62, 'EXECUTE THE PLAN →', { active: true, size: 21, bold: true });
+  btn(ctx, rects, 'back', 1028, 710, 224, 62, 'BACK (Esc)', { size: 17 });
   if (board.message) {
-    ctx.fillStyle = '#ef476f'; ctx.font = '800 16px system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = VC_RED; ctx.font = '800 16px system-ui, sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(board.message, W / 2, 676);
   }
   return rects;
@@ -159,11 +175,11 @@ function drawBoardMap(ctx, x, y, w, h, board, world) {
   ctx.strokeStyle = '#ffd60a'; ctx.lineWidth = 4; ctx.setLineDash([10, 7]);
   ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx, y + 1800 * sy); ctx.lineTo(shx, y + 1800 * sy); ctx.lineTo(shx, shy); ctx.stroke();
   ctx.setLineDash([]);
-  ctx.fillStyle = '#ef476f'; ctx.beginPath(); ctx.arc(tx, ty, 10, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ff6b81'; ctx.beginPath(); ctx.arc(tx, ty, 10, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#fff'; ctx.font = '900 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('TARGET', tx, ty - 16);
-  ctx.fillStyle = '#2ec4b6'; ctx.beginPath(); ctx.arc(shx, shy, 8, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#01cdfe'; ctx.beginPath(); ctx.arc(shx, shy, 8, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#fff'; ctx.fillText('SAFEHOUSE', shx, shy + 22);
-  ctx.fillStyle = '#fb8500'; ctx.font = '800 11px system-ui'; ctx.textAlign = 'left';
+  ctx.fillStyle = '#ffb27a'; ctx.font = '800 11px system-ui'; ctx.textAlign = 'left';
   ctx.fillText("GARAGES (heat shed): MURPHY'S · TURBO WASH", x + 8, y + h - 10);
   ctx.restore();
 }
@@ -172,12 +188,12 @@ export function drawResults(ctx, W, H, world) {
   const rects = [];
   const r = world.results;
   ctx.fillStyle = 'rgba(8,10,18,0.92)'; ctx.fillRect(0, 0, W, H);
-  panel(ctx, W / 2 - 430, 70, 860, 600, null);
+  panel(ctx, W / 2 - 430, 70, 860, 600, null, VC_PINK);
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = r.success ? '#06d6a0' : '#ef476f';
+  ctx.fillStyle = r.success ? VC_CYAN_TEXT : VC_RED;
   ctx.font = '900 46px system-ui, sans-serif';
   ctx.fillText(r.success ? 'JOB DONE — ' + r.heist.name : (r.kind === 'busted' ? 'BUSTED' : 'WASTED'), W / 2, 118);
-  ctx.fillStyle = '#ffd60a'; ctx.font = '900 74px system-ui, sans-serif';
+  ctx.fillStyle = VC_PINK_TEXT; ctx.font = '900 74px system-ui, sans-serif';
   ctx.fillText('GRADE ' + r.settlement.grade, W / 2, 182);
   ctx.fillStyle = '#e9ecef'; ctx.font = '600 18px system-ui, sans-serif';
   ctx.fillText(RESULT_QUIPS[r.settlement.grade] || RESULT_QUIPS.FAIL, W / 2, 226);
@@ -192,12 +208,12 @@ export function drawResults(ctx, W, H, world) {
   ctx.textAlign = 'left'; ctx.font = '700 19px system-ui, sans-serif';
   rows.forEach((row, i) => {
     const yy = 262 + i * 32;
-    ctx.fillStyle = row[0] === 'YOUR NET' ? '#06d6a0' : '#e9ecef';
+    ctx.fillStyle = row[0] === 'YOUR NET' ? VC_CYAN_TEXT : '#e9ecef';
     ctx.fillText(row[0], W / 2 - 380, yy);
     ctx.textAlign = 'right'; ctx.fillText(row[1], W / 2 + 380, yy); ctx.textAlign = 'left';
   });
   const afterY = 262 + rows.length * 32;
-  ctx.fillStyle = '#9fd8ef'; ctx.font = '600 15.5px system-ui, sans-serif';
+  ctx.fillStyle = VC_CYAN_TEXT; ctx.font = '600 15.5px system-ui, sans-serif';
   ctx.fillText('Heat cools off-screen — garages and bribes shed stars faster next time.', W / 2 - 380, afterY + 4);
   ctx.fillStyle = '#ffd60a'; ctx.font = '800 17px system-ui, sans-serif';
   ctx.fillText(NEXT_TEASER[r.heist.id] || '', W / 2 - 380, afterY + 30);
@@ -230,7 +246,7 @@ export function drawPause(ctx, W, H, save) {
 export function drawHelp(ctx, W, H) {
   const rects = [];
   ctx.fillStyle = 'rgba(6,8,14,0.9)'; ctx.fillRect(0, 0, W, H);
-  panel(ctx, W / 2 - 430, 90, 860, 560, 'FIELD MANUAL', '#4cc9f0');
+  panel(ctx, W / 2 - 430, 90, 860, 560, 'FIELD MANUAL', VC_CYAN_PANEL);
   ctx.fillStyle = '#e9ecef'; ctx.font = '600 17.5px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   const lines = [
     'PLAN: pick a target, entry, up to 3 crew, 3 gear, a getaway you own, and a time of day.',
@@ -256,7 +272,7 @@ export function drawGameOver(ctx, W, H, world) {
   const rects = [];
   ctx.fillStyle = 'rgba(20,4,10,0.82)'; ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#ef476f'; ctx.font = '900 84px system-ui, sans-serif';
+  ctx.fillStyle = VC_RED; ctx.font = '900 84px system-ui, sans-serif';
   ctx.fillText(world.over === 'busted' ? 'BUSTED' : 'WASTED', W / 2, 320);
   ctx.fillStyle = '#e9ecef'; ctx.font = '700 21px system-ui, sans-serif';
   ctx.fillText(world.over === 'busted' ? 'Precinct 9 thanks you for stopping.' : 'The Mile keeps your loot bag as a souvenir.', W / 2, 380);

@@ -58,7 +58,7 @@ export function stageShot(name, game) {
     const m = world.mission;
     m.phase = 'grab'; m.alarmStarted = true; m.alarmT = 31;
     m.lootGrabbed = Math.round(m.lootTotal * 0.45);
-    world.player.x = m.building.doorX + 18; world.player.y = m.building.doorY - 4;
+    world.player.x = m.building.doorX + 18; world.player.y = m.building.doorY + 38;
     world.player.car = null;
     world.heat = 60; world.stars = 3;
     // Crew beside the player, one carrying a bag.
@@ -168,18 +168,23 @@ export function stageShot(name, game) {
   // player's flank, dense traffic in both lanes, pursuers behind, and
   // the player's sports car at bottom-centre (~25% of the frame height).
   // After the drive steps, the frame is frozen around the car's final
-  // position: near police, eleven extra traffic cars and eighteen
-  // pavement pedestrians are placed relative to it (no further steps
-  // run, so every placement is exact and deterministic). The start point
-  // sits in the one downtown corridor verified clear of building
-  // footprints (lots encroach on most road edges in this city).
+  // position and recomposed onto measured slots (see the round-8 merger
+  // recomposition below): nine police, seven traffic cars and sixteen
+  // pavement pedestrians, every sprite fully visible and overlap-free
+  // (no further steps run, so every placement is exact and
+  // deterministic). The start point sits in the one downtown corridor
+  // verified clear of building footprints (lots encroach on most road
+  // edges in this city).
   plan.timeOfDay = 'dusk';
   world.beginHeist(heist, plan);
   const m = world.mission;
   m.phase = 'escape'; m.lootGrabbed = m.lootTotal;
-  // Clear ambient traffic out of the cover corridor (staging only); the
-  // staged actors below are the traffic this frame is composed around.
-  world.cars = world.cars.filter((c) => c === world.getawayCar || c.x < 420 || c.x > 1200 || c.y < 900 || c.y > 1060);
+  // Clear ambient traffic out of the whole camera view (staging only);
+  // the staged actors below are the traffic this frame is composed
+  // around. The box is wider than the view cone by more than an ambient
+  // car can drive during the warm-up steps, so nothing uncontrolled can
+  // wander into the composed frame.
+  world.cars = world.cars.filter((c) => c === world.getawayCar || c.x > 1280 || c.y < 300 || c.y > 1230);
   const gw = world.getawayCar;
   gw.x = 1080; gw.y = 978; gw.angle = Math.PI; gw.speed = 170;
   world.player.car = gw; gw.driver = 'player';
@@ -220,12 +225,8 @@ export function stageShot(name, game) {
   const copAhead2 = makeCar(world.rng, 'suv', gw.x - 265, gw.y + 6, Math.PI, { color: '#2f6fed', id: 6203 });
   copAhead2.police = true; copAhead2.driver = 'police'; copAhead2.speed = gw.speed;
   world.cars.push(copAhead2);
-  // Dense traffic staged on the road ahead and alongside: westbound cars
-  // (rear view) in the north lanes, oncoming cars (front view, headlights)
-  // in the south lanes, varied classes and colours, queueing at the
-  // roadblock and streaming past it for depth. Together with the two
-  // ambient cars staged before the drive, thirteen traffic cars are in
-  // the frame.
+  // Thirteen traffic cars are staged (the two ambient cars above plus
+  // these eleven); the recomposition below deals them into the frame.
   const trafficStage = [
     ['compact', -225, 958, Math.PI, '#ffd60a', 6301],
     ['suv', -330, 962, Math.PI, '#90be6d', 6302],
@@ -246,21 +247,60 @@ export function stageShot(name, game) {
     tc.speed = 150;
     world.cars.push(tc);
   }
-  // Sixteen pedestrians frozen on the Market St pavements ahead
-  // (existing sim entities, repositioned by staging): the sidewalk bands
-  // sit at street centre ±~60, so nobody stands in the road. Fourteen
-  // walk the north pavement in a receding line; two stand on the south
-  // pavement in the open lot gap at x 822..832 — the only south-side
-  // spots both clear of the encroaching building lots and visible past
-  // the near police-station block from this camera.
-  world.peds.slice(0, 14).forEach((pd, i) => {
-    pd.x = gw.x - 40 - i * 30;
-    pd.y = 940 + (i % 3);
-    pd.down = 0;
-  });
-  world.peds.slice(14, 16).forEach((pd, j) => {
-    pd.x = gw.x - 142 - j * 10;
-    pd.y = 1059 - j * 2;
+  // --- round-8 merger recomposition. The old staging piled the police
+  // into one clipped cluster (sprites interpenetrating, a yellow car
+  // wedged inside, peds intersecting the pile). Every actor is now dealt
+  // to a measured absolute slot: each position was verified against the
+  // chase camera's building z-buffer (fully visible, never clipped by a
+  // facade) and against every other sprite's screen rectangle (no two
+  // vehicles overlap; the one south pursuer's rectangle grazes only the
+  // hero sprite's empty top-left corner, so the cars never touch). The
+  // three roadblock SUVs trade their side-on line for a west-facing
+  // echelon across the lanes — same count, every outline traceable.
+  // Police (9 in frame): echelon + flank PIT + verge and cross-street
+  // units + the south pursuer. Traffic takes the remaining verified
+  // slots in pastel colours; staged traffic beyond the slot count is
+  // parked east of the camera, out of frame.
+  const place = (car, x, y, ang) => { if (car) { car.x = x; car.y = y; car.angle = ang; } };
+  const byId = (id) => world.cars.find((c) => c.id === id);
+  place(byId(5999), 627, 992, Math.PI);
+  place(byId(6000), 800, 953, Math.PI);
+  place(byId(6001), 770, 985, Math.PI);
+  place(byId(6201), 870, 915, Math.PI);
+  place(byId(6202), 665, 950, Math.PI);
+  place(byId(6203), 500, 876, Math.PI);
+  const pursuers = world.cars.filter((c) => c.police && c.id >= 5000 && c.id < 5100).sort((a, b) => a.id - b.id);
+  place(pursuers[0], 723, 904, Math.PI);
+  place(pursuers[1], 848, 1032, Math.PI);
+  place(pursuers[2], 207, 808, -Math.PI / 2);
+  const trafficSlots = [
+    [6101, 938, 922, Math.PI, '#e8d5c4'],
+    [6102, 772, 848, Math.PI, '#8fb8c8'],
+    [6301, 640, 800, Math.PI / 2, '#d9a08a'],
+    [6302, 614, 854, -Math.PI / 2, '#a8c8a0'],
+    [6303, 196, 861, -Math.PI / 2, '#e6d9a8'],
+    [6304, 275, 826, Math.PI, '#d8a8b8'],
+    [6305, 460, 903, Math.PI, '#b8aed8'],
+  ];
+  for (const [id, x, y, ang, color] of trafficSlots) {
+    const tc = byId(id);
+    place(tc, x, y, ang);
+    if (tc) tc.color = color;
+  }
+  [6306, 6307, 6308, 6309, 6310, 6311].forEach((id, i) => place(byId(id), 1500 + i * 70, 300, 0));
+  // Sixteen pedestrians frozen on pavements and frontage strips
+  // (existing sim entities, repositioned by staging) at the same
+  // measured slots: every figure fully visible from the chase camera
+  // and clear of every vehicle — nobody stands in the road, in the
+  // hero car's space, or inside the police echelon.
+  const pedSlots = [
+    [810, 830], [855, 838], [726, 802], [792, 810], [552, 972], [756, 870],
+    [447, 768], [873, 870], [735, 800], [156, 766], [453, 764], [147, 884],
+    [561, 966], [672, 784], [546, 806], [141, 756],
+  ];
+  world.peds.slice(0, 16).forEach((pd, i) => {
+    pd.x = pedSlots[i][0];
+    pd.y = pedSlots[i][1];
     pd.down = 0;
   });
   // Freeze the helicopter in frame, ahead and above at readable scale,
