@@ -315,7 +315,15 @@ export function drawWorld(ctx, world, cam) {
     if (!plateCulled) {
       ctx.fillStyle = night ? neon : '#ffffff';
       ctx.font = '900 16px system-ui, sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText(b.name, b.x + b.w / 2, b.y + b.h - 10);
+      const tw = ctx.measureText(b.name).width;
+      const bsx = b.x + b.w / 2 - cam.x;
+      const bcx = Math.max(tw / 2 + 8, Math.min(VIEW_W - tw / 2 - 8, bsx));
+      if (bcx !== bsx) {
+        ctx.fillStyle = '#0a0e16';
+        ctx.fillRect(cam.x + bcx - tw / 2 - 8, b.y + b.h - 30, tw + 16, 30);
+        ctx.fillStyle = night ? neon : '#ffffff';
+      }
+      ctx.fillText(b.name, cam.x + bcx, b.y + b.h - 10);
       ctx.font = '700 10px system-ui, sans-serif'; ctx.fillStyle = '#7deeff';
       ctx.fillText(b.sign, b.x + b.w / 2, b.y + 14);
     }
@@ -327,6 +335,7 @@ export function drawWorld(ctx, world, cam) {
   // clamped fully inside the frame, and culled when HUD chrome would
   // cover them — every street name that appears is fully readable.
   ctx.font = '800 15px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const labelCandidates = [];
   for (const a of AVENUES) for (const s of STREETS) {
     if (!(a.x > vx - 100 && a.x < vx + vw + 100 && s.y > vy - 60 && s.y < vy + vh + 60)) continue;
     const label = a.name + ' × ' + s.name;
@@ -335,10 +344,32 @@ export function drawWorld(ctx, world, cam) {
     const sy = s.y - ROAD_W / 2 - 14 - cam.y;
     sx = Math.max(tw / 2 + 8, Math.min(VIEW_W - tw / 2 - 8, sx));
     if (labelCulled(sx, sy, tw + 12, 22)) continue;
-    ctx.fillStyle = 'rgba(8,10,18,0.78)';
-    ctx.fillRect(cam.x + sx - tw / 2 - 6, cam.y + sy - 11, tw + 12, 22);
-    ctx.fillStyle = 'rgba(255,255,255,0.92)';
-    ctx.fillText(label, cam.x + sx, cam.y + sy + 1);
+    labelCandidates.push({ label, tw, sx, sy });
+  }
+  const placedRects = [];
+  const yOffsets = [0, ROAD_W + 28, -26, ROAD_W + 54, -52];
+  for (const cand of labelCandidates) {
+    const { label, tw, sx, sy } = cand;
+    let placed = false;
+    for (const off of yOffsets) {
+      const syTry = sy + off;
+      if (!(syTry - 11 >= 4 && syTry + 11 <= VIEW_H - 4)) continue;
+      if (labelCulled(sx, syTry, tw + 12, 22)) continue;
+      const ex = sx - tw / 2 - 6 - 4, ey = syTry - 11 - 4, ew = tw + 12 + 8, eh = 22 + 8;
+      let intersects = false;
+      for (const r of placedRects) {
+        if (ex < r.x + r.w && ex + ew > r.x && ey < r.y + r.h && ey + eh > r.y) { intersects = true; break; }
+      }
+      if (intersects) continue;
+      ctx.fillStyle = 'rgba(8,10,18,0.78)';
+      ctx.fillRect(cam.x + sx - tw / 2 - 6, cam.y + syTry - 11, tw + 12, 22);
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.fillText(label, cam.x + sx, cam.y + syTry + 1);
+      placedRects.push({ x: sx - tw / 2 - 6, y: syTry - 11, w: tw + 12, h: 22 });
+      placed = true;
+      break;
+    }
+    if (!placed) continue;
   }
   ctx.textBaseline = 'alphabetic';
   // Garages / bribes / spikes / roadblock markers.
