@@ -93,17 +93,25 @@ function drawWorld(ctx, game, cam) {
     ctx.fillStyle = ctx.strokeStyle;
     ctx.beginPath(); ctx.arc(marker.x, marker.y, 7, 0, Math.PI * 2); ctx.fill();
   }
-  // Place labels for story locations when nearby. The plate is clamped fully inside the
-  // visible view rect (the plate shifts, never the place) so no label can clip at an edge.
-  ctx.font = '600 13px system-ui, sans-serif'; ctx.textAlign = 'center';
-  const vx0 = cam.x - hw, vx1 = cam.x + hw, vy0 = cam.y - hh, vy1 = cam.y + hh;
-  for (const key of Object.keys(game.places)) {
-    const pl = game.places[key];
-    if (pl.x < x0 || pl.x > x1 || pl.y < y0 || pl.y > y1) continue;
-    const px = clamp(pl.x - 62, vx0 + 4, Math.max(vx0 + 4, vx1 - 128));
-    const py = clamp(pl.y - 58, vy0 + 4, Math.max(vy0 + 4, vy1 - 23));
-    ctx.fillStyle = 'rgba(10,12,16,0.55)'; ctx.fillRect(px, py, 124, 19);
-    ctx.fillStyle = '#cfd3da'; ctx.fillText(pl.name, px + 62, py + 14);
+  // Place labels for story locations. A label is drawn only when the place anchor is
+  // inside the TRUE visible rect (cam.x ± (VIEW_W/zoom)/2, cam.y ± (VIEW_H/zoom)/2):
+  // an anchor outside it is skipped outright, never clamped in from the wider culled
+  // margin (that is what pinned the Gazette Plaza plate to the top edge of the chase
+  // shot). The 124x19 plate — horizontally centred on the anchor, floating above it —
+  // is clamped fully inside the visible rect with a 4-unit inset on every side, so no
+  // plate can clip at a frame edge. The title screen draws no place labels at all:
+  // its centred overlay owns the middle of the frame.
+  if (game.screen !== 'title') {
+    ctx.font = '600 13px system-ui, sans-serif'; ctx.textAlign = 'center';
+    const vx0 = cam.x - hw, vx1 = cam.x + hw, vy0 = cam.y - hh, vy1 = cam.y + hh;
+    for (const key of Object.keys(game.places)) {
+      const pl = game.places[key];
+      if (pl.x < vx0 || pl.x > vx1 || pl.y < vy0 || pl.y > vy1) continue;
+      const px = clamp(pl.x - 62, vx0 + 4, Math.max(vx0 + 4, vx1 - 124 - 4));
+      const py = clamp(pl.y - 58, vy0 + 4, Math.max(vy0 + 4, vy1 - 19 - 4));
+      ctx.fillStyle = 'rgba(10,12,16,0.55)'; ctx.fillRect(px, py, 124, 19);
+      ctx.fillStyle = '#cfd3da'; ctx.fillText(pl.name, px + 62, py + 14);
+    }
   }
   // Buildings: pseudo-depth — walls extruded away from the camera focus, then the roof.
   const focusX = cam.x, focusY = cam.y + 260;
