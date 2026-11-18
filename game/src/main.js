@@ -1,134 +1,189 @@
-// Boot and the one loop: input is read every frame, the world advances in fixed 1/60 s steps
-// (several in a slow frame, none in a fast one), and the renderer paints what is there. The game
-// moves between four screens: title, play, paused and game over.
-//
-// ?seed=N fixes the falling pattern. ?shot=start|play|end (with &seed=N) stages that scene
-// instead of running the loop, paints it twice and sets window.__shotReady for a screenshot.
-import { BEST_KEY, LIVES, STEP } from './config.js';
-import { createRandom } from './random.js';
-import { createWorld, EVENT_HIT, EVENT_OVER } from './world.js';
-import { ACTION_CONFIRM, ACTION_PAUSE, createInput } from './input.js';
-import { createRenderer, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// main.js — boot, screen state machine, fixed-timestep loop, click routing.
+// Screens: title → plan (planning board) → play (execution / free roam) →
+// results / gameover, with pause and help overlays on top of play.
+import { VIEW_W, VIEW_H, STEP, MAX_STEPS_PER_FRAME } from './config.js';
+import { Input } from './input.js';
+import { AudioSynth } from './audio.js';
+import { createWorld } from './world.js';
+import { loadSave, storeSave, recordRun } from './save.js';
+import { PlanningBoard } from './planning.js';
+import { drawWorld, computeCamera } from './render.js';
+import { drawHud } from './hud.js';
+import { drawTitle, drawPlanning, drawResults, drawPause, drawHelp, drawGameOver } from './render-ui.js';
 import { stageShot } from './shots.js';
-
-/** The longest frame the loop catches up on; a longer stall (a hidden tab) is dropped, not replayed. */
-const MAX_FRAME = 0.25;
-
-const params = new URLSearchParams(window.location.search);
-const shot = params.get('shot');
-const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
-const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() * 4294967296);
+import { HEISTS } from './heists.js';
+import { CAR_CLASSES } from './vehicles.js';
 
 const canvas = document.getElementById('game');
-const status = document.getElementById('status');
-const world = createWorld(createRandom(seed));
-const renderer = createRenderer(canvas);
+const statusEl = document.getElementById('status');
+const ctx = canvas.getContext('2d');
+canvas.width = VIEW_W; canvas.height = VIEW_H;
 
-function readBest() {
-  try {
-    return Number.parseInt(window.localStorage.getItem(BEST_KEY) ?? '0', 10) || 0;
-  } catch {
-    return 0;
+// Visible error banner: screenshot verification asserts this never appears.
+window.addEventListener('error', (e) => {
+  const el = document.getElementById('status');
+  if (el) { el.className = 'error-banner'; el.textContent = 'ERROR: ' + (e.message || 'unknown'); }
+});
+
+const params = new URLSearchParams(window.location.search);
+const shotName = params.get('shot');
+const seed = Number.parseInt(params.get('seed') || '1234', 10) || 1234;
+
+const audio = new AudioSynth();
+const save = loadSave();
+audio.setMuted(!!save.settings.mute);
+const world = createWorld({ seed, audio, save });
+const input = new Input(canvas);
+const game = { world, save, board: new PlanningBoard(save), screen: 'title', overlay: null, rects: [] };
+world.beginRoam('day');
+
+function setStatus(msg) { if (statusEl && statusEl.className !== 'error-banner') statusEl.textContent = msg; }
+
+function startHeist() {
+  const board = game.board;
+  world.beginHeist(board.heist, { ...board.plan, crew: [...board.plan.crew], gear: [...board.plan.gear] });
+  game.screen = 'play';
+  setStatus('Executing: ' + board.heist.name);
+  audio.uiClick();
+}
+
+function finishToResultsIfReady() {
+  if (world.results && game.screen === 'play') {
+    const r = world.results;
+    recordRun(save, { name: r.heist.name, grade: r.settlement.grade, net: r.settlement.net, when: 'run #' + (save.history.length + 1) });
+    storeSave(save);
+    game.screen = 'results';
+    setStatus('Results: grade ' + r.settlement.grade);
+  } else if (world.over && game.screen === 'play' && !world.results) {
+    storeSave(save);
+    game.screen = 'gameover';
+  } else if (world.over && world.results && game.screen === 'play') {
+    game.screen = 'gameover';
   }
 }
 
-function saveBest(value) {
-  try {
-    window.localStorage.setItem(BEST_KEY, String(value));
-  } catch {
-    // Storage can be off (private windows): the best score then lasts this visit only.
+function handleClick(x, y) {
+  for (const r of game.rects) {
+    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) { activate(r.id); return; }
   }
 }
 
-function runShot(name) {
-  const scene = stageShot(name, world);
-  let painted = 0;
-  function paint() {
-    renderer.draw(world.state, scene.screen, scene.best);
-    painted += 1;
-    if (painted < 2) requestAnimationFrame(paint);
-    else window.__shotReady = true;
+function activate(id) {
+  audio.ensure(); audio.uiClick();
+  const board = game.board;
+  if (game.screen === 'title') {
+    if (id === 'new') {
+      const fresh = loadSave(); // keep settings, reset progress via defaults
+      save.cash = 1500; save.rep = 0; save.unlocked = 1; save.garage = ['compact']; save.bestGrades = {}; save.history = [];
+      void fresh;
+      game.board = new PlanningBoard(save);
+      game.screen = 'plan';
+    } else if (id === 'continue') game.screen = 'plan';
+    else if (id === 'roam') { world.beginRoam('day'); game.screen = 'play'; }
+    return;
   }
-  requestAnimationFrame(paint);
+  if (game.screen === 'plan') {
+    if (id.startsWith('heist:')) board.selectHeist(Number(id.slice(6)));
+    else if (id.startsWith('entry:')) board.plan.entry = Number(id.slice(6));
+    else if (id.startsWith('crew:')) board.toggleCrew(id.slice(5));
+    else if (id.startsWith('gear:')) board.toggleGear(id.slice(5));
+    else if (id.startsWith('getaway:')) {
+      const g = id.slice(8);
+      if (save.garage.includes(g)) board.plan.getaway = g;
+      else if (save.cash >= CAR_CLASSES[g].price) {
+        save.cash -= CAR_CLASSES[g].price; save.garage.push(g); board.plan.getaway = g;
+        board.message = 'Bought the ' + CAR_CLASSES[g].name + ' for the garage.';
+        storeSave(save);
+      } else board.message = 'Not enough cash to buy the ' + CAR_CLASSES[g].name + ' ($' + CAR_CLASSES[g].price + ').';
+    }
+    else if (id.startsWith('time:')) board.plan.timeOfDay = id.slice(5);
+    else if (id === 'execute') startHeist();
+    else if (id === 'back') game.screen = 'title';
+    return;
+  }
+  if (game.screen === 'results' || game.screen === 'gameover') {
+    if (id === 'board') { game.board = new PlanningBoard(save); game.screen = 'plan'; world.over = null; world.results = null; }
+    else if (id === 'roam') { world.over = null; world.results = null; world.beginRoam('day'); game.screen = 'play'; }
+    return;
+  }
+  if (game.overlay === 'pause') {
+    if (id === 'resume') game.overlay = null;
+    else if (id === 'mute') { save.settings.mute = !save.settings.mute; audio.setMuted(save.settings.mute); storeSave(save); }
+    else if (id === 'shake') { save.settings.shake = !save.settings.shake; storeSave(save); }
+    else if (id === 'board') { game.overlay = null; world.over = null; world.results = null; game.board = new PlanningBoard(save); game.screen = 'plan'; }
+    else if (id === 'title') { game.overlay = null; game.screen = 'title'; }
+    return;
+  }
+  if (game.overlay === 'help') { if (id === 'close') game.overlay = null; return; }
 }
 
-function runGame() {
-  const input = createInput(canvas);
-  let screen = SCREEN_TITLE;
-  let best = readBest();
-  let accumulator = 0;
-  let last = performance.now();
-
-  // Screen readers (and anyone watching the page's text) hear the screen changes and each hit.
-  function announce(message) {
-    status.textContent = message;
+function handleKeys() {
+  if (input.wasPressed('h')) { game.overlay = game.overlay === 'help' ? null : 'help'; return; }
+  if (game.screen === 'play' && !game.overlay && (input.wasPressed('p') || input.wasPressed('escape'))) { game.overlay = 'pause'; return; }
+  if (game.overlay === 'pause' && (input.wasPressed('p') || input.wasPressed('escape'))) { game.overlay = null; return; }
+  if (game.overlay === 'help' && input.wasPressed('escape')) { game.overlay = null; return; }
+  if (game.screen === 'plan') {
+    for (const k of [...input.pressed]) game.board.handleKey(k);
+    if (input.wasPressed('enter')) startHeist();
+    if (input.wasPressed('escape')) game.screen = 'title';
+    return;
   }
-
-  function startGame() {
-    world.reset();
-    accumulator = 0;
-    screen = SCREEN_PLAY;
-    announce(`Playing. ${LIVES} lives.`);
+  if (game.screen === 'play' && !game.overlay && input.wasPressed('b')) {
+    game.board = new PlanningBoard(save); game.screen = 'plan'; return;
   }
-
-  function endGame() {
-    screen = SCREEN_OVER;
-    if (world.state.score > best) {
-      best = world.state.score;
-      saveBest(best);
-    }
-    announce(`Game over. Score ${world.state.score}. Best ${best}.`);
+  if (game.screen === 'title' && input.wasPressed('enter')) { game.screen = 'plan'; return; }
+  if ((game.screen === 'results' || game.screen === 'gameover') && input.wasPressed('b')) {
+    world.over = null; world.results = null; game.board = new PlanningBoard(save); game.screen = 'plan'; return;
   }
-
-  function handleActions() {
-    const actions = input.takeActions();
-    if (actions & ACTION_CONFIRM && (screen === SCREEN_TITLE || screen === SCREEN_OVER)) startGame();
-    else if (actions & ACTION_PAUSE && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
-    } else if (actions & (ACTION_PAUSE | ACTION_CONFIRM) && screen === SCREEN_PAUSED) {
-      screen = SCREEN_PLAY;
-      announce('Playing.');
-    }
+  if (game.screen === 'results' && input.wasPressed('f')) {
+    world.over = null; world.results = null; world.beginRoam('day'); game.screen = 'play'; return;
   }
+}
 
-  function step() {
-    if (screen === SCREEN_TITLE) {
-      world.step(STEP, 0, true);
-      return;
-    }
-    const events = world.step(STEP, input.direction(), false);
-    if (events & EVENT_OVER) endGame();
-    else if (events & EVENT_HIT) announce(world.state.lives === 1 ? 'Hit. 1 life left.' : `Hit. ${world.state.lives} lives left.`);
-  }
+function draw() {
+  game.rects = [];
+  if (game.screen === 'title') { game.rects = drawTitle(ctx, VIEW_W, VIEW_H, save, world.time); return; }
+  if (game.screen === 'plan') { game.rects = drawPlanning(ctx, VIEW_W, VIEW_H, game.board, world); return; }
+  // Playfield.
+  const cam = computeCamera(world);
+  if (!save.settings.shake) { cam.x = Math.max(0, Math.min(3200 - VIEW_W, world.camera.x - VIEW_W / 2)); cam.y = Math.max(0, Math.min(2400 - VIEW_H, world.camera.y - VIEW_H / 2)); }
+  drawWorld(ctx, world, cam);
+  drawHud(ctx, world, VIEW_W, VIEW_H);
+  if (game.screen === 'results') { game.rects = drawResults(ctx, VIEW_W, VIEW_H, world); return; }
+  if (game.screen === 'gameover') { game.rects = drawGameOver(ctx, VIEW_W, VIEW_H, world); return; }
+  if (game.overlay === 'pause') game.rects = drawPause(ctx, VIEW_W, VIEW_H, save);
+  else if (game.overlay === 'help') game.rects = drawHelp(ctx, VIEW_W, VIEW_H);
+}
 
+function mouseWorld() {
+  const cam = computeCamera(world);
+  return { x: cam.x + input.mouseX, y: cam.y + input.mouseY };
+}
+
+if (shotName) {
+  stageShot(shotName, game);
+  draw(); draw();
+  window.__shotReady = true;
+  setStatus('shot:' + shotName);
+} else {
+  let acc = 0, last = null;
   function frame(now) {
     requestAnimationFrame(frame);
-    accumulator += Math.min((now - last) / 1000, MAX_FRAME);
-    last = now;
-    handleActions();
-    if (screen === SCREEN_TITLE || screen === SCREEN_PLAY) {
-      while (accumulator >= STEP && (screen === SCREEN_TITLE || screen === SCREEN_PLAY)) {
-        step();
-        accumulator -= STEP;
-      }
-    } else {
-      accumulator = 0;
+    if (last === null) last = now;
+    acc += Math.min(0.25, (now - last) / 1000); last = now;
+    if (input.clicked) handleClick(input.clickX, input.clickY);
+    handleKeys();
+    let steps = 0;
+    while (acc >= STEP && steps < MAX_STEPS_PER_FRAME) {
+      if (game.screen === 'play' && !game.overlay) world.step(STEP, input, mouseWorld());
+      acc -= STEP; steps++;
+      input.endStep();
     }
-    renderer.draw(world.state, screen, best);
+    if (steps === 0) input.endStep();
+    finishToResultsIfReady();
+    draw();
   }
-
-  // Leaving the tab pauses a running game rather than letting blocks fall unseen.
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
-    }
-  });
-
-  announce('Block Dodger. Press Space or click to start.');
   requestAnimationFrame(frame);
+  setStatus('THE PLANNER — title screen');
 }
-
-if (shot) runShot(shot);
-else runGame();
+void HEISTS;
