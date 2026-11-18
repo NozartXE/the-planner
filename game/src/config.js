@@ -27,8 +27,8 @@ export const SAVE_KEY = 'the-planner-save-v1';
 export const TIMES_OF_DAY = ['dawn', 'day', 'dusk', 'night'];
 // Per time-of-day: sky tint, traffic density, patrol multiplier, darkness.
 export const DAY_PHASES = {
-  dawn:  { sky: '#f2a65a', tint: 'rgba(242,140,60,0.10)', traffic: 0.7, patrols: 0.8, dark: 0.15, label: 'DAWN' },
+  dawn:  { sky: '#f2a65a', tint: 'rgba(242,140,60,0.12)', traffic: 0.7, patrols: 0.8, dark: 0.15, label: 'DAWN' },
   day:   { sky: '#7ec8e3', tint: 'rgba(0,0,0,0)', traffic: 1.0, patrols: 1.0, dark: 0, label: 'DAY' },
-  dusk:  { sky: '#e76f51', tint: 'rgba(120,40,90,0.14)', traffic: 0.85, patrols: 1.0, dark: 0.3, label: 'DUSK' },
-  night: { sky: '#14213d', tint: 'rgba(5,10,40,0.38)', traffic: 0.45, patrols: 1.25, dark: 0.62, label: 'NIGHT' },
+  dusk:  { sky: '#e76f51', tint: 'rgba(120,40,90,0.20)', traffic: 0.85, patrols: 1.0, dark: 0.38, label: 'DUSK' },
+  night: { sky: '#14213d', tint: 'rgba(5,10,40,0.46)', traffic: 0.45, patrols: 1.25, dark: 0.68, label: 'NIGHT' },
 };

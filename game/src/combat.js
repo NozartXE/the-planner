@@ -19,6 +19,8 @@ export function stepCombat(world, dt, aim, firing) {
     world.audio.shot();
     const mx = p.x + Math.cos(p.aimAngle) * 20, my = p.y + Math.sin(p.aimAngle) * 20;
     world.particles.muzzle(mx, my, p.aimAngle);
+    // Tracer streak down the aim line (the hitscan shot, made visible).
+    world.particles.tracer(p.x + Math.cos(p.aimAngle) * 120, p.y + Math.sin(p.aimAngle) * 120, p.aimAngle, 110);
     world.particles.spawn(p.x + 8, p.y + 6, { vx: 40, vy: -60, life: 0.5, size: 3, color: '#ffd60a', gravity: 300 });
     world.shake(2.2);
     // Hitscan: nearest police car or officer-zone within 420px in the aim cone.
@@ -54,6 +56,19 @@ export function stepCombat(world, dt, aim, firing) {
       c.policeFireT = world.rng.range(0.8, 1.5);
       const near = world.cars.some((car) => car.police && !car.disabled && Math.hypot(car.x - p.x, car.y - p.y) < 330);
       if (near) {
+        // Visualise the return fire: muzzle + tracer from the nearest police
+        // car toward the player (the damage below is the existing zone rule).
+        let shooter = null, sd = Infinity;
+        for (const car of world.cars) {
+          if (!car.police || car.disabled) continue;
+          const d = Math.hypot(car.x - p.x, car.y - p.y);
+          if (d < sd) { sd = d; shooter = car; }
+        }
+        if (shooter) {
+          const pa = angleTo(shooter.x, shooter.y, p.x, p.y);
+          world.particles.muzzle(shooter.x + Math.cos(pa) * 26, shooter.y + Math.sin(pa) * 26, pa);
+          world.particles.tracer((shooter.x + p.x) / 2, (shooter.y + p.y) / 2, pa, sd / 2, '#ffb3c1', 0.14);
+        }
         const dmg = world.plan && world.plan.gear.includes('vests') ? 6 : 9;
         p.health -= dmg;
         world.particles.burst(p.x, p.y, 5, '#ef476f', 120, 0.4, 4);

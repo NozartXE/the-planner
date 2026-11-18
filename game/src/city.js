@@ -60,6 +60,12 @@ const TEMPLATES = [
   ['TIDE POOL MOTEL', 'MOTEL', '#ff9770', '#bf6440', 'hotel'],
 ];
 
+// Open spaces that break the arena grid: a paved plaza and a pocket park.
+// Each replaces one first-lot building (template not consumed, so every kind
+// still places and the building count stays 42); both sit clear of roads.
+export const PLAZA = { x: 1350, y: 1050, w: 300, h: 180, name: 'MERIDIAN PLAZA' };
+export const PARK = { x: 2180, y: 650, w: 290, h: 170, name: 'PALM POCKET PARK' };
+
 // Lot positions: inside each block, up to 2 buildings. Blocks are the cells
 // between roads. We generate deterministically from the template list.
 export function buildCity(rng) {
@@ -73,6 +79,11 @@ export function buildCity(rng) {
       const lotX = 400 * bx + 300 + (by % 2) * 40;
       const lotY = 400 * by + 300;
       if (lotY > RIVER_Y - 260) continue;
+      // The plaza (bx 3, by 2) and park (bx 5, by 1) leave their first lot
+      // open: skip without consuming the template, so the kind still places
+      // in a later lot and the district keeps all 42 fronts.
+      const openLot = (bx === 3 && by === 2) || (bx === 5 && by === 1);
+      if (openLot) continue;
       const t = TEMPLATES[ti++];
       const w = 190 + rng.int(0, 60), h = 130 + rng.int(0, 50);
       buildings.push({

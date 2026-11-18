@@ -1,4 +1,4 @@
-// shots.js — deterministic screenshot staging: ?shot=cover|plan|heist|results.
+// shots.js — deterministic screenshot staging: ?shot=cover|plan|combat|heist.
 // Each scene builds a fresh world, applies a plan, steps the REAL simulation
 // with a simple autopilot, and leaves the game on the requested screen.
 import { Rng } from './rng.js';
@@ -46,20 +46,54 @@ export function stageShot(name, game) {
     return;
   }
 
-  if (name === 'results') {
+  if (name === 'combat') {
     plan.timeOfDay = 'dusk';
     world.beginHeist(heist, plan);
     const m = world.mission;
-    m.lootGrabbed = m.lootTotal; m.time = 214; m.phase = 'done';
-    world.heat = 40;
-    world.finishHeist(true);
-    game.screen = 'results';
+    m.phase = 'grab'; m.alarmStarted = true; m.alarmT = 31;
+    m.lootGrabbed = Math.round(m.lootTotal * 0.45);
+    world.player.x = m.building.doorX + 18; world.player.y = m.building.doorY - 4;
+    world.player.car = null;
+    world.heat = 60; world.stars = 3;
+    // Crew beside the player, one carrying a bag.
+    world.crewMembers.forEach((c, i) => { c.x = world.player.x - 44 + i * 40; c.y = world.player.y + 34; c.hasBag = i === 0; });
+    // Police arriving at the street.
+    world.forcePolice(2, m.building.doorX + 210, m.building.doorY + 120);
+    const cop = world.cars.find((c) => c.police);
+    const aim = cop ? { x: cop.x, y: cop.y } : { x: world.player.x + 200, y: world.player.y };
+    // Fire the REAL sim at the nearest police car: shots, muzzle flashes,
+    // tracers, police return fire, fleeing pedestrians.
+    for (let i = 0; i < 80; i++) world.step(1 / 60, fakeInput([], [], { down: true }), aim);
+    // Freeze one fresh exchange on screen: the player's muzzle + tracer and
+    // the nearest police car's return fire (the sim's zone-based rule).
+    const p = world.player;
+    const a = Math.atan2(aim.y - p.y, aim.x - p.x);
+    world.lastShotT = 0;
+    world.particles.muzzle(p.x + Math.cos(a) * 24, p.y + Math.sin(a) * 24, a);
+    world.particles.tracer(p.x + Math.cos(a) * 120, p.y + Math.sin(a) * 120, a, 110);
+    if (cop) {
+      const pa = Math.atan2(p.y - cop.y, p.x - cop.x);
+      const d = Math.hypot(p.x - cop.x, p.y - cop.y);
+      world.particles.muzzle(cop.x + Math.cos(pa) * 26, cop.y + Math.sin(pa) * 26, pa);
+      world.particles.tracer((cop.x + p.x) / 2, (cop.y + p.y) / 2, pa, d / 2, '#ffb3c1', 0.14);
+    }
+    world.camera.x = world.player.x; world.camera.y = world.player.y;
+    game.screen = 'play';
     return;
   }
 
   if (name === 'heist') {
-    plan.timeOfDay = 'dusk';
-    world.beginHeist(heist, plan);
+    // A different heist + night, so this frame cannot be mistaken for the
+    // combat shot: warehouse grab under lamps and lit windows, crew with
+    // loot bags on a crowded street, police arriving.
+    const heist2 = HEISTS[4];
+    const plan2 = defaultPlan(heist2);
+    plan2.crew = ['dex', 'priya', 'sana'];
+    plan2.gear = ['duffels', 'jammer', 'scanner'];
+    plan2.getaway = 'sports';
+    plan2.entry = 0;
+    plan2.timeOfDay = 'night';
+    world.beginHeist(heist2, plan2);
     const m = world.mission;
     m.phase = 'grab'; m.alarmStarted = true; m.alarmT = 31;
     m.lootGrabbed = Math.round(m.lootTotal * 0.45);
