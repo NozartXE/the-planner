@@ -38,7 +38,7 @@ export const HUD_RECTS = [
   { x: 14, y: 12, w: 218, h: 64 },     // cash / REP panel
   { x: 210, y: 12, w: 860, h: 44 },   // objective banner (max width)
   { x: 14, y: 84, w: 164, h: 123 },   // minimap (on-foot small)
-  { x: 14, y: 682, w: 218, h: 44 },   // health panel
+  { x: 14, y: 676, w: 218, h: 50 },   // health panel
   { x: 1016, y: 724, w: 242, h: 54 }, // gadget strip
 ];
 export function labelCulled(sx, sy, w, h) {
@@ -144,6 +144,13 @@ function drawPerson(ctx, x, y, angle, shirt, opts = {}) {
 export function drawWorld(ctx, world, cam) {
   const phase = DAY_PHASES[(world.plan && world.plan.timeOfDay) || 'day'] || DAY_PHASES.day;
   const night = phase.dark > 0.4, dark = phase.dark;
+  // Grab-phase declutter (the on-foot combat framing): the fight is the
+  // focal, so world labels drop to a budget — the target building keeps
+  // its plate, every other plate/sign goes, and street labels cap at the
+  // three crossings nearest the player. Live play gets the same
+  // behaviour: labels thin out while the alarm runs and the player is
+  // on foot grabbing loot.
+  const declutter = !!(world.mission && world.mission.phase === 'grab');
   ctx.save();
   ctx.translate(-cam.x, -cam.y);
   const vx = cam.x - 40, vy = cam.y - 40, vw = VIEW_W + 80, vh = VIEW_H + 80;
@@ -310,22 +317,34 @@ export function drawWorld(ctx, world, cam) {
     // chrome would cover them (never half-hidden).
     const neon = (b.kind === 'club' || b.kind === 'casino') ? '#ff71ce' : '#ffd60a';
     if (night) { ctx.fillStyle = neon === '#ff71ce' ? 'rgba(255,113,206,0.20)' : 'rgba(255,214,10,0.16)'; ctx.fillRect(b.x - 4, b.y + b.h - 34, b.w + 8, 38); }
-    ctx.fillStyle = '#0a0e16'; ctx.fillRect(b.x, b.y + b.h - 30, b.w, 30);
-    const plateCulled = labelCulled(b.x + b.w / 2 - cam.x, b.y + b.h - 15 - cam.y, b.w, 30);
-    if (!plateCulled) {
-      ctx.fillStyle = night ? neon : '#ffffff';
-      ctx.font = '900 16px system-ui, sans-serif'; ctx.textAlign = 'center';
-      const tw = ctx.measureText(b.name).width;
-      const bsx = b.x + b.w / 2 - cam.x;
-      const bcx = Math.max(tw / 2 + 8, Math.min(VIEW_W - tw / 2 - 8, bsx));
-      if (bcx !== bsx) {
-        ctx.fillStyle = '#0a0e16';
-        ctx.fillRect(cam.x + bcx - tw / 2 - 8, b.y + b.h - 30, tw + 16, 30);
+    // Name plate: in grab-phase declutter only the mission building keeps
+    // one — every other plate is a label the combat frame cannot afford.
+    // (The chip without text would read as a rendering bug, so the whole
+    // chip goes with the text.)
+    const keepPlate = !declutter || (world.mission && b === world.mission.building);
+    if (keepPlate) {
+      ctx.fillStyle = '#0a0e16'; ctx.fillRect(b.x, b.y + b.h - 30, b.w, 30);
+      const plateCulled = labelCulled(b.x + b.w / 2 - cam.x, b.y + b.h - 15 - cam.y, b.w, 30);
+      if (!plateCulled) {
         ctx.fillStyle = night ? neon : '#ffffff';
+        ctx.font = '900 16px system-ui, sans-serif'; ctx.textAlign = 'center';
+        const tw = ctx.measureText(b.name).width;
+        const bsx = b.x + b.w / 2 - cam.x;
+        const bcx = Math.max(tw / 2 + 8, Math.min(VIEW_W - tw / 2 - 8, bsx));
+        if (bcx !== bsx) {
+          ctx.fillStyle = '#0a0e16';
+          ctx.fillRect(cam.x + bcx - tw / 2 - 8, b.y + b.h - 30, tw + 16, 30);
+          ctx.fillStyle = night ? neon : '#ffffff';
+        }
+        ctx.fillText(b.name, cam.x + bcx, b.y + b.h - 10);
+        // Roof sign: dropped in grab-phase declutter — the target's plate
+        // already names the building, and the sign is one more label the
+        // combat frame cannot afford.
+        if (!declutter) {
+          ctx.font = '700 10px system-ui, sans-serif'; ctx.fillStyle = '#7deeff';
+          ctx.fillText(b.sign, b.x + b.w / 2, b.y + 14);
+        }
       }
-      ctx.fillText(b.name, cam.x + bcx, b.y + b.h - 10);
-      ctx.font = '700 10px system-ui, sans-serif'; ctx.fillStyle = '#7deeff';
-      ctx.fillText(b.sign, b.x + b.w / 2, b.y + 14);
     }
     // Door marker.
     ctx.fillStyle = '#ffd60a'; ctx.fillRect(b.doorX - 7, b.doorY - 8, 14, 8);
@@ -334,67 +353,74 @@ export function drawWorld(ctx, world, cam) {
   // label is never half-buried under a roof edge: dark backing plate,
   // clamped fully inside the frame, and culled when HUD chrome would
   // cover them — every street name that appears is fully readable.
-  ctx.font = '800 15px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const labelCandidates = [];
-  for (const a of AVENUES) for (const s of STREETS) {
-    if (!(a.x > vx - 100 && a.x < vx + vw + 100 && s.y > vy - 60 && s.y < vy + vh + 60)) continue;
-    const label = a.name + ' × ' + s.name;
-    const tw = ctx.measureText(label).width;
-    let sx = a.x - cam.x;
-    const sy = s.y - ROAD_W / 2 - 14 - cam.y;
-    sx = Math.max(tw / 2 + 8, Math.min(VIEW_W - tw / 2 - 8, sx));
-    if (labelCulled(sx, sy, tw + 12, 22)) continue;
-    labelCandidates.push({ label, tw, sx, sy });
-  }
-  const placedRects = [];
-  const yOffsets = [0, ROAD_W + 28, -26, ROAD_W + 54, -52];
-  for (const cand of labelCandidates) {
-    const { label, tw, sx, sy } = cand;
-    let placed = false;
-    for (const off of yOffsets) {
-      const syTry = sy + off;
-      if (!(syTry - 11 >= 4 && syTry + 11 <= VIEW_H - 4)) continue;
-      if (labelCulled(sx, syTry, tw + 12, 22)) continue;
-      const ex = sx - tw / 2 - 6 - 4, ey = syTry - 11 - 4, ew = tw + 12 + 8, eh = 22 + 8;
-      let intersects = false;
-      for (const r of placedRects) {
-        if (ex < r.x + r.w && ex + ew > r.x && ey < r.y + r.h && ey + eh > r.y) { intersects = true; break; }
-      }
-      if (intersects) continue;
-      ctx.fillStyle = 'rgba(8,10,18,0.78)';
-      ctx.fillRect(cam.x + sx - tw / 2 - 6, cam.y + syTry - 11, tw + 12, 22);
-      ctx.fillStyle = 'rgba(255,255,255,0.92)';
-      ctx.fillText(label, cam.x + sx, cam.y + syTry + 1);
-      placedRects.push({ x: sx - tw / 2 - 6, y: syTry - 11, w: tw + 12, h: 22 });
-      placed = true;
-      break;
+  // (In grab-phase declutter the late pass below draws them instead:
+  // after the cars, capped at three, so no sprite can occlude one.)
+  if (!declutter) {
+    ctx.font = '800 15px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const labelCandidates = [];
+    for (const a of AVENUES) for (const s of STREETS) {
+      if (!(a.x > vx - 100 && a.x < vx + vw + 100 && s.y > vy - 60 && s.y < vy + vh + 60)) continue;
+      const label = a.name + ' × ' + s.name;
+      const tw = ctx.measureText(label).width;
+      let sx = a.x - cam.x;
+      const sy = s.y - ROAD_W / 2 - 14 - cam.y;
+      sx = Math.max(tw / 2 + 8, Math.min(VIEW_W - tw / 2 - 8, sx));
+      if (labelCulled(sx, sy, tw + 12, 22)) continue;
+      labelCandidates.push({ label, tw, sx, sy });
     }
-    if (!placed) continue;
+    const placedRects = [];
+    const yOffsets = [0, ROAD_W + 28, -26, ROAD_W + 54, -52];
+    for (const cand of labelCandidates) {
+      const { label, tw, sx, sy } = cand;
+      let placed = false;
+      for (const off of yOffsets) {
+        const syTry = sy + off;
+        if (!(syTry - 11 >= 4 && syTry + 11 <= VIEW_H - 4)) continue;
+        if (labelCulled(sx, syTry, tw + 12, 22)) continue;
+        const ex = sx - tw / 2 - 6 - 4, ey = syTry - 11 - 4, ew = tw + 12 + 8, eh = 22 + 8;
+        let intersects = false;
+        for (const r of placedRects) {
+          if (ex < r.x + r.w && ex + ew > r.x && ey < r.y + r.h && ey + eh > r.y) { intersects = true; break; }
+        }
+        if (intersects) continue;
+        ctx.fillStyle = 'rgba(8,10,18,0.78)';
+        ctx.fillRect(cam.x + sx - tw / 2 - 6, cam.y + syTry - 11, tw + 12, 22);
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.fillText(label, cam.x + sx, cam.y + syTry + 1);
+        placedRects.push({ x: sx - tw / 2 - 6, y: syTry - 11, w: tw + 12, h: 22 });
+        placed = true;
+        break;
+      }
+      if (!placed) continue;
+    }
+    ctx.textBaseline = 'alphabetic';
   }
-  ctx.textBaseline = 'alphabetic';
   // Garages / bribes / spikes / roadblock markers.
   for (const g of world.garages) { ctx.fillStyle = '#ffb27a'; ctx.beginPath(); ctx.arc(g.x, g.y, 15, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#14161c'; ctx.font = '900 15px system-ui'; ctx.textAlign = 'center'; ctx.fillText('G', g.x, g.y + 5); }
   for (const br of world.bribes) { ctx.fillStyle = '#01cdfe'; ctx.beginPath(); ctx.arc(br.x, br.y, 14, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#0b2e23'; ctx.font = '900 15px system-ui'; ctx.textAlign = 'center'; ctx.fillText('$', br.x, br.y + 5); }
   for (const s of world.spikes) { ctx.fillStyle = '#22242c'; ctx.fillRect(s.x - 20, s.y - 4, 40, 8); ctx.fillStyle = '#e9ecef'; for (let i = -16; i <= 16; i += 8) { ctx.beginPath(); ctx.moveTo(s.x + i, s.y - 4); ctx.lineTo(s.x + i + 4, s.y - 11); ctx.lineTo(s.x + i + 8, s.y - 4); ctx.fill(); } }
-  // Mission entry marker + loot ring.
-  if (world.mission) {
-    const m = world.mission;
-    const pulse = 1 + Math.sin(world.time * 5) * 0.12;
-    ctx.strokeStyle = '#ff6b81'; ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.arc(m.entryX, m.entryY, 30 * pulse, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = '#ff6b81'; ctx.font = '900 15px system-ui'; ctx.textAlign = 'center';
-    ctx.fillText(m.phase === 'approach' ? 'ENTRY' : m.heist.sign || 'TARGET', m.entryX, m.entryY - 40);
-    if (m.phase === 'grab') {
-      // Loot progress ring offset from the door so the TARGET ring and the
-      // $ amount read cleanly — no in-world alarm bar (the countdown lives
-      // in the HUD banner) and no stacked plates at the target.
-      const cx = m.building.doorX + 84, cy = m.building.doorY - 52;
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 8;
-      ctx.beginPath(); ctx.arc(cx, cy, 26, 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = '#01cdfe';
-      ctx.beginPath(); ctx.arc(cx, cy, 26, -Math.PI / 2, -Math.PI / 2 + (m.lootGrabbed / m.lootTotal) * Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = '#fff'; ctx.font = '900 16px system-ui';
-      ctx.fillText('$' + Math.floor(m.lootGrabbed), cx, cy + 5);
+  // Mission entry marker + loot ring. (In grab-phase declutter the late
+  // pass below draws them instead, after the particles.)
+  if (!declutter) {
+    if (world.mission) {
+      const m = world.mission;
+      const pulse = 1 + Math.sin(world.time * 5) * 0.12;
+      ctx.strokeStyle = '#ff6b81'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(m.entryX, m.entryY, 30 * pulse, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#ff6b81'; ctx.font = '900 15px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText(m.phase === 'approach' ? 'ENTRY' : m.heist.sign || 'TARGET', m.entryX, m.entryY - 40);
+      if (m.phase === 'grab') {
+        // Loot progress ring offset from the door so the TARGET ring and the
+        // $ amount read cleanly — no in-world alarm bar (the countdown lives
+        // in the HUD banner) and no stacked plates at the target.
+        const cx = m.building.doorX + 84, cy = m.building.doorY - 52;
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 8;
+        ctx.beginPath(); ctx.arc(cx, cy, 26, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = '#01cdfe';
+        ctx.beginPath(); ctx.arc(cx, cy, 26, -Math.PI / 2, -Math.PI / 2 + (m.lootGrabbed / m.lootTotal) * Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.font = '900 16px system-ui';
+        ctx.fillText('$' + Math.floor(m.lootGrabbed), cx, cy + 5);
+      }
     }
   }
   // Activity markers.
@@ -423,6 +449,16 @@ export function drawWorld(ctx, world, cam) {
   // Player.
   const p = world.player;
   if (!p.car) {
+    // Player marker (grab-phase declutter only): a bright ring so the
+    // player is findable within 2 seconds at contact-sheet size — the
+    // one figure in the frame that always carries the same outline.
+    // The ring is drawn first so the body sits inside it, not under it.
+    if (declutter) {
+      ctx.strokeStyle = '#01cdfe'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 22, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 26, 0, Math.PI * 2); ctx.stroke();
+    }
     drawPerson(ctx, p.x, p.y, p.aimAngle || p.angle, '#ffd23f', { phase: p.walkPhase });
     // Gun.
     ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.aimAngle || p.angle);
@@ -439,7 +475,15 @@ export function drawWorld(ctx, world, cam) {
       ctx.moveTo(fx - 20, fy); ctx.lineTo(fx, fy - 7); ctx.lineTo(fx + 22, fy); ctx.lineTo(fx, fy + 7); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#ffd60a'; ctx.beginPath(); ctx.arc(fx, fy, 8, 0, Math.PI * 2); ctx.fill();
     }
-    // Name tag.
+    // Name tag: on a dark plate in grab-phase declutter so it reads over
+    // muzzle flash and the searchlight pool instead of dissolving into
+    // them; the plain tag elsewhere, so other frames stay pixel-identical.
+    if (declutter) {
+      ctx.font = '900 14px system-ui'; ctx.textAlign = 'center';
+      const tagW = ctx.measureText('THE PLANNER').width;
+      ctx.fillStyle = 'rgba(8,10,18,0.85)';
+      ctx.fillRect(p.x - tagW / 2 - 7, p.y - 42, tagW + 14, 20);
+    }
     ctx.fillStyle = '#ffd23f'; ctx.font = '900 14px system-ui'; ctx.textAlign = 'center';
     ctx.fillText('THE PLANNER', p.x, p.y - 28);
   }
@@ -469,8 +513,97 @@ export function drawWorld(ctx, world, cam) {
     ctx.beginPath(); ctx.moveTo(-44, 0); ctx.lineTo(-62, -4); ctx.stroke();
     ctx.restore();
   }
+  // --- LATE PASS (grab-phase declutter only): labels and mission
+  // markers, drawn after every actor and after the helicopter, so no
+  // sprite can occlude a plate (the round-10 draw-order lesson).
+  // Street labels sit on dark backing plates, clamped fully inside the
+  // frame, culled when HUD chrome would cover them, and a placement is
+  // refused when a car's screen rect sits under it — a label that
+  // cannot be placed cleanly is skipped, never clipped or half-buried.
+  if (declutter) {
+  ctx.font = '800 15px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const labelCandidates = [];
+  for (const a of AVENUES) for (const s of STREETS) {
+    if (!(a.x > vx - 100 && a.x < vx + vw + 100 && s.y > vy - 60 && s.y < vy + vh + 60)) continue;
+    const label = a.name + ' × ' + s.name;
+    const tw = ctx.measureText(label).width;
+    let sx = a.x - cam.x;
+    const sy = s.y - ROAD_W / 2 - 14 - cam.y;
+    sx = Math.max(tw / 2 + 8, Math.min(VIEW_W - tw / 2 - 8, sx));
+    if (labelCulled(sx, sy, tw + 12, 22)) continue;
+    labelCandidates.push({ label, tw, sx, sy, dist: Math.hypot(a.x - p.x, s.y - p.y) });
+  }
+  // Grab-phase budget: the three crossings nearest the player only.
+  labelCandidates.sort((x, y) => x.dist - y.dist);
+  labelCandidates.length = Math.min(3, labelCandidates.length);
+  // Screen rects of the visible cars (visual scale 1.3×: 46×24 → ~60×31,
+  // plus margin): a plate may not sit on a car.
+  const carRects = [];
+  for (const car of world.cars) {
+    if (car.x < vx - 60 || car.x > vx + vw + 60 || car.y < vy - 60 || car.y > vy + vh + 60) continue;
+    carRects.push({ x: car.x - cam.x - 36, y: car.y - cam.y - 22, w: 72, h: 44 });
+  }
+  const placedRects = [];
+  const yOffsets = [0, ROAD_W + 28, -26, ROAD_W + 54, -52];
+  for (const cand of labelCandidates) {
+    const { label, tw, sx, sy } = cand;
+    let placed = false;
+    for (const off of yOffsets) {
+      const syTry = sy + off;
+      if (!(syTry - 11 >= 4 && syTry + 11 <= VIEW_H - 4)) continue;
+      if (labelCulled(sx, syTry, tw + 12, 22)) continue;
+      const ex = sx - tw / 2 - 6 - 4, ey = syTry - 11 - 4, ew = tw + 12 + 8, eh = 22 + 8;
+      let intersects = false;
+      for (const r of placedRects) {
+        if (ex < r.x + r.w && ex + ew > r.x && ey < r.y + r.h && ey + eh > r.y) { intersects = true; break; }
+      }
+      if (!intersects) for (const r of carRects) {
+        if (ex < r.x + r.w && ex + ew > r.x && ey < r.y + r.h && ey + eh > r.y) { intersects = true; break; }
+      }
+      if (intersects) continue;
+      ctx.fillStyle = 'rgba(8,10,18,0.78)';
+      ctx.fillRect(cam.x + sx - tw / 2 - 6, cam.y + syTry - 11, tw + 12, 22);
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.fillText(label, cam.x + sx, cam.y + syTry + 1);
+      placedRects.push({ x: sx - tw / 2 - 6, y: syTry - 11, w: tw + 12, h: 22 });
+      placed = true;
+      break;
+    }
+    if (!placed) continue;
+  }
+  ctx.textBaseline = 'alphabetic';
+  }
   // Particles in world space.
   world.particles.draw(ctx);
+  // Mission entry marker + loot ring, drawn AFTER the particles so
+  // TARGET and the $ amount sit on top of muzzle flashes and bursts
+  // instead of dissolving into them. The loot ring sits south-east of
+  // the door on the pavement — clear of the building's name plate above
+  // it, of the TARGET text, and of the police approach from the east.
+  if (declutter && world.mission) {
+    const m = world.mission;
+    const pulse = 1 + Math.sin(world.time * 5) * 0.12;
+    ctx.strokeStyle = '#ff6b81'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(m.entryX, m.entryY, 30 * pulse, 0, Math.PI * 2); ctx.stroke();
+    const tagText = m.phase === 'approach' ? 'ENTRY' : m.heist.sign || 'TARGET';
+    ctx.font = '900 15px system-ui'; ctx.textAlign = 'center';
+    const tagW = ctx.measureText(tagText).width;
+    ctx.fillStyle = 'rgba(8,10,18,0.82)';
+    ctx.fillRect(m.entryX - tagW / 2 - 7, m.entryY - 55, tagW + 14, 20);
+    ctx.fillStyle = '#ff6b81';
+    ctx.fillText(tagText, m.entryX, m.entryY - 40);
+    if (m.phase === 'grab') {
+      // No in-world alarm bar (the countdown lives in the HUD banner)
+      // and no stacked plates at the target.
+      const cx = m.building.doorX + 110, cy = m.building.doorY + 30;
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 8;
+      ctx.beginPath(); ctx.arc(cx, cy, 26, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#01cdfe';
+      ctx.beginPath(); ctx.arc(cx, cy, 26, -Math.PI / 2, -Math.PI / 2 + (m.lootGrabbed / m.lootTotal) * Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = '900 16px system-ui';
+      ctx.fillText('$' + Math.floor(m.lootGrabbed), cx, cy + 5);
+    }
+  }
   ctx.restore();
   // Dusk sun glow (warm, low in the sky) + vignette: the frame must read as
   // dusk/night at a glance, not as a flat tint.

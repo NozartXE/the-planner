@@ -32,6 +32,9 @@ export class Particles {
     this.spawn(x, y, { vx: 0, vy: 0, life, size: halfLen, color, shape: 'streak', angle, spin: 0 });
   }
   floatText(x, y, text, color = '#ffffff', size = 22) {
+    // One readout per text: a fresh HIT! replaces the previous one
+    // instead of stacking beside it (the old pile read as one smear).
+    this.floats = this.floats.filter((f) => f.text !== text);
     if (this.floats.length >= 5) this.floats.shift(); // hard cap: big, few
     this.floats.push({ x, y, text, color, size, life: 1.5 });
   }

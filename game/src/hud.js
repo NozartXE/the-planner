@@ -42,14 +42,22 @@ export function drawHud(ctx, world, W, H) {
   ctx.fillStyle = '#e9ecef'; ctx.font = '700 14px system-ui, sans-serif';
   ctx.fillText(save ? `REP ${save.rep}` : 'REP 0', 26, 60);
   ctx.restore();
-  // Health bar bottom-left.
+  // Health bar bottom-left. During the grab phase on foot, the panel is
+  // tall enough that the bar and the hint text never share a row: bar
+  // H-114..H-100, text baseline H-82 (glyphs H-91..H-82) — the old
+  // layout put the bar over the top of the ON FOOT hint text. Every
+  // other frame keeps the old layout, so the chase cover and the
+  // results screen are pixel-identical.
   ctx.save();
-  ctx.fillStyle = 'rgba(10,12,22,0.78)'; ctx.fillRect(14, H - 118, 218, 40);
-  ctx.fillStyle = '#3a3f4a'; ctx.fillRect(24, H - 104, 198, 14);
+  const grabFoot = !p.car && world.mission && world.mission.phase === 'grab';
+  const hp = grabFoot ? { y: H - 124, h: 50, barY: H - 114, textY: H - 82 }
+                      : { y: H - 118, h: 40, barY: H - 104, textY: H - 84 };
+  ctx.fillStyle = 'rgba(10,12,22,0.78)'; ctx.fillRect(14, hp.y, 218, hp.h);
+  ctx.fillStyle = '#3a3f4a'; ctx.fillRect(24, hp.barY, 198, 14);
   ctx.fillStyle = p.health > 30 ? '#01cdfe' : '#ff6b81';
-  ctx.fillRect(24, H - 104, 198 * Math.max(0, p.health) / 100, 14);
+  ctx.fillRect(24, hp.barY, 198 * Math.max(0, p.health) / 100, 14);
   ctx.fillStyle = '#fff'; ctx.font = '700 12px system-ui, sans-serif'; ctx.textAlign = 'left';
-  ctx.fillText(p.car ? `CAR ${Math.ceil(p.car.health)}/${p.car.maxHealth} · ${p.car.spec.name}` : 'ON FOOT — E: enter car · mouse: aim · click: fire', 24, H - 84);
+  ctx.fillText(p.car ? `CAR ${Math.ceil(p.car.health)}/${p.car.maxHealth} · ${p.car.spec.name}` : 'ON FOOT — E: enter car · mouse: aim · click: fire', 24, hp.textY);
   ctx.restore();
   // Bust meter.
   if (p.bust > 0.02) {

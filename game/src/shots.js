@@ -60,22 +60,35 @@ export function stageShot(name, game) {
     m.lootGrabbed = Math.round(m.lootTotal * 0.45);
     world.player.x = m.building.doorX + 18; world.player.y = m.building.doorY + 38;
     world.player.car = null;
+    // Park the getaway car west on AURUM WAY, out of the firing lane and
+    // clear of the player tag — in the old frame it sat behind the tag.
+    const gw = world.getawayCar;
+    if (gw) { gw.x = m.building.doorX - 160; gw.y = 600; gw.angle = 0; gw.speed = 0; }
     world.heat = 60; world.stars = 3;
-    // Crew beside the player, one carrying a bag.
-    world.crewMembers.forEach((c, i) => { c.x = world.player.x - 44 + i * 40; c.y = world.player.y + 34; c.hasBag = i === 0; });
-    // Bystander peds on the pavements around the target (existing sim
-    // entities, repositioned by staging) so the street reads populated.
+    // Crew spread WEST along the pavement in a loose line — clear of the
+    // player (≥90 px), clear of each other (≥55 px), bags never stacked:
+    // the fight reads as one player + one crew, not a pile of circles.
+    const crewSpots = [[-95, -8], [-150, 28], [-95, 64]];
+    world.crewMembers.forEach((c, i) => { const s = crewSpots[i] || [0, 0]; c.x = world.player.x + s[0]; c.y = world.player.y + s[1]; c.hasBag = i === 0; });
+    // Bystander peds on the two roads, far from the focal (≥180 px) and
+    // out of the firing lane — the street reads populated, the fight
+    // stays one readable action.
+    const pedSpots = [[-240, 200], [260, 200], [-280, 200], [-240, 600], [300, 600], [420, 600]];
     world.peds.slice(0, 6).forEach((pd, i) => {
-      pd.x = world.player.x - 150 + i * 58; pd.y = world.player.y + (i % 2 === 0 ? 92 : -86);
+      const s = pedSpots[i];
+      pd.x = world.player.x + s[0]; pd.y = s[1];
       pd.down = 0;
     });
-    // Police arriving at the street.
-    world.forcePolice(2, m.building.doorX + 210, m.building.doorY + 120);
+    // Police arriving at the street, EAST of the player in the open: one
+    // clear target for the one exchange, the second car behind it.
+    world.forcePolice(2, m.building.doorX + 250, m.building.doorY + 90);
     const cop = world.cars.find((c) => c.police);
     const aim = cop ? { x: cop.x, y: cop.y } : { x: world.player.x + 200, y: world.player.y };
-    // Fire the REAL sim at the nearest police car: shots, muzzle flashes,
-    // tracers, police return fire, fleeing pedestrians.
-    for (let i = 0; i < 80; i++) world.step(1 / 60, fakeInput([], [], { down: true }), aim);
+    // Fire the REAL sim at the nearest police car — one short exchange
+    // (36 steps ≈ 0.6 s, ~3 shots): no disabled-car burst, no stacked
+    // HIT! floats, the police return fire still to come as the frozen
+    // muzzle + tracer below.
+    for (let i = 0; i < 36; i++) world.step(1 / 60, fakeInput([], [], { down: true }), aim);
     // Freeze one fresh exchange on screen: the player's muzzle + tracer and
     // the nearest police car's return fire (the sim's zone-based rule).
     const p = world.player;
@@ -89,6 +102,14 @@ export function stageShot(name, game) {
       world.particles.muzzle(cop.x + Math.cos(pa) * 26, cop.y + Math.sin(pa) * 26, pa);
       world.particles.tracer((cop.x + p.x) / 2, (cop.y + p.y) / 2, pa, d / 2, '#ffb3c1', 0.14);
     }
+    // Searchlight pool off the focal: the heli keeps sweeping the street
+    // east of the fight, but its pool no longer washes over the player,
+    // the crew, or the loot readout — in the old frame the pool was the
+    // pale disc the player tag dissolved into.
+    world.heli.x = world.player.x + 430; world.heli.y = world.player.y + 10;
+    world.heli.lightX = world.player.x + 330; world.heli.lightY = world.player.y + 180;
+    world.heli.lightAngle = Math.atan2(world.heli.lightY - world.heli.y, world.heli.lightX - world.heli.x);
+    world.heli.lightOnPlayer = false;
     world.camera.x = world.player.x; world.camera.y = world.player.y;
     game.screen = 'play';
     return;
