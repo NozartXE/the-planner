@@ -1,61 +1,34 @@
-// Every tuning number and colour in one place. The playfield is a fixed 1280x720 logical area;
-// the renderer scales it to the window, so no rule below depends on the screen size.
-
-export const FIELD = { width: 1280, height: 720, groundY: 664 };
-
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
+// config.js — THE PLANNER: shared tuning constants for the whole game.
+export const VIEW_W = 1280;
+export const VIEW_H = 800;
 export const STEP = 1 / 60;
-
-export const PLAYER = {
-  width: 72,
-  height: 24,
-  speed: 560,
-  invulnerable: 1.5,
+export const MAX_STEPS_PER_FRAME = 5;
+export const WORLD_W = 3200;
+export const WORLD_H = 2400;
+export const BLOCK = 400;
+export const ROAD_W = 96;
+export const SIDEWALK = 18;
+export const RIVER_Y = 2080; // river occupies the south strip below this y
+export const PLAYER_SPEED = 150;
+export const PLAYER_RUN = 240;
+export const PLAYER_RADIUS = 13;
+export const CAR_LENGTH = 46;
+export const CAR_WIDTH = 24;
+export const HEAT_MAX = 100;
+export const HEAT_DECAY_PER_SEC = 1.7;
+export const BUST_TIME = 2.2;
+export const COLORS = {
+  road: '#3a3f4a', roadLine: '#f5d76e', sidewalk: '#9aa3ad', grass: '#3fae5a',
+  water: '#1e7fb8', sand: '#e8cf8f', player: '#ffd23f', police: '#2f6fed',
+  danger: '#ef476f', loot: '#06d6a0', gold: '#ffb703',
 };
-
-export const LIVES = 3;
-
-export const BLOCK = {
-  minWidth: 40,
-  maxWidth: 110,
-  height: 36,
-  speed: 240,
-  speedPerLevel: 30,
-  speedJitter: 90,
-  interval: 0.55,
-  intervalScale: 0.88,
-  minInterval: 0.14,
-  dodgePoints: 1,
+export const HEIST_IDS = ['casino-vault','bank-vault','jewelry-exchange','museum-gem','port-container','data-centre','armored-ambush','racetrack-strongroom'];
+export const SAVE_KEY = 'the-planner-save-v1';
+export const TIMES_OF_DAY = ['dawn', 'day', 'dusk', 'night'];
+// Per time-of-day: sky tint, traffic density, patrol multiplier, darkness.
+export const DAY_PHASES = {
+  dawn:  { sky: '#f2a65a', tint: 'rgba(242,140,60,0.10)', traffic: 0.7, patrols: 0.8, dark: 0.15, label: 'DAWN' },
+  day:   { sky: '#7ec8e3', tint: 'rgba(0,0,0,0)', traffic: 1.0, patrols: 1.0, dark: 0, label: 'DAY' },
+  dusk:  { sky: '#e76f51', tint: 'rgba(120,40,90,0.14)', traffic: 0.85, patrols: 1.0, dark: 0.3, label: 'DUSK' },
+  night: { sky: '#14213d', tint: 'rgba(5,10,40,0.38)', traffic: 0.45, patrols: 1.25, dark: 0.62, label: 'NIGHT' },
 };
-
-export const COIN = {
-  size: 24,
-  speed: 190,
-  speedPerLevel: 14,
-  interval: 1.4,
-  intervalJitter: 0.8,
-  points: 10,
-};
-
-/** Seconds of play per level, and the last level: speeds and spawn rates stop growing there. */
-export const LEVEL = { seconds: 12, max: 12 };
-
-/** How many falling things can exist at once; the pool is allocated once, at boot. */
-export const POOL_SIZE = 64;
-
-export const PALETTE = {
-  backdrop: '#11141b',
-  sky: '#1b1f2a',
-  ground: '#2a3040',
-  player: '#4fc3f7',
-  block: '#e5534b',
-  coin: '#f2c94c',
-  panel: '#252b38',
-  text: '#eef1f5',
-  muted: '#8b93a3',
-};
-
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-
-/** Where the best score is kept between visits (this browser only). */
-export const BEST_KEY = 'block-dodger.best';
