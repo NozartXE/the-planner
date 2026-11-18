@@ -1,6 +1,6 @@
 // render.js — camera, culled world drawing, the night-lighting pass (darkness, light holes, additive glows) and vignette.
 import { VIEW_W, VIEW_H, WORLD_SIZE, BLOCK_PITCH, ROAD_W, CAMERA_ZOOM, PALETTE } from './config.js';
-import { isRoadCoord } from './city.js';
+import { isRoadCoord, isOnRoad } from './city.js';
 import { drawCar } from './cars.js';
 import { drawFigure } from './people.js';
 import { clamp } from './rng.js';
@@ -12,6 +12,20 @@ function getLightCanvas() {
     lightCanvas.width = VIEW_W; lightCanvas.height = VIEW_H;
   } catch (e) { lightCanvas = null; }
   return lightCanvas;
+}
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return '255,255,255';
+  const n = parseInt(m[1], 16);
+  return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
+}
+function worldStreak(ctx, x, y, len, w, rgb, alpha) {
+  const jx = Math.sin(x * 12.9898 + y * 78.233) * 3;
+  const grad = ctx.createLinearGradient(0, y, 0, y + len);
+  grad.addColorStop(0, `rgba(${rgb},${alpha})`);
+  grad.addColorStop(1, `rgba(${rgb},0)`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(x - w / 2 + jx, y, w, len);
 }
 export function makeCamera() { return { x: 1880, y: 1880, zoom: CAMERA_ZOOM }; }
 export function updateCamera(cam, target, vx, vy, dt) {
@@ -70,6 +84,20 @@ function drawWorld(ctx, game, cam) {
     const bx0 = bx * BLOCK_PITCH + ROAD_W, by0 = by * BLOCK_PITCH + ROAD_W, s = BLOCK_PITCH - ROAD_W;
     if (bx0 + s < x0 || bx0 > x1 || by0 + s < y0 || by0 > y1) continue;
     ctx.strokeRect(bx0 - 4, by0 - 4, s + 8, s + 8);
+  }
+  // Skid marks left by hard cornering and PIT contact, under everything that follows.
+  game.fx.drawSkids(ctx);
+  // Wet-road reflections (static): lamp and neon streaks smeared down the asphalt,
+  // only where the streak actually falls on a road. Subtle by design.
+  for (const l of game.city.lamps) {
+    if (l.x < x0 || l.x > x1 || l.y < y0 || l.y > y1) continue;
+    if (isOnRoad(l.x, l.y + 30)) worldStreak(ctx, l.x, l.y, 54, 13, '255,190,100', 0.15);
+  }
+  for (const b of game.city.buildings) {
+    if (!b.neon) continue;
+    if (b.x + b.w < x0 || b.x > x1 || b.y + b.h < y0 || b.y > y1) continue;
+    const cx = b.x + b.w / 2, sy = b.y + b.h + 20;
+    if (isOnRoad(cx, sy + 21)) worldStreak(ctx, cx, sy, 42, 16, hexToRgb(b.neonColor), 0.10);
   }
   // Parks and trees.
   for (const p of game.city.parks) {
@@ -217,6 +245,7 @@ function drawLighting(ctx, game, cam) {
   const g = lc.getContext('2d');
   if (!g) return;
   const toScreen = (wx, wy) => ({ x: (wx - cam.x) * cam.zoom + VIEW_W / 2, y: (wy - cam.y) * cam.zoom + VIEW_H / 2 });
+  const toWorld = (sx, sy) => ({ x: (sx - VIEW_W / 2) / cam.zoom + cam.x, y: (sy - VIEW_H / 2) / cam.zoom + cam.y });
   g.globalCompositeOperation = 'source-over';
   g.clearRect(0, 0, VIEW_W, VIEW_H);
   g.fillStyle = 'rgba(6,8,18,0.60)';
@@ -263,6 +292,39 @@ function drawLighting(ctx, game, cam) {
     }
   }
   if (marker) glow(marker.x, marker.y, 52, marker.color === 'pickup' ? 'rgba(232,200,50,0.5)' : 'rgba(79,201,106,0.5)', 0.4 + Math.sin(game.time * 3.2) * 0.12);
+  // Wet-road reflections (dynamic): elongated glows stretched down-screen from lamps,
+  // headlights, taillights and sirens. Car streaks are gated to roads: the world point
+  // 26 screen units below the streak anchor must itself be on a road.
+  const streakGlow = (wx, wy, r, color, offY, scaleY) => {
+    const s = toScreen(wx, wy);
+    const cx = s.x, cy = s.y + (offY || 0);
+    const R = r * cam.zoom, sy2 = (scaleY || 3.4);
+    if (cx < -R || cx > VIEW_W + R || cy < -R * sy2 || cy > VIEW_H + R * sy2) return;
+    ctx.save();
+    ctx.translate(cx, cy); ctx.scale(1, sy2);
+    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
+    grad.addColorStop(0, color); grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = 1; ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  };
+  const streakOnRoad = (wx, wy) => {
+    const s = toScreen(wx, wy);
+    const w = toWorld(s.x, s.y + 26);
+    return isOnRoad(w.x, w.y);
+  };
+  for (const l of game.city.lamps) streakGlow(l.x, l.y, 15, 'rgba(255,190,100,0.10)', 20 * cam.zoom, 3.4);
+  for (const car of allCars) {
+    const fx2 = car.x + Math.cos(car.angle) * 24, fy2 = car.y + Math.sin(car.angle) * 24;
+    if (streakOnRoad(fx2, fy2)) streakGlow(fx2, fy2, 13, 'rgba(255,240,200,0.10)', 15 * cam.zoom, 3.4);
+    const rx2 = car.x - Math.cos(car.angle) * 24, ry2 = car.y - Math.sin(car.angle) * 24;
+    if (streakOnRoad(rx2, ry2)) streakGlow(rx2, ry2, 10, 'rgba(229,72,77,0.08)', 15 * cam.zoom, 3.4);
+  }
+  for (const cop of game.police.cops) {
+    if (cop.dead) continue;
+    const phase = Math.sin(game.time * 10 + cop.sirenPhase) > 0;
+    if (streakOnRoad(cop.x, cop.y)) streakGlow(cop.x, cop.y, 17, phase ? 'rgba(255,59,48,0.10)' : 'rgba(59,130,246,0.10)', 0, 3.6);
+  }
   ctx.restore();
   ctx.globalAlpha = 1;
   // Vignette.

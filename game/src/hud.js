@@ -135,6 +135,48 @@ export function drawTitle(ctx, game) {
   const s = game.saveData;
   ctx.fillText(s.missionsCompleted > 0 ? `Saved progress: $${Math.floor(s.money)} · ${s.missionsCompleted} jobs done · $${Math.floor(s.totalEarned)} earned` : 'No saved progress yet — your first night in Meridian.', VIEW_W / 2, 524);
 }
+export function drawSummary(ctx, game) {
+  const s = game.lastSummary || {
+    jobs: game.jobsThisChain || 0, chainEarned: Math.floor(game.chainEarned || 0),
+    money: Math.floor(game.money), totalEarned: Math.floor(game.totalEarned),
+    chains: game.chainsFinished || 0, bestEscapeMs: game.bestEscapeMs || 0,
+    carsStolen: game.carsStolen || 0, timesWasted: game.timesWasted || 0,
+  };
+  ctx.save();
+  ctx.fillStyle = 'rgba(5,6,12,0.55)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  const px = VIEW_W / 2 - 300, py = VIEW_H / 2 - 220;
+  panel(ctx, px, py, 600, 440);
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#f2c14e'; ctx.font = '700 30px system-ui, sans-serif';
+  ctx.fillText('CHAIN COMPLETE', VIEW_W / 2, py + 30);
+  ctx.fillStyle = PALETTE.hudText; ctx.font = '15px system-ui, sans-serif';
+  ctx.fillText('Dario Venn — all five jobs delivered.', VIEW_W / 2, py + 72);
+  const esc = s.bestEscapeMs > 0
+    ? `${Math.floor(s.bestEscapeMs / 60000)}:${String(Math.floor((s.bestEscapeMs % 60000) / 1000)).padStart(2, '0')}`
+    : '—';
+  const rows = [
+    ['JOBS DONE', `${s.jobs} / 5`],
+    ['CHAIN EARNINGS', '$' + Math.floor(s.chainEarned).toLocaleString('en-US')],
+    ['CASH', '$' + Math.floor(s.money).toLocaleString('en-US')],
+    ['LIFETIME EARNED', '$' + Math.floor(s.totalEarned).toLocaleString('en-US')],
+    ['BEST ESCAPE', esc],
+    ['CARS STOLEN', String(s.carsStolen)],
+    ['TIMES WASTED', String(s.timesWasted)],
+    ['CHAINS FINISHED', String(s.chains)],
+  ];
+  rows.forEach((row, i) => {
+    const y = py + 122 + i * 34;
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 13px system-ui, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(row[0], px + 36, y + 3);
+    ctx.fillStyle = PALETTE.hudText; ctx.font = '700 17px system-ui, sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(row[1], px + 600 - 36, y);
+  });
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#f2c14e'; ctx.font = '15px system-ui, sans-serif';
+  ctx.fillText('The chain restarts at +25% pay per loop — press ENTER to keep driving', VIEW_W / 2, py + 440 - 40);
+  ctx.restore();
+}
 export function drawWasted(ctx, game) {
   ctx.fillStyle = 'rgba(20,4,6,0.55)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.textAlign = 'center'; ctx.fillStyle = '#e5484d';

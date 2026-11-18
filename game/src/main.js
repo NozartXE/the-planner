@@ -12,7 +12,7 @@ import { Police } from './police.js';
 import { Fx } from './fx.js';
 import { makeCar } from './cars.js';
 import { makeCamera, updateCamera, renderGame } from './render.js';
-import { drawHud, drawTitle, drawWasted, drawPause } from './hud.js';
+import { drawHud, drawTitle, drawWasted, drawPause, drawSummary } from './hud.js';
 import { applyShot } from './shots.js';
 
 const statusEl = typeof document !== 'undefined' ? document.getElementById('status') : null;
@@ -35,6 +35,10 @@ export function createGame() {
     missionsCompleted: saveData.missionsCompleted,
     totalEarned: saveData.totalEarned,
     chainsFinished: saveData.chainsFinished || 0,
+    bestEscapeMs: saveData.bestEscapeMs || 0,
+    timesWasted: saveData.timesWasted || 0,
+    carsStolen: saveData.carsStolen || 0,
+    chainEarned: 0, jobsThisChain: 0, lastSummary: null, _heatStart: 0, _chainJustDone: false,
     traffic: [], peds: [], bullets: [], toasts: [],
     police: new Police(), missions: new Missions(), fx: new Fx(rng),
     camera: makeCamera(), input: new Input(),
@@ -48,7 +52,17 @@ export function createGame() {
   game.camera.x = player.x; game.camera.y = player.y;
   game.toast = (text) => { game.toasts.push({ text, until: game.nowMs + 3800 }); if (game.toasts.length > 4) game.toasts.shift(); };
   game.crime = (level) => { game.police.crime(level, game.nowMs, game); };
-  game.persist = () => writeSave({ money: Math.floor(game.money), missionsCompleted: game.missionsCompleted, totalEarned: Math.floor(game.totalEarned), chainsFinished: game.chainsFinished });
+  game.persist = () => writeSave({ money: Math.floor(game.money), missionsCompleted: game.missionsCompleted, totalEarned: Math.floor(game.totalEarned), chainsFinished: game.chainsFinished, bestEscapeMs: game.bestEscapeMs, timesWasted: game.timesWasted, carsStolen: game.carsStolen });
+  game.showSummary = () => {
+    game.lastSummary = {
+      jobs: game.jobsThisChain, chainEarned: Math.floor(game.chainEarned),
+      money: Math.floor(game.money), totalEarned: Math.floor(game.totalEarned),
+      chains: game.chainsFinished, bestEscapeMs: game.bestEscapeMs,
+      carsStolen: game.carsStolen, timesWasted: game.timesWasted,
+      nextPayBonus: Math.round(game.missions.loop * 25),
+    };
+    game.screen = 'summary';
+  };
   return game;
 }
 
@@ -89,6 +103,7 @@ function tryEnterExit(game) {
   if (!car) return;
   const wasMoving = Math.abs(car.speed) > 24;
   enterCar(game, car);
+  game.carsStolen += 1;
   if (car.isCop) game.crime(3);
   else if (wasMoving) game.crime(1);
   if (game.missions.markedCar && car === game.missions.markedCar) game.toast('That is the sedan Venn wants — drive!');
@@ -105,8 +120,21 @@ function missionCtx(game) {
     addMoney: (n) => { game.money += n; game.totalEarned += n; },
     setWanted: (n) => game.police.setStars(Math.max(game.police.stars, n), game.nowMs),
     toast: (t) => game.toast(t), sfx,
-    onMissionComplete: () => { game.missionsCompleted += 1; game.persist(); },
-    onChainDone: () => { game.chainsFinished += 1; game.toast('Chain complete — Venn has more work, at better pay.'); game.persist(); },
+    onMissionComplete: (def, pay) => {
+      game.missionsCompleted += 1;
+      game.jobsThisChain += 1;
+      game.chainEarned += pay || 0;
+      game.persist();
+      // missions.js calls onChainDone BEFORE onMissionComplete for the final job,
+      // so the summary is shown here, once the last job's pay is counted.
+      if (game._chainJustDone) {
+        game._chainJustDone = false;
+        game.showSummary();
+        game.chainEarned = 0; game.jobsThisChain = 0;
+        game.persist();
+      }
+    },
+    onChainDone: () => { game.chainsFinished += 1; game._chainJustDone = true; game.persist(); },
   };
 }
 function startNextMissionIfIdle(game, dt) {
@@ -119,6 +147,7 @@ function startNextMissionIfIdle(game, dt) {
   // The briefing itself is shown by the HUD briefing panel; no duplicate toast.
 }
 function killPlayer(game) {
+  game.timesWasted += 1;
   game.screen = 'wasted';
   game.wastedUntil = game.nowMs + 2600;
   sfx.sting();
@@ -281,6 +310,18 @@ export function updateGame(game, dt) {
     input.endFrame();
     return;
   }
+  if (game.screen === 'summary') {
+    updateTraffic(game.rng, game.traffic, dt, game.player, allCars(game));
+    updatePedestrians(game.peds, dt, game.nowMs, null);
+    game.fx.update(dt);
+    updateCamera(game.camera, game.player, 0, 0, dt);
+    if (input.wasPressed('Enter')) {
+      game.screen = 'play';
+      game.toast('Venn: chain ' + (game.missions.loop + 1) + ' pays +25% a job.');
+    }
+    input.endFrame();
+    return;
+  }
   // Play.
   game.playTime += dt;
   if (input.wasPressed('KeyP')) { game.screen = 'paused'; game.help = false; input.endFrame(); return; }
@@ -291,6 +332,12 @@ export function updateGame(game, dt) {
   updateBullets(game, dt);
   updateTraffic(game.rng, game.traffic, dt, game.player, allCars(game));
   game.police.update(game.rng, dt, game.nowMs, game.player, game.traffic, game.fx);
+  if (game.police.stars >= 2 && !game._heatStart) game._heatStart = game.nowMs;
+  if (game.police.stars === 0 && game._heatStart) {
+    const esc = game.nowMs - game._heatStart;
+    if (!game.bestEscapeMs || esc < game.bestEscapeMs) { game.bestEscapeMs = esc; game.persist(); }
+    game._heatStart = 0;
+  }
   if (game.player.hp <= 0) { killPlayer(game); input.endFrame(); return; }
   const danger = [];
   if (game.lastShotAt && game.nowMs - game.lastShotAt < 500) danger.push({ x: game.player.x, y: game.player.y, r: 130 });
@@ -330,6 +377,7 @@ function boot() {
       ctx.clearRect(0, 0, VIEW_W, VIEW_H);
       renderGame(ctx, game);
       if (game.screen === 'play' || game.screen === 'paused') drawHud(ctx, game);
+      if (game.screen === 'summary') drawSummary(ctx, game);
       if (game.screen === 'title') { drawHudTitleSafe(ctx, game); }
       if (game.screen === 'wasted') drawWasted(ctx, game);
       if (game.screen === 'paused') drawPause(ctx, game, game.help);

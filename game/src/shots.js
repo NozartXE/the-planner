@@ -1,4 +1,4 @@
-// shots.js — deterministic staging for screenshots: ?shot=title|chase|mission|roam runs the real
+// shots.js — deterministic staging for screenshots: ?shot=title|chase|mission|results runs the real
 // simulation first, then sets one explicit, coherent mid-chain state per shot and freezes it.
 // Everything that appears on screen (money, stars, mission, speeds, crowds, cops, effects) is set
 // AFTER the run steps, so a re-capture is byte-identical and nothing drifts between frames.
@@ -73,29 +73,39 @@ export function applyShot(game, name, step) {
     stagePed(game, 3, 958, 1058, 0, 2.2, 3);
     stagePed(game, 4, 1096, 1040, Math.PI / 2, 4.1, 1);
     game.bullets = []; game.fx.particles = []; game.toasts = [];
+    game.camera.zoom = 1.05;
     finish(game);
     return true;
   }
   if (name === 'chase') {
-    // 5-star pursuit east along the Hotel Aurelia avenue (Old Town): seven interceptors
-    // converging, traffic scattering, sidewalks busy. Jobs 1–2 are done ($1,350) and the
-    // current job is 3, "Front Page". Displayed speed: round(225 * 0.62) = 140 km/h.
+    // 5-star pursuit east along the Hotel Aurelia avenue (Old Town), frozen at the PIT
+    // contact moment: an interceptor is on the hero's rear-left quarter, sparks and tyre
+    // smoke at the contact, skid arcs behind both cars, a second cop cutting in ahead.
+    // Jobs 1–2 are done ($1,350) and the current job is 3, "Front Page".
+    // Displayed speed: round(225 * 0.62) = 140 km/h.
     game.screen = 'play';
     run(150);
     game.screen = 'play';
-    putPlayerInCar(game, game.traffic[0], 1100, 1477, 0, 225, { kind: 'coupe', color: '#7a4a3a', hp: 84, maxHp: 90 });
-    setCar(game.traffic[1], 1315, 1440, 0.32, 60);
-    setCar(game.traffic[2], 1610, 1477, 0, 95);
-    setCar(game.traffic[3], 700, 1435, Math.PI, 80);
-    setCar(game.traffic[4], 1512, 1524, 0.85, 0);
+    putPlayerInCar(game, game.traffic[0], 1100, 1477, 0.10, 225, { kind: 'coupe', color: '#7a4a3a', hp: 31, maxHp: 90 });
+    const hero = game.traffic[0];
+    const rot = (a, x, y) => ({ x: x * Math.cos(a) - y * Math.sin(a), y: x * Math.sin(a) + y * Math.cos(a) });
+    const at = (car, x, y) => { const r = rot(car.angle, x, y); return { x: car.x + r.x, y: car.y + r.y }; };
+    // Traffic: one car swerving just ahead-right, one braking further ahead at an angle.
+    setCar(game.traffic[1], hero.x + 215, hero.y + 47, 0.85, 0);
+    setCar(game.traffic[2], hero.x + 430, hero.y, 0.30, 40);
     game.police.cops = [];
-    addCop(game, 900, 1477, 0);
-    addCop(game, 765, 1477, 0);
-    addCop(game, 835, 1435, 0.06);
-    addCop(game, 1085, 1433, 0.10);
-    addCop(game, 1380, 1477, 0.5);
-    addCop(game, 1465, 1438, -0.35);
-    addCop(game, 625, 1477, 0);
+    // PIT cop: nose on the hero's rear-left quarter, computed from the hero transform.
+    const contact = at(hero, -14, -8);
+    const pitAngle = 0.55;
+    const pit = addCop(game, 0, 0, pitAngle);
+    pit.x = contact.x - Math.cos(pitAngle) * 20; pit.y = contact.y - Math.sin(pitAngle) * 20;
+    pit.angle = pitAngle; pit.speed = 150;
+    // Second cop cutting in ahead-right.
+    const cutter = addCop(game, hero.x + 300, hero.y - 38, -0.38); cutter.speed = 150;
+    // Remaining cops staggered behind at varied angles and offsets — no parade line.
+    for (const [dx, dy, a] of [[-200, -6, 0.04], [-330, 10, -0.05], [-95, 42, 0.22], [-430, -14, 0.02]]) {
+      const c = addCop(game, hero.x + dx, hero.y + dy, a); c.speed = 150;
+    }
     stagePed(game, 0, 730, 1406, 0, 0.7, 0);
     stagePed(game, 1, 990, 1406, Math.PI, 2.4, 1);
     stagePed(game, 2, 1440, 1406, 0, 4.0, 2);
@@ -106,7 +116,42 @@ export function applyShot(game, name, step) {
     game.police.setStars(5, game.nowMs);
     setMission(game, 2, 'pickup', 78);
     game.player.hp = 100;
-    game.bullets = []; game.fx.particles = []; game.toasts = [];
+    game.bullets = []; game.toasts = [];
+    // Skids: two curved-feeling tracks behind the hero (three short segments per side,
+    // angle opening as they trail back) and one pair behind the PIT cop.
+    game.fx.skids = [];
+    const skidAngles = [0.02, 0.08, 0.14];
+    for (const side of [-8, 8]) {
+      for (let i = 0; i < 3; i++) {
+        const p = at(hero, -14 - 6 - i * 16, side);
+        game.fx.skid(p.x, p.y, skidAngles[i], 18, 3.2);
+      }
+    }
+    for (const side of [-8, 8]) {
+      const p = at(pit, -20, side);
+      game.fx.skid(p.x, p.y, pitAngle, 18, 3.2);
+    }
+    // Frozen effects: sparks at the contact point, smoke at the hero's rear tyres and
+    // the PIT cop's front tyres.
+    const heroTyreL = at(hero, -14, -8), heroTyreR = at(hero, -14, 8);
+    const pitTyreL = at(pit, 15, -7), pitTyreR = at(pit, 15, 7);
+    const sparkCols = ['#ffd76a', '#f2c14e'];
+    const sparkSizes = [2, 2.6, 3.4, 2.4, 3.0];
+    const sparkLife = [0.7, 0.85, 1, 0.8, 0.9];
+    game.fx.particles = [];
+    for (let i = 0; i < 5; i++) {
+      game.fx.particles.push({
+        x: contact.x + (i - 2) * 1.6, y: contact.y + ((i % 3) - 1) * 1.6,
+        vx: 0, vy: 0, life: 0.5 * sparkLife[i], maxLife: 0.5,
+        color: sparkCols[i % 2], size: sparkSizes[i], drag: 0,
+      });
+    }
+    const smokePts = [heroTyreL, heroTyreR, pitTyreL, pitTyreR];
+    const smokeSizes = [5, 6.5, 8, 5.5];
+    smokePts.forEach((p, i) => {
+      game.fx.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.75, maxLife: 1.0, color: 'rgba(120,120,125,0.55)', size: smokeSizes[i], drag: 0 });
+    });
+    game.camera.zoom = 1.55;
     finish(game);
     return true;
   }
@@ -152,37 +197,50 @@ export function applyShot(game, name, step) {
       { x: 2482, y: 982, vx: 0, vy: 0, life: 0.9, maxLife: 0.9, color: 'rgba(120,120,125,0.5)', size: 5.5, drag: 0 },
     ];
     game.toasts = [];
+    game.camera.zoom = 1.5;
     // Camera framed north-west of the player so the Hotel Aurelia plate stays out of frame
-    // instead of hiding behind the minimap.
-    finish(game, 2200, 900);
+    // instead of hiding behind the minimap. At zoom 1.5 the frame sits closer on the
+    // player than the old 0.92 framing, so the firefight stays the frame's subject.
+    finish(game, 2260, 950);
     return true;
   }
-  if (name === 'roam') {
-    // Calm post-job frame at Port Meridian (industrial SW): job 4 has just paid out,
-    // the money is the highest of the set ($3,450), heat is nearly gone and the player
-    // rolls east in a van — a different car at a different speed (round(137*0.62) = 85).
+  if (name === 'results') {
+    // End-of-chain outcome screen at Port Meridian: job 5 ("Heavy Metal") has just been
+    // delivered in the armored sedan, the whole chain is done and the summary panel is
+    // up over the live port. Money story: $250 start + 400 + 700 + 900 + 1,200 + 2,000
+    // = $5,450 cash, $5,200 earned on this chain.
     game.screen = 'play';
     run(150);
     game.screen = 'play';
-    putPlayerInCar(game, game.traffic[5], 700, 3357, 0, 137, { kind: 'van', color: '#5c6068', hp: 120, maxHp: 130 });
-    setCar(game.traffic[6], 1150, 3357, 0, 80);
-    setCar(game.traffic[7], 1052, 3315, Math.PI, 75);
-    setCar(game.traffic[8], 495, 3048, Math.PI / 2, 70);
+    putPlayerInCar(game, game.traffic[5], 700, 3357, 0, 0, { kind: 'armored', color: '#3f444c', hp: 150, maxHp: 220 });
+    game.police.setStars(0, game.nowMs);
     game.police.cops = [];
     addCop(game, 330, 3315, Math.PI);
     stagePed(game, 0, 620, 3386, 0, 1.2, 1);
     stagePed(game, 1, 900, 3386, Math.PI, 3.8, 2);
     stagePed(game, 2, 760, 3286, 0, 5.6, 0);
     stagePed(game, 3, 1080, 3286, Math.PI, 2.0, 3);
-    game.money = 3450;
-    game.police.setStars(1, game.nowMs);
-    game.missions.index = 4; game.missions.active = false; game.missions.stage = 'idle';
+    game.money = 5450;
+    game.totalEarned = 5200;
+    game.missionsCompleted = 5;
+    game.chainsFinished = 1;
+    game.jobsThisChain = 5;
+    game.chainEarned = 5200;
+    game.bestEscapeMs = 41000;
+    game.carsStolen = 7;
+    game.timesWasted = 1;
+    game.missions.index = 0; game.missions.loop = 1;
+    game.missions.active = false; game.missions.stage = 'idle';
     game.missions.briefUntil = 0; game.missions.lastBrief = '';
     game.player.hp = 100;
-    game.bullets = []; game.fx.particles = [];
-    game.toasts = [{ text: 'Job done: Two Drops — $1,200', until: game.nowMs + 3800 }];
-    // Camera framed a little south so the South Depot plate stays out of the top edge.
-    finish(game, 700, 3420);
+    game.bullets = []; game.fx.particles = []; game.fx.skids = [];
+    game.showSummary();
+    game.toasts = []; game.bullets = [];
+    game.camera.zoom = 1.3;
+    // Camera framed south-east of the delivery point: the South Depot plate stays out
+    // of the top edge and the Port Meridian anchor falls outside the visible rect, so
+    // its plate is skipped rather than half-hidden behind the summary panel.
+    finish(game, 1020, 3440);
     return true;
   }
   return false;

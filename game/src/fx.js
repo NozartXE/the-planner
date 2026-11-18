@@ -1,7 +1,16 @@
 // fx.js — particles (sparks, smoke, muzzle flash, explosion, debris) and screen shake.
 import { clamp } from './rng.js';
 export class Fx {
-  constructor(rng) { this.particles = []; this.shake = 0; this.rng = rng; }
+  constructor(rng) { this.particles = []; this.skids = []; this.shake = 0; this.rng = rng; }
+  skid(x, y, angle, len, w) { this.skids.push({ x, y, angle, len, w }); }
+  drawSkids(ctx) {
+    for (const s of this.skids) {
+      ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.angle);
+      ctx.fillStyle = 'rgba(8,8,10,0.42)';
+      ctx.fillRect(-s.len / 2, -s.w / 2, s.len, s.w);
+      ctx.restore();
+    }
+  }
   burst(x, y, n, color, speed, life, size) {
     for (let i = 0; i < n; i++) {
       const a = this.rng.range(0, Math.PI * 2);
