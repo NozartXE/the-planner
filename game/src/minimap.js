@@ -38,7 +38,7 @@ export function drawMinimap(ctx, world, x, y) {
   // Crew.
   for (const c of world.crewMembers) blip(c.x, c.y, c.def.color, 3);
   // Police (always with scanner gear, else within range).
-  const showAll = world.plan && world.plan.gear.includes('scanner');
+  const showAll = world.plan && world.plan.gear && world.plan.gear.includes('scanner');
   const p = world.player;
   for (const car of world.cars) {
     if (!car.police || car.disabled) continue;

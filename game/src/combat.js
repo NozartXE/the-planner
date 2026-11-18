@@ -69,7 +69,7 @@ export function stepCombat(world, dt, aim, firing) {
           world.particles.muzzle(shooter.x + Math.cos(pa) * 26, shooter.y + Math.sin(pa) * 26, pa);
           world.particles.tracer((shooter.x + p.x) / 2, (shooter.y + p.y) / 2, pa, sd / 2, '#ffb3c1', 0.14);
         }
-        const dmg = world.plan && world.plan.gear.includes('vests') ? 6 : 9;
+        const dmg = world.plan && world.plan.gear && world.plan.gear.includes('vests') ? 6 : 9;
         p.health -= dmg;
         world.particles.burst(p.x, p.y, 5, '#ef476f', 120, 0.4, 4);
         world.spawnFloat(p.x, p.y - 30, 'HIT!', '#ef476f', 18);

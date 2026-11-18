@@ -8,6 +8,7 @@ import { createWorld } from './world.js';
 import { loadSave, storeSave, recordRun } from './save.js';
 import { PlanningBoard } from './planning.js';
 import { drawWorld, computeCamera } from './render.js';
+import { drawChaseView } from './chaseview.js';
 import { drawHud } from './hud.js';
 import { drawTitle, drawPlanning, drawResults, drawPause, drawHelp, drawGameOver } from './render-ui.js';
 import { stageShot } from './shots.js';
@@ -144,10 +145,16 @@ function draw() {
   game.rects = [];
   if (game.screen === 'title') { game.rects = drawTitle(ctx, VIEW_W, VIEW_H, save, world.time); return; }
   if (game.screen === 'plan') { game.rects = drawPlanning(ctx, VIEW_W, VIEW_H, game.board, world); return; }
-  // Playfield.
-  const cam = computeCamera(world);
-  if (!save.settings.shake) { cam.x = Math.max(0, Math.min(3200 - VIEW_W, world.camera.x - VIEW_W / 2)); cam.y = Math.max(0, Math.min(2400 - VIEW_H, world.camera.y - VIEW_H / 2)); }
-  drawWorld(ctx, world, cam);
+  // Playfield. While the player is driving, the raycast chase view renders
+  // the world from behind the car; on foot the top-down renderer is used
+  // exactly as before. The HUD draws over either view.
+  if (game.screen === 'play' && world.player && world.player.car) {
+    drawChaseView(ctx, world);
+  } else {
+    const cam = computeCamera(world);
+    if (!save.settings.shake) { cam.x = Math.max(0, Math.min(3200 - VIEW_W, world.camera.x - VIEW_W / 2)); cam.y = Math.max(0, Math.min(2400 - VIEW_H, world.camera.y - VIEW_H / 2)); }
+    drawWorld(ctx, world, cam);
+  }
   drawHud(ctx, world, VIEW_W, VIEW_H);
   if (game.screen === 'results') { game.rects = drawResults(ctx, VIEW_W, VIEW_H, world); return; }
   if (game.screen === 'gameover') { game.rects = drawGameOver(ctx, VIEW_W, VIEW_H, world); return; }
