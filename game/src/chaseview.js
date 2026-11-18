@@ -93,6 +93,16 @@ function shadeOf(hex, f) {
   const c = rgb(hex);
   return `rgb(${Math.round(clamp(c[0] * f, 0, 255))},${Math.round(clamp(c[1] * f, 0, 255))},${Math.round(clamp(c[2] * f, 0, 255))})`;
 }
+// LIGHT RULE — one light direction governs every actor in this module:
+// light comes from ahead-left of the camera, so top decks are lightest
+// (x1.28), main faces carry the mid gradient (1.14 -> 0.94 -> 0.60) and
+// side faces are darkest (x0.58). carSprite, pedSprite, heroSprite and
+// heliSprite all follow it, so hero, traffic and air support share one
+// sun. Contact shadows are NOT baked into sprites: they are projected
+// onto the ground plane by drawGroundShadow inside drawChaseView, so a
+// shadow always sits on the road under its actor, in the same
+// perspective as everything else.
+
 // Three-quarter view of a car (rear or front face + top deck + one shaded
 // side face with its own glass and wheel), so actors read as solid volumes
 // from a chase camera instead of flat side-profile cutouts. The billboard
@@ -104,8 +114,6 @@ function carSprite(color, police, front, disabled) {
   c = makeCanvas(150, 88);
   const g = c.getContext('2d');
   const body = disabled ? '#555b66' : color;
-  g.fillStyle = 'rgba(0,0,0,0.38)';
-  g.beginPath(); g.ellipse(74, 80, 70, 7, 0, 0, Math.PI * 2); g.fill();
   // Side face (right, darker) with glass band and a real wheel.
   g.fillStyle = shadeOf(body, 0.58);
   g.beginPath(); g.moveTo(92, 38); g.lineTo(140, 47); g.lineTo(140, 72); g.lineTo(92, 72); g.closePath(); g.fill();
@@ -160,8 +168,6 @@ function pedSprite(shirt) {
   if (c) return c;
   c = makeCanvas(44, 110);
   const g = c.getContext('2d');
-  g.fillStyle = 'rgba(0,0,0,0.3)';
-  g.beginPath(); g.ellipse(22, 105, 15, 4, 0, 0, Math.PI * 2); g.fill();
   g.fillStyle = '#1d2026'; g.fillRect(11, 60, 8, 40); // far leg
   g.fillStyle = '#2b2f38'; g.fillRect(24, 60, 8, 43); // near leg, longer stride
   g.fillStyle = '#111'; g.fillRect(9, 98, 11, 5); g.fillRect(23, 101, 11, 5); // shoes
@@ -254,69 +260,89 @@ function parkedCars() {
   parkedCache = out;
   return out;
 }
-// In-world helicopter: a volumetric body — fuselage with cockpit glass and
-// a cheatline stripe (no text label), tail boom and fin with a tail rotor,
-// landing skids on struts, and a translucent rotor-blur disc on the mast.
+// In-world helicopter as a front three-quarter VOLUME, seen from the
+// chase camera: a lit top deck, a mid-gradient nose face, one darker
+// flank, cockpit glass wrapping the nose corner, and a tail boom that
+// recedes with a perspective taper to the fin and tail rotor. Landing
+// skids hang on struts under the belly; the main rotor is a wide flat
+// translucent disc on the mast. NO baked ground shadow — the shadow is
+// projected onto the ground plane by drawGroundShadow in drawChaseView,
+// offset away from the sun, while the body flies at HELI_ALT. The flank
+// carries a plain blue cheatline (no text label).
 function heliSprite() {
   let c = spriteCache.get('heli');
   if (c) return c;
   c = makeCanvas(260, 120);
   const g = c.getContext('2d');
-  // Ground shadow is implicit in the searchlight pool; a soft drop shadow
-  // under the skids seats the body when it crosses rooftops.
-  g.fillStyle = 'rgba(0,0,0,0.20)';
-  g.beginPath(); g.ellipse(96, 112, 74, 6, 0, 0, Math.PI * 2); g.fill();
-  // Tail boom, tapering back from the fuselage, plus the tail fin.
-  const boom = g.createLinearGradient(0, 40, 0, 64);
-  boom.addColorStop(0, '#3d4454'); boom.addColorStop(1, '#22262e');
+  // Tail boom receding from the fuselage flank with a perspective taper
+  // (thick at the root, thin at the fin), plus the tail fin.
+  const boom = g.createLinearGradient(0, 46, 0, 66);
+  boom.addColorStop(0, '#39414f'); boom.addColorStop(1, '#20242c');
   g.fillStyle = boom;
-  g.beginPath(); g.moveTo(138, 42); g.lineTo(244, 50); g.lineTo(244, 58); g.lineTo(138, 60); g.closePath(); g.fill();
-  g.fillStyle = '#2b2f38';
-  g.beginPath(); g.moveTo(238, 26); g.lineTo(252, 26); g.lineTo(252, 64); g.lineTo(238, 58); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(140, 48); g.lineTo(243, 56); g.lineTo(243, 62); g.lineTo(140, 68); g.closePath(); g.fill();
+  g.fillStyle = '#272c36';
+  g.beginPath(); g.moveTo(236, 32); g.lineTo(251, 34); g.lineTo(250, 66); g.lineTo(236, 62); g.closePath(); g.fill();
   // Tail rotor (blurred vertical disc) + red nav light on the fin.
   g.fillStyle = 'rgba(190,205,220,0.45)';
-  g.beginPath(); g.ellipse(247, 42, 3.5, 15, 0, 0, Math.PI * 2); g.fill();
-  g.fillStyle = '#ff3355'; g.beginPath(); g.arc(245, 24, 3.5, 0, Math.PI * 2); g.fill();
-  // Far skid (dimmer, offset up) then the near skid on its struts.
+  g.beginPath(); g.ellipse(246, 48, 3.5, 13, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#ff3355'; g.beginPath(); g.arc(244, 30, 3.5, 0, Math.PI * 2); g.fill();
+  // Far skid (dimmer, offset up) behind the belly.
   g.strokeStyle = 'rgba(16,18,22,0.55)'; g.lineWidth = 4; g.lineCap = 'round';
-  g.beginPath(); g.moveTo(40, 96); g.lineTo(168, 96); g.stroke();
-  g.beginPath(); g.moveTo(56, 80); g.lineTo(50, 96); g.moveTo(140, 80); g.lineTo(146, 96); g.stroke();
-  // Fuselage: rounded body with a lit top and a dark belly.
-  const bodyGrad = g.createLinearGradient(0, 28, 0, 86);
-  bodyGrad.addColorStop(0, '#49536a'); bodyGrad.addColorStop(0.55, '#2e3442'); bodyGrad.addColorStop(1, '#191d26');
+  g.beginPath(); g.moveTo(46, 97); g.lineTo(160, 97); g.stroke();
+  g.beginPath(); g.moveTo(62, 82); g.lineTo(56, 97); g.moveTo(138, 82); g.lineTo(144, 97); g.stroke();
+  // Flank: the shaded side face (darkest, x0.58 of the deck tone),
+  // drawn first so the nose face overlaps its front edge.
+  g.fillStyle = '#232833';
+  g.beginPath(); g.moveTo(100, 38); g.lineTo(154, 46); g.lineTo(154, 80); g.lineTo(100, 86); g.closePath(); g.fill();
+  // Door seam on the flank + the blue cheatline wrapping face and flank.
+  g.strokeStyle = 'rgba(210,222,235,0.25)'; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(112, 44); g.lineTo(112, 80); g.stroke();
+  g.fillStyle = 'rgba(238,241,245,0.9)';
+  g.beginPath(); g.moveTo(100, 62); g.lineTo(154, 68); g.lineTo(154, 71); g.lineTo(100, 65); g.closePath(); g.fill();
+  g.fillStyle = 'rgba(51,136,255,0.85)';
+  g.beginPath(); g.moveTo(100, 65); g.lineTo(154, 71); g.lineTo(154, 76); g.lineTo(100, 70); g.closePath(); g.fill();
+  // Nose / main face: mid gradient, lit at the top, dark at the belly.
+  // The face is deliberately narrower than the flank run behind it, so
+  // the body reads as a front three-quarter volume, not a side profile.
+  const bodyGrad = g.createLinearGradient(0, 30, 0, 88);
+  bodyGrad.addColorStop(0, '#4d5870'); bodyGrad.addColorStop(0.55, '#2e3442'); bodyGrad.addColorStop(1, '#191d26');
   g.fillStyle = bodyGrad;
-  g.beginPath(); g.roundRect(24, 30, 132, 54, 24); g.fill();
+  g.beginPath(); g.roundRect(22, 32, 82, 54, 22); g.fill();
+  // Top deck: the lightest plane (x1.28), sloping from the mast back
+  // over the cabin toward the flank.
+  g.fillStyle = '#5f6d89';
+  g.beginPath(); g.moveTo(34, 36); g.lineTo(52, 24); g.lineTo(118, 24); g.lineTo(134, 38); g.lineTo(106, 41); g.lineTo(52, 40); g.closePath(); g.fill();
   // Engine deck + exhaust on top of the fuselage.
-  g.fillStyle = '#22262e'; g.beginPath(); g.roundRect(104, 22, 40, 12, 5); g.fill();
-  g.fillStyle = '#12151b'; g.fillRect(140, 25, 10, 6);
-  // Cockpit glass: two panes with a sky highlight, wrapped at the nose.
+  g.fillStyle = '#22262e'; g.beginPath(); g.roundRect(98, 16, 38, 11, 5); g.fill();
+  g.fillStyle = '#12151b'; g.fillRect(132, 19, 9, 5);
+  // Cockpit glass wrapping the nose corner: a front pane on the nose
+  // face and a second pane turning the corner onto the flank, both with
+  // the same sky highlight as the car glass.
   g.fillStyle = '#9fd8ef';
-  g.beginPath(); g.roundRect(32, 38, 42, 30, 12); g.fill();
+  g.beginPath(); g.roundRect(29, 40, 38, 29, 11); g.fill();
   g.fillStyle = '#7cc3e4';
-  g.beginPath(); g.roundRect(78, 38, 30, 28, 9); g.fill();
-  g.fillStyle = 'rgba(230,246,255,0.75)'; g.fillRect(38, 41, 16, 6); g.fillRect(82, 41, 11, 5);
-  // Door seam + a plain blue cheatline stripe along the flank (no lettering).
-  g.strokeStyle = 'rgba(210,222,235,0.28)'; g.lineWidth = 2;
-  g.beginPath(); g.roundRect(112, 38, 34, 40, 7); g.stroke();
-  g.fillStyle = 'rgba(51,136,255,0.85)'; g.fillRect(28, 62, 124, 5);
-  g.fillStyle = 'rgba(238,241,245,0.9)'; g.fillRect(28, 58, 124, 3);
+  g.beginPath(); g.moveTo(71, 41); g.lineTo(96, 44); g.lineTo(96, 68); g.lineTo(71, 69); g.closePath(); g.fill();
+  g.fillStyle = 'rgba(230,246,255,0.75)'; g.fillRect(35, 43, 14, 6); g.fillRect(75, 44, 10, 5);
+  // Cheatline across the nose face (meets the flank stripe at the corner).
+  g.fillStyle = 'rgba(238,241,245,0.9)'; g.fillRect(26, 62, 76, 3);
+  g.fillStyle = 'rgba(51,136,255,0.85)'; g.fillRect(26, 65, 76, 5);
   // Searchlight pod slung under the nose, lamp lit.
-  g.fillStyle = '#14161a'; g.beginPath(); g.arc(46, 86, 7, 0, Math.PI * 2); g.fill();
-  g.fillStyle = '#fff3b0'; g.beginPath(); g.arc(44, 87, 3.5, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#14161a'; g.beginPath(); g.arc(44, 87, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff3b0'; g.beginPath(); g.arc(42, 88, 3.5, 0, Math.PI * 2); g.fill();
   // Near skid + struts, drawn over the belly line.
   g.strokeStyle = '#101216'; g.lineWidth = 5;
-  g.beginPath(); g.moveTo(34, 104); g.lineTo(176, 104); g.stroke();
+  g.beginPath(); g.moveTo(32, 106); g.lineTo(172, 106); g.stroke();
   g.lineWidth = 4;
-  g.beginPath(); g.moveTo(58, 82); g.lineTo(50, 104); g.moveTo(142, 82); g.lineTo(152, 104); g.stroke();
-  // Rotor mast + translucent rotor-blur disc (an ellipse, not a line).
-  g.fillStyle = '#14161a'; g.fillRect(88, 12, 9, 14);
+  g.beginPath(); g.moveTo(56, 84); g.lineTo(48, 106); g.moveTo(140, 84); g.lineTo(150, 106); g.stroke();
+  // Rotor mast + translucent rotor-blur disc (a wide flat ellipse).
+  g.fillStyle = '#14161a'; g.fillRect(86, 10, 9, 14);
   g.fillStyle = 'rgba(198,214,228,0.20)';
-  g.beginPath(); g.ellipse(94, 10, 92, 10, 0, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(92, 8, 94, 9, 0, 0, Math.PI * 2); g.fill();
   g.fillStyle = 'rgba(220,232,244,0.30)';
-  g.beginPath(); g.ellipse(94, 10, 92, 5.5, 0, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(92, 8, 94, 5, 0, 0, Math.PI * 2); g.fill();
   g.strokeStyle = 'rgba(226,236,246,0.35)'; g.lineWidth = 1.5;
-  g.beginPath(); g.ellipse(94, 10, 92, 10, 0, 0, Math.PI * 2); g.stroke();
-  g.fillStyle = '#2b2f38'; g.beginPath(); g.arc(94, 10, 5, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(92, 8, 94, 9, 0, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = '#2b2f38'; g.beginPath(); g.arc(92, 8, 5, 0, Math.PI * 2); g.fill();
   spriteCache.set('heli', c);
   return c;
 }
@@ -336,84 +362,139 @@ function drawBillboard(ctx, spr, cxPix, bottomRow, wPix, dist, zbuf, flip) {
   }
 }
 
-// The player's own car, drawn at bottom-centre as a detailed rear
-// three-quarter chase hero: spoiler, glowing tail bar, exhausts, plate.
-// The whole hero is scaled to ~25% of the frame height (0.92 of the
-// original 218px drawing) so the road ahead stays the subject.
-function drawHeroCar(ctx, world, car) {
-  const W = VIEW_W, H = VIEW_H;
+// The player's own car as a high-detail REAR three-quarter sprite, built
+// with the SAME construction language and the SAME shading factors as
+// carSprite (see the LIGHT RULE above): main rear face with the vertical
+// gradient 1.14 -> 0.94 -> 0.60, top deck lighter (x1.28), ONE side face
+// darker (x0.58) on the same side carSprite shows unflipped, face glass
+// with the same highlight style. Identity details carried over from the
+// old screen-space hero: spoiler on struts, full-width glowing tail-light
+// bar, badge text, plate 'PLNR·6', twin exhausts and rear wheels (a face
+// wheel plus the side face's wheel as a squashed ellipse). The exhaust
+// flame flicker and damage smoke are time-varying, so they are drawn in
+// screen space by drawHeroCar over this cached body.
+function heroSprite(color, name) {
+  const key = `hero|${color}|${name}`;
+  let c = spriteCache.get(key);
+  if (c) return c;
+  c = makeCanvas(460, 250);
+  const g = c.getContext('2d');
+  // Side face (right, darkest x0.58) with its glass band and wheel.
+  g.fillStyle = shadeOf(color, 0.58);
+  g.beginPath(); g.moveTo(316, 96); g.lineTo(440, 118); g.lineTo(440, 206); g.lineTo(316, 226); g.closePath(); g.fill();
+  g.fillStyle = '#0d1320';
+  g.beginPath(); g.moveTo(326, 106); g.lineTo(408, 120); g.lineTo(408, 144); g.lineTo(326, 130); g.closePath(); g.fill();
+  g.fillStyle = 'rgba(160,210,255,0.30)'; g.fillRect(330, 108, 26, 7);
+  g.fillStyle = '#ff2038'; g.fillRect(434, 148, 6, 10); // side-face tail wrap
+  g.fillStyle = '#0c0e11'; g.beginPath(); g.ellipse(390, 212, 27, 15, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#8b939e'; g.beginPath(); g.ellipse(390, 212, 11, 6, 0, 0, Math.PI * 2); g.fill();
+  // Top deck (lightest, x1.28): rear deck + cabin roof sloping up from
+  // the rear face, with the rear window set into it.
+  g.fillStyle = shadeOf(color, 1.28);
+  g.beginPath(); g.moveTo(64, 88); g.lineTo(102, 48); g.lineTo(336, 48); g.lineTo(322, 88); g.closePath(); g.fill();
+  g.fillStyle = '#0e1420';
+  g.beginPath(); g.moveTo(130, 55); g.lineTo(202, 55); g.lineTo(194, 81); g.lineTo(116, 81); g.closePath(); g.fill();
+  g.fillStyle = 'rgba(160,210,255,0.35)'; g.fillRect(124, 57, 34, 7);
+  // The deck's light plane continues over the side face as its top
+  // edge strip, so the side face hangs from the same lit roof plane
+  // instead of butting against the rear face as a separate box.
+  g.fillStyle = shadeOf(color, 1.28);
+  g.beginPath(); g.moveTo(316, 92); g.lineTo(440, 114); g.lineTo(440, 124); g.lineTo(316, 104); g.closePath(); g.fill();
+  // Main rear face with the shared vertical paint gradient.
+  const grad = g.createLinearGradient(0, 84, 0, 234);
+  grad.addColorStop(0, shadeOf(color, 1.14)); grad.addColorStop(0.55, shadeOf(color, 0.94)); grad.addColorStop(1, shadeOf(color, 0.6));
+  g.fillStyle = grad;
+  g.beginPath(); g.roundRect(64, 84, 258, 150, 14); g.fill();
+  // Face glass band with the same highlight style as carSprite.
+  g.fillStyle = '#0e1420'; g.beginPath(); g.roundRect(94, 92, 198, 30, 8); g.fill();
+  g.fillStyle = 'rgba(160,210,255,0.32)'; g.fillRect(102, 95, 52, 8);
+  // Face wheels at the bottom corners of the rear face.
+  g.fillStyle = '#101216'; g.fillRect(64, 192, 32, 44); g.fillRect(290, 192, 32, 44);
+  // Spoiler on struts, spanning deck and side face.
+  g.fillStyle = '#14161c';
+  g.fillRect(118, 40, 11, 34); g.fillRect(292, 40, 11, 34);
+  g.beginPath(); g.roundRect(52, 26, 384, 16, 7); g.fill();
+  // Full-width tail-light bar, glowing.
+  g.fillStyle = 'rgba(255,32,56,0.35)';
+  g.beginPath(); g.roundRect(74, 138, 238, 21, 9); g.fill();
+  g.fillStyle = '#ff2438';
+  g.beginPath(); g.roundRect(78, 142, 230, 11, 5); g.fill();
+  g.fillStyle = '#ffd7dc';
+  g.beginPath(); g.roundRect(78, 142, 230, 4, 2); g.fill();
+  // Badge + plate.
+  g.fillStyle = 'rgba(255,255,255,0.85)';
+  g.font = '800 16px system-ui, sans-serif'; g.textAlign = 'center';
+  g.fillText(name, 193, 180);
+  g.fillStyle = '#e8ecf1';
+  g.beginPath(); g.roundRect(156, 188, 74, 27, 4); g.fill();
+  g.fillStyle = '#1c2733'; g.font = '900 17px system-ui, sans-serif';
+  g.fillText('PLNR·6', 193, 208);
+  // Twin exhausts at the bottom edge of the rear face.
+  g.fillStyle = '#22262e';
+  g.beginPath(); g.arc(118, 230, 9, 0, Math.PI * 2); g.arc(268, 230, 9, 0, Math.PI * 2); g.fill();
+  spriteCache.set(key, c);
+  return c;
+}
+
+// The player's own car, drawn THROUGH the same projection as every other
+// actor: project() fixes its screen centre and its size (a ~45-world-unit
+// width at the camera distance lands ~390px wide / ~210px tall on screen,
+// ~25% of the frame height as the staging requires). The ground shadow
+// comes from the shared ground-plane helper; the sprite itself is drawn
+// with a plain drawImage and NO z-clipping — nothing can stand between
+// the chase camera and its own car. The projected ground row of the car
+// sits below the frame's bottom edge (the camera rides closer than the
+// frame's near ground plane), so the sprite's base is anchored at the
+// frame bottom exactly where the old screen-space hero sat, keeping the
+// whole car — plate, exhausts, spoiler — inside the staged frame.
+function drawHeroCar(ctx, world, car, project, drawGroundShadow) {
   const lean = clamp(car.steer || 0, -1, 1) * 26;
   const bounce = Math.sin(world.time * 27) * Math.min(2.2, Math.abs(car.speed) / 130);
-  const cx = W / 2 + lean, base = H - 6 + bounce;
-  const w = 452, top = base - 218;
-  ctx.save();
-  ctx.translate(cx, 0);
-  ctx.translate(0, base); ctx.scale(0.92, 0.92); ctx.translate(0, -base);
-  // Ground shadow + headlight wash on the road ahead (drawn as glow at base).
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  ctx.beginPath(); ctx.ellipse(0, base - 8, w * 0.56, 26, 0, 0, Math.PI * 2); ctx.fill();
-  // Wheels.
-  ctx.fillStyle = '#0c0e11';
-  ctx.beginPath(); ctx.roundRect(-w / 2 - 8, base - 74, 44, 72, 10); ctx.fill();
-  ctx.beginPath(); ctx.roundRect(w / 2 - 36, base - 74, 44, 72, 10); ctx.fill();
-  // Body with a vertical paint gradient.
-  const grad = ctx.createLinearGradient(0, top, 0, base);
-  grad.addColorStop(0, shadeOf(car.color, 1.22));
-  grad.addColorStop(0.5, shadeOf(car.color, 0.98));
-  grad.addColorStop(1, shadeOf(car.color, 0.58));
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.moveTo(-w / 2, base - 6);
-  ctx.lineTo(-w / 2 + 6, top + 74);
-  ctx.quadraticCurveTo(-w / 2 + 10, top + 40, -w * 0.31, top + 30);
-  ctx.lineTo(w * 0.31, top + 30);
-  ctx.quadraticCurveTo(w / 2 - 10, top + 40, w / 2 - 6, top + 74);
-  ctx.lineTo(w / 2, base - 6);
-  ctx.closePath(); ctx.fill();
-  // Cabin + rear glass.
-  ctx.fillStyle = shadeOf(car.color, 0.72);
-  ctx.beginPath(); ctx.roundRect(-w * 0.30, top + 2, w * 0.60, 52, 16); ctx.fill();
-  ctx.fillStyle = '#0d1320';
-  ctx.beginPath(); ctx.roundRect(-w * 0.265, top + 9, w * 0.53, 38, 12); ctx.fill();
-  ctx.fillStyle = 'rgba(160,210,255,0.30)';
-  ctx.beginPath(); ctx.roundRect(-w * 0.24, top + 12, w * 0.20, 12, 6); ctx.fill();
-  // Spoiler on struts.
-  ctx.fillStyle = '#14161c';
-  ctx.fillRect(-w * 0.20, top + 44, 12, 26); ctx.fillRect(w * 0.20 - 12, top + 44, 12, 26);
-  ctx.beginPath(); ctx.roundRect(-w * 0.44, top + 30, w * 0.88, 15, 7); ctx.fill();
-  // Full-width tail-light bar, glowing.
-  ctx.fillStyle = 'rgba(255,32,56,0.35)';
-  ctx.beginPath(); ctx.roundRect(-w * 0.435, base - 118, w * 0.87, 21, 9); ctx.fill();
-  ctx.fillStyle = '#ff2438';
-  ctx.beginPath(); ctx.roundRect(-w * 0.42, base - 113, w * 0.84, 11, 5); ctx.fill();
-  ctx.fillStyle = '#ffd7dc';
-  ctx.beginPath(); ctx.roundRect(-w * 0.42, base - 113, w * 0.84, 4, 2); ctx.fill();
-  // Badge + plate.
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.font = '800 15px system-ui, sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText(car.spec ? car.spec.name : 'GETAWAY', 0, base - 84);
-  ctx.fillStyle = '#e8ecf1';
-  ctx.beginPath(); ctx.roundRect(-37, base - 72, 74, 27, 4); ctx.fill();
-  ctx.fillStyle = '#1c2733'; ctx.font = '900 17px system-ui, sans-serif';
-  ctx.fillText('PLNR·6', 0, base - 53);
-  // Exhausts, with a deterministic flame flicker at speed.
-  ctx.fillStyle = '#22262e';
-  ctx.beginPath(); ctx.arc(-w * 0.30, base - 22, 10, 0, Math.PI * 2); ctx.arc(w * 0.30, base - 22, 10, 0, Math.PI * 2); ctx.fill();
+  const spr = heroSprite(car.color, car.spec ? car.spec.name : 'GETAWAY');
+  const p = project ? project(car.x, car.y, 0) : null;
+  let cx, base, wPix;
+  if (p) {
+    wPix = (45 * PLANE / p.dist) * SCALE;
+    cx = p.sx * SCALE + lean;
+    base = Math.min(p.row * SCALE, VIEW_H - 6) + bounce;
+    // Ground shadow with the helper's exact math (wWorld 48, alpha
+    // 0.45), but centred on the anchored base: the helper's projected
+    // centre row is the same off-frame row the sprite base is anchored
+    // from, so the ellipse is placed where the car's contact patch
+    // actually renders.
+    const sw = (48 * PLANE / p.dist) * SCALE;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.beginPath(); ctx.ellipse(cx, base - 6, sw / 2, sw * 0.11, 0, 0, Math.PI * 2); ctx.fill();
+  } else {
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.beginPath(); ctx.ellipse(VIEW_W / 2 + lean, VIEW_H - 14, 232, 24, 0, 0, Math.PI * 2); ctx.fill();
+    wPix = 416;
+    cx = VIEW_W / 2 + lean;
+    base = VIEW_H - 6 + bounce;
+  }
+  const hPix = wPix * (spr.height / spr.width);
+  const x0 = cx - wPix / 2, top = base - hPix;
+  ctx.drawImage(spr, x0, top, wPix, hPix);
+  // Exhaust flames: deterministic flicker at speed, at the sprite's
+  // exhaust positions (canvas 118/460 and 268/460 across, 230/250 down).
   if (Math.abs(car.speed) > 200) {
-    const fl = 8 + Math.sin(world.time * 41) * 4;
+    const fl = (8 + Math.sin(world.time * 41) * 4) * (wPix / 416);
+    const ey = top + (230 / 250) * hPix;
     ctx.fillStyle = 'rgba(255,150,40,0.75)';
-    ctx.beginPath(); ctx.ellipse(-w * 0.30, base - 22 + fl * 0.4, 5, fl, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(w * 0.30, base - 22 + fl * 0.4, 5, fl, 0, 0, Math.PI * 2); ctx.fill();
+    for (const fx of [118, 268]) {
+      const ex = x0 + (fx / 460) * wPix;
+      ctx.beginPath(); ctx.ellipse(ex, ey + fl * 0.4, Math.max(2, 5 * (wPix / 416)), fl, 0, 0, Math.PI * 2); ctx.fill();
+    }
   }
   // Damage smoke curling off the rear deck.
   if (car.health < car.maxHealth * 0.4) {
     ctx.fillStyle = 'rgba(120,124,132,0.4)';
+    const s = wPix / 416;
     for (let i = 0; i < 3; i++) {
       const ph = (world.time * 0.9 + i * 0.33) % 1;
-      ctx.beginPath(); ctx.arc(-40 + i * 34 + Math.sin(world.time * 3 + i) * 8, top + 20 - ph * 66, 10 + ph * 22, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx + (-40 + i * 34) * s + Math.sin(world.time * 3 + i) * 8, top + 20 * s - ph * 66, (10 + ph * 22) * s, 0, Math.PI * 2); ctx.fill();
     }
   }
-  ctx.restore();
 }
 
 // Deterministic speed streaks: pale motion lines raking the road surface
@@ -686,6 +767,22 @@ export function drawChaseView(ctx, world) {
     };
   };
 
+  // Shared ground-plane contact shadow: an ellipse projected onto the
+  // ground plane at (x, y, 0) — centre at the projected point, width
+  // wWorld * PLANE / dist in screen px, height ~0.22 of the width. It is
+  // drawn only when the actor's centre column passes the z-test
+  // (dist <= zbuf[centre col] + 6), so the shadow of a building-occluded
+  // actor never leaks through the facade.
+  const drawGroundShadow = (x, y, wWorld, alpha) => {
+    const p = project(x, y, 0);
+    if (!p || p.dist > MAX_DIST) return;
+    const col = Math.max(0, Math.min(COLS - 1, Math.floor(p.sx)));
+    if (p.dist > zbuf[col] + 6) return;
+    const w = (wWorld * PLANE / p.dist) * SCALE;
+    ctx.fillStyle = `rgba(0,0,0,${alpha})`;
+    ctx.beginPath(); ctx.ellipse(p.sx * SCALE, p.row * SCALE, w / 2, w * 0.11, 0, 0, Math.PI * 2); ctx.fill();
+  };
+
   // -- helicopter searchlight cone (under the sprites)
   if (lightOn) {
     const hp = project(heli.x, heli.y, HELI_ALT);
@@ -767,6 +864,7 @@ export function drawChaseView(ctx, world) {
       const spr = carSprite(c.color, c.police, cosR < 0, c.disabled);
       const flip = sinR < 0;
       if (s.p.sx < -wPix || s.p.sx > COLS + wPix) continue;
+      drawGroundShadow(c.x, c.y, wWorld, 0.38);
       drawBillboard(ctx, spr, s.p.sx, s.p.row, wPix, s.p.dist, zbuf, flip);
       // Siren flashers washing the road around a live police car.
       if (c.police && !c.disabled && s.p.dist < 420) {
@@ -787,6 +885,7 @@ export function drawChaseView(ctx, world) {
       const shirt = s.kind === 'ped' ? s.obj.shirt : '#7deeff';
       const wPix = (9.5 * PLANE) / s.p.dist;
       if (s.p.sx < -wPix || s.p.sx > COLS + wPix) continue;
+      drawGroundShadow(s.obj.x, s.obj.y, 11, 0.30);
       drawBillboard(ctx, pedSprite(shirt), s.p.sx, s.p.row, wPix, s.p.dist, zbuf, false);
       if (s.kind === 'crew' && s.obj.hasBag) {
         ctx.fillStyle = '#01cdfe';
@@ -796,6 +895,10 @@ export function drawChaseView(ctx, world) {
     } else if (s.kind === 'heli') {
       const wPix = (98 * PLANE) / s.p.dist;
       if (s.p.sx < -wPix || s.p.sx > COLS + wPix) continue;
+      // The body flies at HELI_ALT, but its shadow sits on the ground
+      // plane, offset in world space AWAY from the sun by ~55 units
+      // along the current sky's sun azimuth.
+      drawGroundShadow(heli.x - Math.cos(sky.sunAz) * 55, heli.y - Math.sin(sky.sunAz) * 55, 100, 0.28);
       // The heli flies above the rooftops: no z-buffer clipping.
       const spr = heliSprite();
       const hPix = wPix * (spr.height / spr.width);
@@ -805,7 +908,7 @@ export function drawChaseView(ctx, world) {
 
   // -- speed streaks on the road, the hero car, edge streaks, vignette
   drawSpeedStreaks(ctx, world, 'road');
-  drawHeroCar(ctx, world, car);
+  drawHeroCar(ctx, world, car, project, drawGroundShadow);
   drawSpeedStreaks(ctx, world, 'edge');
   if (phaseName === 'dusk' || phaseName === 'night') {
     const vg = ctx.createRadialGradient(VIEW_W / 2, VIEW_H * 0.44, VIEW_H * 0.36, VIEW_W / 2, VIEW_H * 0.5, VIEW_H * 0.95);
