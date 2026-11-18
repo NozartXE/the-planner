@@ -12,13 +12,29 @@
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
+/** The entry this program hands in: THE PLANNER, an open-world heist game set in Meridian. */
+const ENTRY_TITLE = 'THE PLANNER — plan the heist, drive the getaway (Meridian Mile, 8 heists)';
+
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+
+// Pre-flight: the entry ships exactly 3–4 screenshots, each within the 256 KiB cap.
+// Fail loudly here rather than handing the scorer an entry it would refuse.
+const shotsDir = join(here, 'screenshots');
+const shotFiles = existsSync(shotsDir) ? readdirSync(shotsDir).filter((f) => /\.(png|jpe?g)$/i.test(f)) : [];
+if (shotFiles.length < 3 || shotFiles.length > 4) {
+  throw new Error(`${ENTRY_TITLE}: expected 3-4 screenshots in screenshots/, found ${shotFiles.length}`);
+}
+for (const f of shotFiles) {
+  const bytes = statSync(join(shotsDir, f)).size;
+  if (bytes > 262144) throw new Error(`${ENTRY_TITLE}: screenshot ${f} is ${bytes} bytes, over the 262144 cap`);
+}
+console.log(`${ENTRY_TITLE} — ${shotFiles.length} screenshots verified, building dossier.`);
 
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
