@@ -93,101 +93,166 @@ function shadeOf(hex, f) {
   const c = rgb(hex);
   return `rgb(${Math.round(clamp(c[0] * f, 0, 255))},${Math.round(clamp(c[1] * f, 0, 255))},${Math.round(clamp(c[2] * f, 0, 255))})`;
 }
-// Rear or front view of a car in the given body colour.
+// Three-quarter view of a car (rear or front face + top deck + one shaded
+// side face with its own glass and wheel), so actors read as solid volumes
+// from a chase camera instead of flat side-profile cutouts. The billboard
+// flip mirrors the side face to whichever side faces the camera.
 function carSprite(color, police, front, disabled) {
   const key = `car|${color}|${police ? 1 : 0}|${front ? 1 : 0}|${disabled ? 1 : 0}`;
   let c = spriteCache.get(key);
   if (c) return c;
-  c = makeCanvas(132, 74);
+  c = makeCanvas(150, 88);
   const g = c.getContext('2d');
   const body = disabled ? '#555b66' : color;
-  g.fillStyle = 'rgba(0,0,0,0.35)';
-  g.beginPath(); g.ellipse(66, 66, 58, 7, 0, 0, Math.PI * 2); g.fill();
-  g.fillStyle = '#14161a';
-  g.fillRect(4, 44, 17, 24); g.fillRect(111, 44, 17, 24); // wheels
-  const grad = g.createLinearGradient(0, 14, 0, 62);
-  grad.addColorStop(0, shadeOf(body, 1.18)); grad.addColorStop(0.55, shadeOf(body, 0.95)); grad.addColorStop(1, shadeOf(body, 0.62));
+  g.fillStyle = 'rgba(0,0,0,0.38)';
+  g.beginPath(); g.ellipse(74, 80, 70, 7, 0, 0, Math.PI * 2); g.fill();
+  // Side face (right, darker) with glass band and a real wheel.
+  g.fillStyle = shadeOf(body, 0.58);
+  g.beginPath(); g.moveTo(92, 38); g.lineTo(140, 47); g.lineTo(140, 72); g.lineTo(92, 72); g.closePath(); g.fill();
+  g.fillStyle = '#0d1320';
+  g.beginPath(); g.moveTo(95, 42); g.lineTo(130, 48); g.lineTo(130, 57); g.lineTo(95, 54); g.closePath(); g.fill();
+  g.fillStyle = 'rgba(160,210,255,0.30)'; g.fillRect(97, 43, 12, 4);
+  g.fillStyle = '#0c0e11'; g.beginPath(); g.arc(127, 71, 10, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#8b939e'; g.beginPath(); g.arc(127, 71, 4, 0, Math.PI * 2); g.fill();
+  // Top deck: cabin roof / bonnet sloping up from the face.
+  g.fillStyle = shadeOf(body, 1.28);
+  g.beginPath(); g.moveTo(10, 32); g.lineTo(28, 13); g.lineTo(108, 13); g.lineTo(92, 32); g.closePath(); g.fill();
+  g.fillStyle = '#0e1420';
+  g.beginPath(); g.moveTo(34, 16); g.lineTo(58, 16); g.lineTo(48, 29); g.lineTo(24, 29); g.closePath(); g.fill();
+  g.fillStyle = 'rgba(160,210,255,0.35)'; g.fillRect(30, 17, 14, 4);
+  // Main face (rear or front) with a vertical paint gradient.
+  const grad = g.createLinearGradient(0, 30, 0, 76);
+  grad.addColorStop(0, shadeOf(body, 1.14)); grad.addColorStop(0.55, shadeOf(body, 0.94)); grad.addColorStop(1, shadeOf(body, 0.6));
   g.fillStyle = grad;
-  g.beginPath(); g.roundRect(9, 20, 114, 42, 9); g.fill();
-  g.fillStyle = shadeOf(body, 0.78); // cabin
-  g.beginPath(); g.roundRect(29, 5, 74, 24, 8); g.fill();
-  g.fillStyle = '#0e1420'; // glass
-  g.beginPath(); g.roundRect(35, 9, 62, 16, 6); g.fill();
-  g.fillStyle = 'rgba(160,210,255,0.35)';
-  g.fillRect(38, 10, 24, 5);
+  g.beginPath(); g.roundRect(8, 30, 84, 44, 8); g.fill();
+  g.fillStyle = '#0e1420'; g.beginPath(); g.roundRect(22, 34, 56, 13, 5); g.fill(); // face glass
+  g.fillStyle = 'rgba(160,210,255,0.32)'; g.fillRect(26, 35, 20, 4);
+  g.fillStyle = '#101216'; g.fillRect(8, 60, 15, 18); g.fillRect(79, 60, 13, 18); // face wheels
   if (police) {
-    g.fillStyle = '#eef1f5'; g.fillRect(9, 30, 114, 15);
-    g.fillStyle = '#16233d'; g.font = '900 11px system-ui, sans-serif'; g.textAlign = 'center';
-    g.fillText('POLICE', 66, 42);
-    g.fillStyle = '#ff3355'; g.fillRect(42, 0, 24, 7);
-    g.fillStyle = '#3388ff'; g.fillRect(66, 0, 24, 7);
+    g.fillStyle = '#eef1f5'; g.fillRect(8, 48, 84, 13);
+    g.fillStyle = '#16233d'; g.font = '900 10px system-ui, sans-serif'; g.textAlign = 'center';
+    g.fillText('POLICE', 50, 58);
+    g.fillStyle = '#ff3355'; g.fillRect(52, 6, 22, 7);
+    g.fillStyle = '#3388ff'; g.fillRect(74, 6, 22, 7);
   }
   if (front) {
     g.fillStyle = '#fff3b0';
-    g.beginPath(); g.arc(26, 42, 7, 0, Math.PI * 2); g.arc(106, 42, 7, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(22, 52, 6, 0, Math.PI * 2); g.arc(80, 52, 6, 0, Math.PI * 2); g.fill();
     g.fillStyle = 'rgba(255,243,176,0.35)';
-    g.beginPath(); g.arc(26, 42, 12, 0, Math.PI * 2); g.arc(106, 42, 12, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#22262e'; g.fillRect(48, 44, 36, 8);
+    g.beginPath(); g.arc(22, 52, 11, 0, Math.PI * 2); g.arc(80, 52, 11, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#22262e'; g.fillRect(38, 62, 28, 7);
+    g.fillStyle = '#fff3b0'; g.fillRect(133, 56, 6, 6); // side-face headlight wrap
   } else {
-    g.fillStyle = '#ff2038'; g.fillRect(13, 36, 27, 7); g.fillRect(92, 36, 27, 7);
-    g.fillStyle = 'rgba(255,32,56,0.4)'; g.fillRect(11, 34, 31, 11); g.fillRect(90, 34, 31, 11);
-    g.fillStyle = '#dfe3e8'; g.fillRect(54, 46, 24, 10);
-    g.fillStyle = '#39404c'; g.fillRect(58, 49, 16, 2);
+    g.fillStyle = '#ff2038'; g.fillRect(11, 50, 22, 6); g.fillRect(70, 50, 20, 6);
+    g.fillStyle = 'rgba(255,32,56,0.4)'; g.fillRect(9, 48, 26, 10); g.fillRect(68, 48, 24, 10);
+    g.fillStyle = '#dfe3e8'; g.fillRect(40, 63, 22, 9);
+    g.fillStyle = '#ff2038'; g.fillRect(134, 56, 5, 6); // side-face tail wrap
   }
-  if (disabled) { g.fillStyle = 'rgba(20,20,24,0.45)'; g.fillRect(0, 0, 132, 74); }
+  if (disabled) { g.fillStyle = 'rgba(20,20,24,0.45)'; g.fillRect(0, 0, 150, 88); }
   spriteCache.set(key, c);
   return c;
 }
-// Side profile of a car (used when it crosses the view).
-function carSideSprite(color, police, disabled) {
-  const key = `side|${color}|${police ? 1 : 0}|${disabled ? 1 : 0}`;
-  let c = spriteCache.get(key);
-  if (c) return c;
-  c = makeCanvas(176, 58);
-  const g = c.getContext('2d');
-  const body = disabled ? '#555b66' : color;
-  g.fillStyle = 'rgba(0,0,0,0.35)';
-  g.beginPath(); g.ellipse(88, 52, 82, 6, 0, 0, Math.PI * 2); g.fill();
-  const grad = g.createLinearGradient(0, 12, 0, 46);
-  grad.addColorStop(0, shadeOf(body, 1.15)); grad.addColorStop(1, shadeOf(body, 0.6));
-  g.fillStyle = grad;
-  g.beginPath(); g.roundRect(5, 18, 166, 27, 10); g.fill();
-  g.fillStyle = shadeOf(body, 0.8);
-  g.beginPath(); g.roundRect(56, 5, 66, 19, 8); g.fill();
-  g.fillStyle = '#0e1420';
-  g.beginPath(); g.roundRect(62, 8, 54, 13, 5); g.fill();
-  if (police) {
-    g.fillStyle = '#eef1f5'; g.fillRect(5, 27, 166, 11);
-    g.fillStyle = '#ff3355'; g.fillRect(76, 0, 13, 6);
-    g.fillStyle = '#3388ff'; g.fillRect(89, 0, 13, 6);
-  }
-  g.fillStyle = '#fff3b0'; g.fillRect(166, 26, 6, 7);
-  g.fillStyle = '#ff2038'; g.fillRect(4, 26, 5, 7);
-  g.fillStyle = '#101216';
-  g.beginPath(); g.arc(38, 45, 12, 0, Math.PI * 2); g.arc(138, 45, 12, 0, Math.PI * 2); g.fill();
-  g.fillStyle = '#8b939e';
-  g.beginPath(); g.arc(38, 45, 5, 0, Math.PI * 2); g.arc(138, 45, 5, 0, Math.PI * 2); g.fill();
-  if (disabled) { g.fillStyle = 'rgba(20,20,24,0.45)'; g.fillRect(0, 0, 176, 58); }
-  spriteCache.set(key, c);
-  return c;
-}
+// Three-quarter pedestrian: front torso lit, side plane shaded, arms and
+// striding legs offset so the figure has volume from behind/side angles.
 function pedSprite(shirt) {
   const key = `ped|${shirt}`;
   let c = spriteCache.get(key);
   if (c) return c;
-  c = makeCanvas(36, 108);
+  c = makeCanvas(44, 110);
   const g = c.getContext('2d');
   g.fillStyle = 'rgba(0,0,0,0.3)';
-  g.beginPath(); g.ellipse(18, 103, 13, 4, 0, 0, Math.PI * 2); g.fill();
-  g.fillStyle = '#23262e'; g.fillRect(9, 58, 7, 42); g.fillRect(20, 58, 7, 42);
-  g.fillStyle = shadeOf(shirt, 0.85); g.fillRect(4, 26, 6, 30); g.fillRect(26, 26, 6, 30);
-  g.fillStyle = shirt;
-  g.beginPath(); g.roundRect(8, 23, 20, 37, 6); g.fill();
-  g.fillStyle = '#e8b08a';
-  g.beginPath(); g.arc(18, 13, 9, 0, Math.PI * 2); g.fill();
-  g.fillStyle = '#2b2118'; g.beginPath(); g.arc(18, 9, 9, Math.PI, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(22, 105, 15, 4, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#1d2026'; g.fillRect(11, 60, 8, 40); // far leg
+  g.fillStyle = '#2b2f38'; g.fillRect(24, 60, 8, 43); // near leg, longer stride
+  g.fillStyle = '#111'; g.fillRect(9, 98, 11, 5); g.fillRect(23, 101, 11, 5); // shoes
+  g.fillStyle = shadeOf(shirt, 0.62); g.fillRect(31, 27, 7, 32); // side arm
+  g.fillStyle = shadeOf(shirt, 0.85); g.fillRect(5, 27, 6, 30);  // front arm
+  g.fillStyle = shirt; // front torso plane
+  g.beginPath(); g.moveTo(9, 24); g.lineTo(27, 24); g.lineTo(29, 62); g.lineTo(10, 62); g.closePath(); g.fill();
+  g.fillStyle = shadeOf(shirt, 0.66); // side torso plane
+  g.beginPath(); g.moveTo(27, 24); g.lineTo(34, 27); g.lineTo(35, 60); g.lineTo(29, 62); g.closePath(); g.fill();
+  g.fillStyle = '#e8b08a'; g.beginPath(); g.arc(20, 13, 10, 0, Math.PI * 2); g.fill();
+  g.fillStyle = 'rgba(0,0,0,0.18)'; g.beginPath(); g.arc(24, 14, 8, -0.6, 1.4); g.lineTo(24, 14); g.fill(); // head side shade
+  g.fillStyle = '#2b2118'; g.beginPath(); g.arc(20, 9, 10, Math.PI, Math.PI * 2); g.fill();
   spriteCache.set(key, c);
   return c;
+}
+// Street-prop sprites from the city's own prop data (lamp, palm, crate,
+// barrier, bench, hydrant) — simple shaded volumes, not flat icons.
+function propSprite(kind, lit) {
+  const key = `prop|${kind}|${lit ? 1 : 0}`;
+  let c = spriteCache.get(key);
+  if (c) return c;
+  if (kind === 'lamp') {
+    c = makeCanvas(26, 132); const g = c.getContext('2d');
+    g.fillStyle = '#22262e'; g.fillRect(11, 22, 4, 108); g.fillRect(11, 18, 13, 4);
+    if (lit) { const gr = g.createRadialGradient(23, 24, 1, 23, 24, 15); gr.addColorStop(0, 'rgba(255,226,150,0.95)'); gr.addColorStop(1, 'rgba(255,226,150,0)'); g.fillStyle = gr; g.beginPath(); g.arc(23, 24, 15, 0, Math.PI * 2); g.fill(); }
+    g.fillStyle = lit ? '#ffe9a8' : '#cfd6dd'; g.beginPath(); g.arc(23, 23, 4, 0, Math.PI * 2); g.fill();
+  } else if (kind === 'palm') {
+    c = makeCanvas(96, 132); const g = c.getContext('2d');
+    g.strokeStyle = '#7a5c38'; g.lineWidth = 7; g.beginPath(); g.moveTo(40, 130); g.quadraticCurveTo(46, 84, 54, 44); g.stroke();
+    g.strokeStyle = '#2e8b47'; g.lineWidth = 5;
+    for (let i = 0; i < 6; i++) { const a = -0.25 - i * 0.5; g.beginPath(); g.moveTo(54, 42); g.quadraticCurveTo(54 + Math.cos(a) * 26, 42 + Math.sin(a) * 20 - 8, 54 + Math.cos(a) * 44, 42 + Math.sin(a) * 34 + 12); g.stroke(); }
+    g.fillStyle = '#5d8143'; g.beginPath(); g.arc(50, 46, 5, 0, Math.PI * 2); g.arc(59, 47, 5, 0, Math.PI * 2); g.fill();
+  } else if (kind === 'crate') {
+    c = makeCanvas(46, 42); const g = c.getContext('2d');
+    g.fillStyle = '#8a6b3a'; g.beginPath(); g.moveTo(4, 14); g.lineTo(14, 5); g.lineTo(42, 5); g.lineTo(32, 14); g.closePath(); g.fill(); // top
+    g.fillStyle = '#a37f45'; g.fillRect(4, 14, 28, 25);
+    g.fillStyle = '#6f552c'; g.beginPath(); g.moveTo(32, 14); g.lineTo(42, 5); g.lineTo(42, 30); g.lineTo(32, 39); g.closePath(); g.fill(); // side
+    g.strokeStyle = 'rgba(40,26,8,0.6)'; g.lineWidth = 2; g.strokeRect(6, 16, 24, 21);
+  } else if (kind === 'barrier') {
+    c = makeCanvas(70, 46); const g = c.getContext('2d');
+    g.fillStyle = '#33373f'; g.fillRect(7, 26, 5, 18); g.fillRect(58, 26, 5, 18);
+    g.fillStyle = '#eef1f5'; g.fillRect(2, 8, 66, 17);
+    g.fillStyle = '#ff7b1c'; for (let i = 0; i < 4; i++) { g.beginPath(); g.moveTo(6 + i * 17, 25); g.lineTo(15 + i * 17, 8); g.lineTo(22 + i * 17, 8); g.lineTo(13 + i * 17, 25); g.closePath(); g.fill(); }
+    g.fillStyle = '#22262e'; g.fillRect(2, 25, 66, 3);
+  } else if (kind === 'bench') {
+    c = makeCanvas(62, 40); const g = c.getContext('2d');
+    g.fillStyle = '#5d4630'; g.fillRect(4, 6, 54, 5); g.fillRect(4, 14, 54, 5);
+    g.fillStyle = '#77572f'; g.fillRect(4, 24, 54, 6);
+    g.fillStyle = '#22262e'; g.fillRect(7, 30, 5, 9); g.fillRect(50, 30, 5, 9);
+  } else { // hydrant
+    c = makeCanvas(24, 34); const g = c.getContext('2d');
+    g.fillStyle = '#c1272d'; g.beginPath(); g.roundRect(6, 8, 12, 24, 4); g.fill();
+    g.fillStyle = '#e33'; g.beginPath(); g.arc(12, 7, 6, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#f4f6f8'; g.fillRect(1, 15, 5, 5); g.fillRect(18, 15, 5, 5);
+  }
+  spriteCache.set(key, c);
+  return c;
+}
+const PROP_W = { lamp: 8, palm: 36, crate: 17, barrier: 27, bench: 23, hydrant: 8 };
+// Render-only kerb-parked cars, derived deterministically from the road
+// grid (seeded hashes): they densify the chase frame without touching the
+// simulation's car list, speeds or behaviour in any way.
+const PARKED_COLORS = ['#c0c6ce', '#7a4a2b', '#33566e', '#6e3333', '#3f6e46', '#8c8f57', '#4a3f66', '#b8b0a4'];
+let parkedCache = null;
+function parkedCars() {
+  if (parkedCache) return parkedCache;
+  const out = [];
+  const off = ROAD_W / 2 + 13;
+  const nearCross = (v, lines) => lines.some((l) => Math.abs(v - l) < 82);
+  AVENUES.forEach((a, ai) => {
+    for (let i = 0; i < 13; i++) {
+      const y = 110 + i * 152;
+      if (y > RIVER_Y - 120 || nearCross(y, STREETS.map((s) => s.y))) continue;
+      for (let side = -1; side <= 1; side += 2) {
+        if (hash01(ai * 977 + i * 131 + (side + 1) * 57) > 0.42) continue;
+        out.push({ x: a.x + side * off, y, angle: side > 0 ? Math.PI / 2 : -Math.PI / 2, color: PARKED_COLORS[Math.floor(hash01(ai * 31 + i * 7 + side) * 8) % 8], police: false, disabled: false, parkedRender: true, id: 9000 + out.length });
+      }
+    }
+  });
+  STREETS.forEach((s, si) => {
+    for (let i = 0; i < 21; i++) {
+      const x = 110 + i * 152;
+      if (nearCross(x, AVENUES.map((a) => a.x))) continue;
+      for (let side = -1; side <= 1; side += 2) {
+        if (hash01(5000 + si * 977 + i * 131 + (side + 1) * 57) > 0.42) continue;
+        out.push({ x, y: s.y + side * off, angle: side > 0 ? 0 : Math.PI, color: PARKED_COLORS[Math.floor(hash01(si * 43 + i * 11 + side) * 8) % 8], police: false, disabled: false, parkedRender: true, id: 9500 + out.length });
+      }
+    }
+  });
+  parkedCache = out;
+  return out;
 }
 function heliSprite() {
   let c = spriteCache.get('heli');
@@ -425,28 +490,68 @@ export function drawChaseView(ctx, world) {
     const botRow = Math.min(ROWS - 1, Math.ceil(HORIZON + CAM_H * PLANE / bestT));
     const hitX = camX + dx * bestT, hitY = camY + dy * bestT;
     const u = bestFace === 0 ? hitY : hitX;
-    const base = rgb(bestB.color);
+    const base0 = rgb(bestB.color);
     const roofC = rgb(bestB.roof);
     const faceMul = bestFace === 0 ? 0.78 : 1.0;
     const shadeMul = sky.amb * faceMul * (0.30 + 0.70 / (1 + bestT * 0.0011));
     const fogT = Math.min(0.6, (bestT / MAX_DIST) * 0.6);
-    const winColSeed = Math.floor(u / 21);
+    // Per-building facade character, all seeded from the building id:
+    // channel tint, window rhythm, a possible vertical neon strip, and
+    // which shopfront bays glow — so no two frontages read alike.
+    const bid = bestB.id;
+    const base = [base0[0] * (0.86 + hash01(bid * 311) * 0.28), base0[1] * (0.88 + hash01(bid * 313) * 0.24), base0[2] * (0.86 + hash01(bid * 317) * 0.3)];
+    const colW = 17 + Math.floor(hash01(bid * 41 + 5) * 9);
+    const rowH = 21 + Math.floor(hash01(bid * 43 + 9) * 6);
+    const winOff = hash01(bid * 47) * colW;
+    const neonOn = hash01(bid * 53 + 1) < 0.42;
+    const neonU = hash01(bid * 59) * 150;
+    const neonC = hash01(bid * 61) < 0.5 ? [255, 64, 170] : [64, 220, 255];
+    const winColSeed = Math.floor((u + winOff) / colW);
     for (let y = topRow; y <= botRow; y++) {
       const z = CAM_H + (HORIZON - y) * bestT / PLANE; // world height at this row
       let r, g, bl;
-      if (z > bH - 15 && z < bH - 4) {
-        // Sign band near the roofline, in the building's roof colour.
-        r = roofC[0] * shadeMul * 1.5; g = roofC[1] * shadeMul * 1.5; bl = roofC[2] * shadeMul * 1.5;
-      } else {
-        const band = Math.floor(z / 24);
-        const inWinCol = (u - winColSeed * 21) > 5 && (u - winColSeed * 21) < 16;
-        const inWinRow = (z - band * 24) > 6 && (z - band * 24) < 18;
-        if (inWinCol && inWinRow && band >= 0) {
-          const lit = hash01(bestB.id * 131 + band * 17 + winColSeed * 7) < sky.lit;
-          if (lit) { r = 255 * shadeMul * 1.15; g = 196 * shadeMul * 1.15; bl = 104 * shadeMul; }
-          else { r = base[0] * shadeMul * 0.5; g = base[1] * shadeMul * 0.5; bl = base[2] * shadeMul * 0.62; }
+      if (z > bH - 3.5) {
+        // Parapet cap: a bright roofline lip that separates the skyline.
+        r = roofC[0] * shadeMul * 1.95; g = roofC[1] * shadeMul * 1.95; bl = roofC[2] * shadeMul * 1.95;
+      } else if (z > bH - 14) {
+        // Sign band: dark fascia with lit letter-blocks spelling rhythm.
+        const seg = Math.floor((u + winOff) / 9), sf = ((u + winOff) % 9) / 9;
+        if (sf < 0.62 && hash01(bid * 71 + seg * 13) < 0.55) { r = 255 * shadeMul * 1.45; g = 214 * shadeMul * 1.45; bl = 130 * shadeMul * 1.2; }
+        else { r = roofC[0] * shadeMul * 1.3; g = roofC[1] * shadeMul * 1.3; bl = roofC[2] * shadeMul * 1.3; }
+      } else if (neonOn && Math.abs(u - neonU) < 3.4 && z > 30) {
+        // Vertical neon blade sign running down the frontage.
+        r = neonC[0] * (shadeMul * 1.5 + 0.25); g = neonC[1] * (shadeMul * 1.5 + 0.25); bl = neonC[2] * (shadeMul * 1.5 + 0.25);
+      } else if (z < 30) {
+        // Ground floor: striped awning over glowing shopfront glass.
+        if (z > 24) {
+          const awn = Math.floor(u / 10) % 2 === 0 ? 1.45 : 0.85;
+          r = roofC[0] * shadeMul * awn; g = roofC[1] * shadeMul * awn; bl = roofC[2] * shadeMul * awn;
+        } else if (z < 3.5) {
+          r = base[0] * shadeMul * 0.35; g = base[1] * shadeMul * 0.35; bl = base[2] * shadeMul * 0.35;
         } else {
-          const gradMul = 0.82 + 0.18 * clamp(z / bH, 0, 1);
+          const bay = Math.floor((u + winOff) / (colW + 12)), bf = ((u + winOff) % (colW + 12)) / (colW + 12);
+          if (bf > 0.07 && bf < 0.93) {
+            if (hash01(bid * 83 + bay * 19) < 0.8) { const w = 0.85 + hash01(bid * 89 + bay * 3) * 0.4; r = 255 * shadeMul * w; g = 188 * shadeMul * w; bl = 104 * shadeMul * w; }
+            else { r = base[0] * shadeMul * 0.42; g = base[1] * shadeMul * 0.5; bl = base[2] * shadeMul * 0.72; }
+          } else { r = base[0] * shadeMul * 0.4; g = base[1] * shadeMul * 0.4; bl = base[2] * shadeMul * 0.4; }
+        }
+      } else {
+        const band = Math.floor(z / rowH);
+        const rowF = (z - band * rowH) / rowH, colF = ((u + winOff) % colW) / colW;
+        const inWin = colF > 0.22 && colF < 0.78 && rowF > 0.24 && rowF < 0.8;
+        if (inWin) {
+          const wh = hash01(bid * 131 + band * 17 + winColSeed * 7);
+          if (wh < sky.lit) {
+            // Lit window: warm or cool by hash, some half-blinded.
+            if (hash01(bid * 137 + band * 5 + winColSeed) < 0.25 && rowF > 0.55) { r = base[0] * shadeMul * 0.55; g = base[1] * shadeMul * 0.55; bl = base[2] * shadeMul * 0.6; }
+            else if (hash01(bid * 139 + band + winColSeed * 3) < 0.3) { r = 168 * shadeMul * 1.2; g = 204 * shadeMul * 1.2; bl = 255 * shadeMul * 1.1; }
+            else { r = 255 * shadeMul * 1.15; g = 196 * shadeMul * 1.15; bl = 104 * shadeMul; }
+          } else { r = base[0] * shadeMul * 0.5; g = base[1] * shadeMul * 0.5; bl = base[2] * shadeMul * 0.66; }
+        } else {
+          // Wall: vertical gradient, floor slab lines, pilaster shadows.
+          let gradMul = 0.82 + 0.18 * clamp(z / bH, 0, 1);
+          if (rowF < 0.07) gradMul *= 0.78;
+          if (((u + winOff) % 92) < 5) gradMul *= 0.7;
           r = base[0] * shadeMul * gradMul; g = base[1] * shadeMul * gradMul; bl = base[2] * shadeMul * gradMul;
         }
       }
@@ -537,6 +642,14 @@ export function drawChaseView(ctx, world) {
     const p = project(other.x, other.y, 0);
     if (p && p.dist < MAX_DIST) sprites.push({ kind: 'car', obj: other, p });
   }
+  for (const pc of parkedCars()) {
+    const p = project(pc.x, pc.y, 0);
+    if (p && p.dist < MAX_DIST) sprites.push({ kind: 'car', obj: pc, p });
+  }
+  for (const pr of world.city.props) {
+    const p = project(pr.x, pr.y, 0);
+    if (p && p.dist < 720) sprites.push({ kind: 'prop', obj: pr, p });
+  }
   for (const ped of world.peds) {
     if (ped.down > 0) continue;
     const p = project(ped.x, ped.y, 0);
@@ -556,11 +669,11 @@ export function drawChaseView(ctx, world) {
       const c = s.obj;
       const rel = angleDiff(c.angle, car.angle);
       const cosR = Math.cos(rel), sinR = Math.sin(rel);
-      const wWorld = Math.abs(cosR) * 26 + Math.abs(sinR) * 48;
+      const wWorld = Math.abs(cosR) * 30 + Math.abs(sinR) * 46;
       const wPix = (wWorld * PLANE) / s.p.dist;
-      let spr, flip = false;
-      if (Math.abs(sinR) > 0.72) { spr = carSideSprite(c.color, c.police, c.disabled); flip = sinR < 0; }
-      else spr = carSprite(c.color, c.police, cosR < 0, c.disabled);
+      // Always the 3/4 volume sprite; flip mirrors its side face.
+      const spr = carSprite(c.color, c.police, cosR < 0, c.disabled);
+      const flip = sinR < 0;
       if (s.p.sx < -wPix || s.p.sx > COLS + wPix) continue;
       drawBillboard(ctx, spr, s.p.sx, s.p.row, wPix, s.p.dist, zbuf, flip);
       // Siren flashers washing the road around a live police car.
@@ -571,6 +684,13 @@ export function drawChaseView(ctx, world) {
         ctx.ellipse(s.p.sx * SCALE, s.p.row * SCALE, wPix * SCALE * 0.75, wPix * SCALE * 0.2, 0, 0, Math.PI * 2);
         ctx.fill();
       }
+    } else if (s.kind === 'prop') {
+      const pr = s.obj;
+      const lit = phaseName === 'dusk' || phaseName === 'night' || phaseName === 'dawn';
+      const spr = propSprite(pr.kind, lit && pr.kind === 'lamp');
+      const wPix = ((PROP_W[pr.kind] || 12) * PLANE) / s.p.dist;
+      if (s.p.sx < -wPix || s.p.sx > COLS + wPix) continue;
+      drawBillboard(ctx, spr, s.p.sx, s.p.row, wPix, s.p.dist, zbuf, false);
     } else if (s.kind === 'ped' || s.kind === 'crew') {
       const shirt = s.kind === 'ped' ? s.obj.shirt : '#06d6a0';
       const wPix = (9.5 * PLANE) / s.p.dist;
@@ -579,7 +699,7 @@ export function drawChaseView(ctx, world) {
       if (s.kind === 'crew' && s.obj.hasBag) {
         ctx.fillStyle = '#06d6a0';
         const bw = Math.max(3, wPix * SCALE * 0.5);
-        ctx.fillRect(s.p.sx * SCALE + bw * 0.4, (s.p.row * SCALE) - wPix * SCALE * (108 / 36) * 0.52, bw, bw * 0.8);
+        ctx.fillRect(s.p.sx * SCALE + bw * 0.4, (s.p.row * SCALE) - wPix * SCALE * (110 / 44) * 0.55, bw, bw * 0.8);
       }
     } else if (s.kind === 'heli') {
       const wPix = (98 * PLANE) / s.p.dist;

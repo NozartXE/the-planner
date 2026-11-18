@@ -1,10 +1,12 @@
-// shots.js — deterministic screenshot staging: ?shot=cover|plan|chase|results
-// (plus a legacy combat scene, no longer in the shipped set).
+// shots.js — deterministic screenshot staging: ?shot=cover|plan|combat|results
+// (plus a legacy chase scene, no longer in the shipped set).
 // Each scene builds a fresh world, applies a plan, steps the REAL simulation
 // with a simple autopilot, and leaves the game on the requested screen.
-// Cover and chase are staged inside a car, so they render in the raycast
-// chase view; plan is the planning-board feature shot; results restores
-// the progression evidence (settlement, grade, run history, next teaser).
+// Cover is staged inside a car, so it renders in the raycast chase view;
+// combat is the on-foot verb shot (firefight at the target, crew with loot
+// bags, alarm running, police arriving, peds and traffic around, full HUD);
+// plan is the planning-board feature shot; results restores the progression
+// evidence (settlement, grade, run history, next teaser).
 import { Rng } from './rng.js';
 import { HEISTS, defaultPlan } from './heists.js';
 import { PlanningBoard } from './planning.js';
@@ -62,6 +64,12 @@ export function stageShot(name, game) {
     world.heat = 60; world.stars = 3;
     // Crew beside the player, one carrying a bag.
     world.crewMembers.forEach((c, i) => { c.x = world.player.x - 44 + i * 40; c.y = world.player.y + 34; c.hasBag = i === 0; });
+    // Bystander peds on the pavements around the target (existing sim
+    // entities, repositioned by staging) so the street reads populated.
+    world.peds.slice(0, 6).forEach((pd, i) => {
+      pd.x = world.player.x - 150 + i * 58; pd.y = world.player.y + (i % 2 === 0 ? 92 : -86);
+      pd.down = 0;
+    });
     // Police arriving at the street.
     world.forcePolice(2, m.building.doorX + 210, m.building.doorY + 120);
     const cop = world.cars.find((c) => c.police);
@@ -197,6 +205,13 @@ export function stageShot(name, game) {
   const rng = new Rng(99);
   void rng;
   for (let i = 0; i < 26; i++) world.step(1 / 60, fakeInput(['w']), { x: gw.x - 300, y: gw.y });
+  // Pedestrians frozen on both Market St pavements ahead (existing sim
+  // entities, repositioned by staging after the drive) so the canyon
+  // reads lived-in without anyone standing in the hero car's bonnet.
+  world.peds.slice(0, 6).forEach((pd, i) => {
+    pd.x = gw.x - 150 - i * 82; pd.y = gw.y + (i % 2 === 0 ? -62 : 62);
+    pd.down = 0;
+  });
   // Freeze the helicopter in frame, ahead and above, light on the player
   // (its hover lag would otherwise leave it behind the camera).
   world.heli.active = true;
