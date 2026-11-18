@@ -7,7 +7,6 @@
 // bags, alarm running, police arriving, peds and traffic around, full HUD);
 // plan is the planning-board feature shot; results restores the progression
 // evidence (settlement, grade, run history, next teaser).
-import { Rng } from './rng.js';
 import { HEISTS, defaultPlan } from './heists.js';
 import { PlanningBoard } from './planning.js';
 import { makeCar } from './vehicles.js';
@@ -165,11 +164,15 @@ export function stageShot(name, game) {
   // cover (default): the busiest chase tick, staged in the raycast chase
   // view — dusk escape westbound down the Market St canyon into the
   // sunset, 5 stars, helicopter overhead with its searchlight on the
-  // player, a police roadblock across the road ahead, a patrol car on
-  // the shoulder, traffic in both lanes, pursuers behind, the player's
-  // sports car large at bottom-centre. The start point sits in the one
-  // downtown corridor verified clear of building footprints (lots
-  // encroach on most road edges in this city).
+  // player, a police roadblock across the road ahead, a PIT car on the
+  // player's flank, dense traffic in both lanes, pursuers behind, and
+  // the player's sports car at bottom-centre (~25% of the frame height).
+  // After the drive steps, the frame is frozen around the car's final
+  // position: near police, eleven extra traffic cars and eighteen
+  // pavement pedestrians are placed relative to it (no further steps
+  // run, so every placement is exact and deterministic). The start point
+  // sits in the one downtown corridor verified clear of building
+  // footprints (lots encroach on most road edges in this city).
   plan.timeOfDay = 'dusk';
   world.beginHeist(heist, plan);
   const m = world.mission;
@@ -202,20 +205,69 @@ export function stageShot(name, game) {
   world.cars.push(t2);
   // Pursuers on our tail (they converge during the drive steps).
   world.forcePolice(3, gw.x + 260, gw.y + 22);
-  const rng = new Rng(99);
-  void rng;
   for (let i = 0; i < 26; i++) world.step(1 / 60, fakeInput(['w']), { x: gw.x - 300, y: gw.y });
-  // Pedestrians frozen on both Market St pavements ahead (existing sim
-  // entities, repositioned by staging after the drive) so the canyon
-  // reads lived-in without anyone standing in the hero car's bonnet.
-  world.peds.slice(0, 6).forEach((pd, i) => {
-    pd.x = gw.x - 150 - i * 82; pd.y = gw.y + (i % 2 === 0 ? -62 : 62);
+  // --- post-drive freeze: compose the hero frame around the car's final
+  // position. No further steps run, so these placements are exact.
+  // Near police at readable scale: a PIT car on the south flank trying to
+  // turn the player, and two patrol cars ahead in the player's lane (the
+  // roadblock SUVs above are the third element, at the block itself).
+  const pit = makeCar(world.rng, 'sedan', gw.x - 118, gw.y + 46, Math.PI, { color: '#2f6fed', id: 6201 });
+  pit.police = true; pit.driver = 'police'; pit.speed = gw.speed;
+  world.cars.push(pit);
+  const copAhead = makeCar(world.rng, 'sedan', gw.x - 145, gw.y - 12, Math.PI, { color: '#2f6fed', id: 6202 });
+  copAhead.police = true; copAhead.driver = 'police'; copAhead.speed = gw.speed;
+  world.cars.push(copAhead);
+  const copAhead2 = makeCar(world.rng, 'suv', gw.x - 265, gw.y + 6, Math.PI, { color: '#2f6fed', id: 6203 });
+  copAhead2.police = true; copAhead2.driver = 'police'; copAhead2.speed = gw.speed;
+  world.cars.push(copAhead2);
+  // Dense traffic staged on the road ahead and alongside: westbound cars
+  // (rear view) in the north lanes, oncoming cars (front view, headlights)
+  // in the south lanes, varied classes and colours, queueing at the
+  // roadblock and streaming past it for depth. Together with the two
+  // ambient cars staged before the drive, thirteen traffic cars are in
+  // the frame.
+  const trafficStage = [
+    ['compact', -225, 958, Math.PI, '#ffd60a', 6301],
+    ['suv', -330, 962, Math.PI, '#90be6d', 6302],
+    ['coupe', -375, 988, Math.PI, '#f72585', 6303],
+    ['sedan', -480, 986, Math.PI, '#4cc9f0', 6304],
+    ['compact', -560, 964, Math.PI, '#e9ecef', 6305],
+    ['truck', -410, 956, Math.PI, '#bc6c25', 6306],
+    ['sedan', -190, 1028, 0, '#ff9770', 6307],
+    ['suv', -275, 1042, 0, '#adb5bd', 6308],
+    ['coupe', -350, 1016, 0, '#7209b7', 6309],
+    ['sedan', -440, 1034, 0, '#06d6a0', 6310],
+    ['compact', -530, 1012, 0, '#fb8500', 6311],
+  ];
+  for (const [cls, dx, y, ang, color, id] of trafficStage) {
+    const tc = makeCar(world.rng, cls, gw.x + dx, y, ang, { color, id });
+    tc.driver = 'traffic';
+    tc.traffic = { dir: ang === 0 ? 1 : -1, vertical: false, cruise: 150, waypoint: null };
+    tc.speed = 150;
+    world.cars.push(tc);
+  }
+  // Sixteen pedestrians frozen on the Market St pavements ahead
+  // (existing sim entities, repositioned by staging): the sidewalk bands
+  // sit at street centre ±~60, so nobody stands in the road. Fourteen
+  // walk the north pavement in a receding line; two stand on the south
+  // pavement in the open lot gap at x 822..832 — the only south-side
+  // spots both clear of the encroaching building lots and visible past
+  // the near police-station block from this camera.
+  world.peds.slice(0, 14).forEach((pd, i) => {
+    pd.x = gw.x - 40 - i * 30;
+    pd.y = 940 + (i % 3);
     pd.down = 0;
   });
-  // Freeze the helicopter in frame, ahead and above, light on the player
-  // (its hover lag would otherwise leave it behind the camera).
+  world.peds.slice(14, 16).forEach((pd, j) => {
+    pd.x = gw.x - 142 - j * 10;
+    pd.y = 1059 - j * 2;
+    pd.down = 0;
+  });
+  // Freeze the helicopter in frame, ahead and above at readable scale,
+  // light on the player (its hover lag would otherwise leave it behind
+  // the camera).
   world.heli.active = true;
-  world.heli.x = gw.x - 330; world.heli.y = gw.y - 130;
+  world.heli.x = gw.x - 260; world.heli.y = gw.y - 80;
   world.heli.lightX = gw.x + 20; world.heli.lightY = gw.y + 10;
   world.heli.lightOnPlayer = true;
   game.screen = 'play';
