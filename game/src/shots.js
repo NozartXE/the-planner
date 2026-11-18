@@ -61,14 +61,32 @@ export function stageShot(name, game) {
     world.player.x = m.building.doorX + 18; world.player.y = m.building.doorY + 38;
     world.player.car = null;
     world.heat = 60; world.stars = 3;
-    // Crew beside the player, one carrying a bag.
-    world.crewMembers.forEach((c, i) => { c.x = world.player.x - 44 + i * 40; c.y = world.player.y + 34; c.hasBag = i === 0; });
+    // Crew beside the player, one carrying a bag. (3D restage: the old
+    // west-of-player slots sat between the foot camera and the player,
+    // filling the frame as cropped giants — the crew now stands ahead-
+    // north of the player, mid-frame at readable scale, still west of
+    // the police line to the east.)
+    world.crewMembers.forEach((c, i) => { c.x = world.player.x + 48 + i * 36; c.y = world.player.y - 58 + i * 10; c.hasBag = i === 0; });
+    // The getaway car and ambient traffic otherwise block the aim lane
+    // as foreground boxes in the foot camera: push the getaway south-
+    // east to the frame edge and clear non-police cars near the player.
+    if (world.getawayCar) { world.getawayCar.x = world.player.x + 165; world.getawayCar.y = world.player.y + 105; }
+    for (const car of world.cars) {
+      if (car.police || car === world.getawayCar) continue;
+      if (Math.hypot(car.x - world.player.x, car.y - world.player.y) < 230) { car.x = world.player.x + 430; car.y = world.player.y - 190; }
+    }
     // Bystander peds on the pavements around the target (existing sim
     // entities, repositioned by staging) so the street reads populated.
     world.peds.slice(0, 6).forEach((pd, i) => {
-      pd.x = world.player.x - 150 + i * 58; pd.y = world.player.y + (i % 2 === 0 ? 92 : -86);
+      // North-side peds at -34, not -86: -86 put them INSIDE the target
+      // building's footprint, where the 3D renderer showed only a head
+      // poking through the facade (painter interleaving).
+      pd.x = world.player.x - 150 + i * 58; pd.y = world.player.y + (i % 2 === 0 ? 92 : -34);
       pd.down = 0;
+      pd.walkPhase = i * 1.1 + 0.3; // varied mid-stride poses
+      pd.angle = i % 2 === 0 ? 0 : Math.PI;
     });
+    world.crewMembers.forEach((c, i) => { c.walkPhase = i * 1.3 + 0.5; });
     // Police arriving at the street.
     world.forcePolice(2, m.building.doorX + 210, m.building.doorY + 120);
     const cop = world.cars.find((c) => c.police);
@@ -89,6 +107,16 @@ export function stageShot(name, game) {
       world.particles.muzzle(cop.x + Math.cos(pa) * 26, cop.y + Math.sin(pa) * 26, pa);
       world.particles.tracer((cop.x + p.x) / 2, (cop.y + p.y) / 2, pa, d / 2, '#ffb3c1', 0.14);
     }
+    // Post-step freeze (no further steps run, so these placements are
+    // exact): the 80 sim steps dragged the crew into the follow slots
+    // right at the foot camera, where they loomed and overlapped.
+    // Restage them ahead-south-east of the player (the camera faces
+    // east-south-east, so south reads as frame-right) at readable scale.
+    world.crewMembers.forEach((c, i) => {
+      c.x = world.player.x + 92 + i * 36; c.y = world.player.y + 58 + i * 16;
+      c.angle = Math.atan2(aim.y - c.y, aim.x - c.x);
+      c.walkPhase = i * 1.3 + 0.5;
+    });
     world.camera.x = world.player.x; world.camera.y = world.player.y;
     game.screen = 'play';
     return;
@@ -264,13 +292,13 @@ export function stageShot(name, game) {
   const place = (car, x, y, ang) => { if (car) { car.x = x; car.y = y; car.angle = ang; } };
   const byId = (id) => world.cars.find((c) => c.id === id);
   place(byId(5999), 627, 992, Math.PI);
-  place(byId(6000), 800, 953, Math.PI);
-  place(byId(6001), 770, 985, Math.PI);
+  place(byId(6000), 806, 946, Math.PI);
+  place(byId(6001), 764, 1002, Math.PI);
   place(byId(6201), 870, 915, Math.PI);
-  place(byId(6202), 665, 950, Math.PI);
+  place(byId(6202), 658, 962, Math.PI);
   place(byId(6203), 500, 876, Math.PI);
   const pursuers = world.cars.filter((c) => c.police && c.id >= 5000 && c.id < 5100).sort((a, b) => a.id - b.id);
-  place(pursuers[0], 723, 904, Math.PI);
+  place(pursuers[0], 716, 892, Math.PI);
   place(pursuers[1], 848, 1032, Math.PI);
   place(pursuers[2], 207, 808, -Math.PI / 2);
   const trafficSlots = [
@@ -302,6 +330,10 @@ export function stageShot(name, game) {
     pd.x = pedSlots[i][0];
     pd.y = pedSlots[i][1];
     pd.down = 0;
+    // Mid-stride, never a standing lineup: each figure gets its own
+    // stride phase and walks along the street (east/west alternating).
+    pd.walkPhase = i * 0.9 + 0.4;
+    pd.angle = i % 2 === 0 ? 0 : Math.PI;
   });
   // Freeze the helicopter in frame, ahead and above at readable scale,
   // light on the player (its hover lag would otherwise leave it behind

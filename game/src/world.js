@@ -112,7 +112,7 @@ export function createWorld(opts = {}) {
     world.player.health = 100; world.player.bust = 0;
     // Spawn the chosen getaway car near the target, tougher with Sana driving.
     const gw = makeCar(world.rng, plan.getaway, m.building.doorX + 130, m.building.doorY + 60, 0, { id: 4000 });
-    if (plan.crew.includes('sana')) { gw.health = gw.maxHealth * 1.3; gw.maxHealth = gw.health; gw.x = m.building.doorX + 80; }
+    if (plan.crew.includes('sana')) { gw.health = Math.round(gw.maxHealth * 1.3); gw.maxHealth = gw.health; gw.x = m.building.doorX + 80; }
     gw.getaway = true;
     world.cars.push(gw);
     world.getawayCar = gw;

@@ -48,7 +48,7 @@ export const HEISTS = [
   { id: 'armored-ambush', name: 'ARMORED TRUCK AMBUSH', kind: 'bank', baseLoot: 62000, grabRate: 3800, alarmBase: 38, camDensity: 0.5, guardHeat: 36,
     brief: 'Mara Voss: "The Foundry Mule runs AURUM WAY at shift change. Stop it, empty it, be a ghost before the escort wakes."',
     entries: ['RAMMING STOP', 'REAR DOORS', 'DRIVER CAB'] },
-  { id: 'racetrack-strongroom', name: 'MERIDIAN CIRCUIT STRONGROOM', kind: 'racetrack', baseLoot: 70000, grabRate: 3200, alarmBase: 58, camDensity: 0.85, guardHeat: 32,
+  { id: 'racetrack-strongroom', name: 'SOLACE CIRCUIT STRONGROOM', kind: 'racetrack', baseLoot: 70000, grabRate: 3200, alarmBase: 58, camDensity: 0.85, guardHeat: 32,
     brief: 'Mara Voss: "Derby day takings, one strongroom, every cop in the Mile on duty. This is the big one, planner."',
     entries: ['PADDOCK GATE', 'BETTING HALL', 'WINNERS TUNNEL'] },
 ];
