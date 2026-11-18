@@ -2,12 +2,23 @@
 // Original projected-polygon renderer, vanilla canvas 2D, no libraries:
 // every face is a world-space polygon transformed into camera space
 // (third-person camera basis: right / up / forward), clipped against the
-// near plane, perspective-divided onto the full 1280x800 canvas, flat
-// shaded from ONE consistent sun direction, fogged toward the sky's fog
-// colour, and drawn far-to-near (painter's algorithm). It only READS
-// world state — the simulation is untouched — and every variation is a
+// near plane, perspective-divided onto the full 1280x800 canvas, shaded
+// from ONE consistent sun direction, fogged toward the sky's fog colour,
+// and drawn far-to-near (painter's algorithm). It only READS world
+// state — the simulation is untouched — and every variation is a
 // deterministic hash, never Math.random / Date.now, so screenshot
 // staging stays perfectly reproducible.
+//
+// PHASE 2 (realism pass, Rect 2026-11-18 20:47–20:49): a render-side
+// colour grade desaturates every world colour toward sun-baked earthy
+// tones; tall faces shade with a vertical gradient + ground-contact AO;
+// buildings, cars and figures cast long dusk shadows from the one sun;
+// figures are rebuilt on slimmer human proportions; cars gain tapered
+// cabins, sloped hoods, wheel arches, mirrors and door seams; palms are
+// broad drooping frond planes; facade windows are inset and framed
+// (with guards against embedded and camera-hugging faces); the camera
+// sits LOW behind the subject, GTA-style, and near buildings letter
+// their real sign word on the fascia.
 //
 // The world is built from real volumes: buildings are boxes with two
 // facades + roof visible at once, cars are procedural box models, and
@@ -15,7 +26,7 @@
 // two-segment arms, two two-segment legs) posed per state — walking
 // figures are caught mid-stride, the player aims with both arms.
 import { VIEW_W, VIEW_H, ROAD_W, RIVER_Y } from './config.js';
-import { AVENUES, STREETS, PLAZA, PARK, collideWorld } from './city.js';
+import { AVENUES, STREETS, PLAZA, PARK, collideWorld, insideBuilding } from './city.js';
 import { clamp } from './rng.js';
 
 const FOV = 1.10; // ~63 degrees
@@ -41,18 +52,43 @@ function rgb(hex) {
   return c;
 }
 
-// Per time-of-day look (same values the old chase view used): sky
-// gradient, fog colour, ambient light, lit-window fraction, sun place.
+// Per time-of-day look — PHASE 2 realism grade: natural late-afternoon
+// light (warm key, cooler sky fill), grounded haze instead of the flat
+// cartoon purple/pink skies of phase 1.
 const SKIES = {
-  day:   { top: [64, 138, 208], hor: [190, 232, 240], fog: [190, 232, 240], amb: 1.0,  lit: 0.06, sunAz: 0.9,  sunEl: 0.62, sun: [255, 244, 200] },
-  dawn:  { top: [104, 72, 150], hor: [255, 166, 122], fog: [238, 150, 122], amb: 0.86, lit: 0.30, sunAz: 0.0,  sunEl: 0.10, sun: [255, 196, 110] },
-  dusk:  { top: [92, 44, 138],  hor: [255, 138, 118], fog: [216, 138, 172], amb: 0.80, lit: 0.48, sunAz: Math.PI, sunEl: 0.07, sun: [255, 178, 84] },
-  night: { top: [16, 12, 44],   hor: [62, 34, 88],    fog: [40, 26, 66],    amb: 0.46, lit: 0.62, sunAz: 2.2,  sunEl: 0.42, sun: [214, 226, 245] },
+  day:   { top: [86, 132, 178], hor: [198, 214, 220], fog: [186, 198, 202], amb: 0.96, lit: 0.06, sunAz: 0.9,  sunEl: 0.62, sun: [255, 240, 205] },
+  dawn:  { top: [88, 94, 130],  hor: [233, 166, 118], fog: [208, 162, 134], amb: 0.84, lit: 0.28, sunAz: 0.0,  sunEl: 0.11, sun: [255, 192, 116] },
+  dusk:  { top: [72, 84, 128],  hor: [240, 160, 102], fog: [200, 152, 126], amb: 0.78, lit: 0.42, sunAz: Math.PI, sunEl: 0.09, sun: [255, 174, 92] },
+  night: { top: [13, 17, 36],   hor: [44, 48, 70],    fog: [35, 37, 56],    amb: 0.46, lit: 0.62, sunAz: 2.2,  sunEl: 0.42, sun: [210, 220, 240] },
 };
-const GRASS = ['#3d8f4e', '#357f45', '#47975a', '#3a7d4c', '#418a52', '#6f7268', '#7a7d72'].map(rgb);
-const ASPHALT = [50, 53, 61], SIDEWALK = [140, 147, 154], DASH = [245, 215, 110];
-const EDGE = [196, 201, 206], SAND = [232, 207, 143], WATER = [19, 84, 122];
-const PLAZA_C = [141, 133, 120], LAWN = [47, 125, 58], POND = [30, 127, 184];
+// Grounded, sun-baked ground tones (dry olive grass, warm concrete) —
+// the saturated cartoon greens/blues of phase 1 are gone.
+const GRASS = ['#5c7247', '#546b42', '#637652', '#576a4b', '#5f7451', '#6f7268', '#7a7d72'].map(rgb);
+const ASPHALT = [52, 52, 57], SIDEWALK = [139, 134, 126], DASH = [226, 196, 118];
+const EDGE = [188, 186, 178], SAND = [208, 184, 140], WATER = [36, 84, 108];
+const PLAZA_C = [137, 129, 117], LAWN = [74, 102, 60], POND = [52, 102, 128];
+
+// PHASE 2 colour grade (brief A): every world colour is desaturated and
+// pulled toward earthy, sun-baked tones BEFORE shading, so the bright
+// flat data colours (city.js / heists.js, untouched) never reach the
+// screen raw. Emissive faces (light factor >= 1.2: lamps, tail lights,
+// neon) skip the grade so signals still read.
+const gradeCache = new Map();
+function gradeCol(c) {
+  const key = (c[0] << 16) | (c[1] << 8) | c[2];
+  let g = gradeCache.get(key);
+  if (!g) {
+    const lum = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+    const sat = 0.30; // pull 30% toward luminance
+    g = [
+      clamp((c[0] + (lum - c[0]) * sat) * 1.04, 0, 255),
+      clamp((c[1] + (lum - c[1]) * sat) * 0.97, 0, 255),
+      clamp((c[2] + (lum - c[2]) * sat) * 0.86, 0, 255),
+    ];
+    gradeCache.set(key, g);
+  }
+  return g;
+}
 
 const KIND_TALL = { casino: 96, bank: 74, office: 84, data: 62, hotel: 72, flats: 64, museum: 34, club: 24, civic: 30, police: 44 };
 function buildingHeight(b) {
@@ -61,7 +97,7 @@ function buildingHeight(b) {
 
 // Render-only kerb-parked cars, derived deterministically from the road
 // grid (seeded hashes): street dressing that never touches the sim.
-const PARKED_COLORS = ['#e8d5c4', '#d9a08a', '#8fb8c8', '#d8a8b8', '#a8c8a0', '#e6d9a8', '#b8aed8', '#f0e6d8'];
+const PARKED_COLORS = ['#c9b6a2', '#a3866f', '#7e939e', '#a8838e', '#8f9c80', '#c2b28f', '#8f8a99', '#d3c8b4'];
 let parkedCache = null;
 function parkedCars() {
   if (parkedCache) return parkedCache;
@@ -100,7 +136,7 @@ function newFrame(camPos, fwd) {
   const f = norm3(fwd);
   const r = norm3([-f[1], f[0], 0]); // horizontal right, same convention as the sim views
   const u = cross3(f, r);
-  return { cam: camPos, f, r, u, faces: [] };
+  return { cam: camPos, f, r, u, faces: [], signs: [] };
 }
 function norm3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
 function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
@@ -150,11 +186,23 @@ function addPoly(pts, base, opts = {}) {
   const fogT = clamp((depth - 200) / 1150, 0, 0.62) * (opts.noFog ? 0 : 1);
   const fog = F.sky.fog;
   const a = opts.alpha === undefined ? 1 : opts.alpha;
-  const rC = clamp(base[0] * light + (fog[0] - base[0] * light) * fogT, 0, 255);
-  const gC = clamp(base[1] * light + (fog[1] - base[1] * light) * fogT, 0, 255);
-  const bC = clamp(base[2] * light + (fog[2] - base[2] * light) * fogT, 0, 255);
-  const col = a >= 1 ? `rgb(${rC | 0},${gC | 0},${bC | 0})` : `rgba(${rC | 0},${gC | 0},${bC | 0},${a})`;
-  F.faces.push({ pts: clipped.map(projectCam), depth, col });
+  // Render-side realism grade (emissive faces keep their raw signal colour).
+  const gBase = (opts.light !== undefined && opts.light >= 1.2) || opts.noGrade ? base : gradeCol(base);
+  const shade = (L) => {
+    const rC = clamp(gBase[0] * L + (fog[0] - gBase[0] * L) * fogT, 0, 255);
+    const gC = clamp(gBase[1] * L + (fog[1] - gBase[1] * L) * fogT, 0, 255);
+    const bC = clamp(gBase[2] * L + (fog[2] - gBase[2] * L) * fogT, 0, 255);
+    return a >= 1 ? `rgb(${rC | 0},${gC | 0},${bC | 0})` : `rgba(${rC | 0},${gC | 0},${bC | 0},${a})`;
+  };
+  const face = { pts: clipped.map(projectCam), depth, col: shade(light) };
+  // PHASE 2 graduated shading (brief B): tall faces carry a vertical
+  // gradient — brighter at the top, a darker ambient-occlusion falloff
+  // toward the ground contact — instead of one flat tone per face.
+  if (opts.vGrad && a >= 1) {
+    face.colTop = shade(Math.min(1.35, light * 1.13));
+    face.colBot = shade(light * 0.60);
+  }
+  F.faces.push(face);
 }
 function addQuad(p0, p1, p2, p3, base, opts) { addPoly([p0, p1, p2, p3], base, opts); }
 
@@ -205,15 +253,15 @@ function addLimb(p0, p1, w, d, base, sideHint, opts = {}) {
 // ONE shadow system for every actor: the footprint polygon on the ground,
 // stretched AWAY from the sun, in two alpha layers (soft edge) — never an
 // identical ellipse disc. Altitude (helicopter) lengthens the stretch.
-function addShadow(x, y, hx, hy, yaw, stretch, alpha = 0.30) {
-  const c = Math.cos(yaw), s = Math.sin(yaw);
-  const corners = [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]].map(([lx, ly]) => [x + lx * c - ly * s, y + lx * s + ly * c]);
+// PHASE 2: the stretch is scaled by F.shadowK (long dusk shadows from the
+// one low sun) and BUILDINGS cast through the same hull path, so every
+// object sits IN the light instead of on top of it.
+function shadowHull(corners, stretch) {
   const off = [-F.sunDir[0] * stretch, -F.sunDir[1] * stretch];
-  const hullPts = [];
-  for (const [px, py] of corners) hullPts.push([px, py, 0.4]);
-  for (const [px, py] of corners) hullPts.push([px + off[0], py + off[1], 0.4]);
-  // Convex hull (monotone chain) of footprint + stretched footprint.
-  const pts2 = hullPts.map((p) => [p[0], p[1]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const pts2 = [];
+  for (const [px, py] of corners) pts2.push([px, py]);
+  for (const [px, py] of corners) pts2.push([px + off[0], py + off[1]]);
+  pts2.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   const cross2 = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
   const lower = [], upper = [];
   for (const p of pts2) {
@@ -225,10 +273,28 @@ function addShadow(x, y, hx, hy, yaw, stretch, alpha = 0.30) {
     while (upper.length >= 2 && cross2(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
     upper.push(p);
   }
-  const hull = lower.slice(0, -1).concat(upper.slice(0, -1)).map(([px, py]) => [px, py, 0.4]);
-  if (hull.length >= 3) addPoly(hull, [8, 8, 12], { alpha: alpha * 0.55, light: 1, noFog: false });
+  return { hull: lower.slice(0, -1).concat(upper.slice(0, -1)), off };
+}
+function addShadow(x, y, hx, hy, yaw, stretch, alpha = 0.30) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  const corners = [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]].map(([lx, ly]) => [x + lx * c - ly * s, y + lx * s + ly * c]);
+  const st = stretch * (F.shadowK || 1);
+  const { hull, off } = shadowHull(corners, st);
+  if (hull.length >= 3) addPoly(hull.map(([px, py]) => [px, py, 0.4]), [8, 8, 12], { alpha: alpha * 0.55, light: 1, noGrade: true });
   const inner = corners.map(([px, py]) => [px + off[0] * 0.4, py + off[1] * 0.4, 0.5]);
-  addPoly(inner, [8, 8, 12], { alpha, light: 1 });
+  addPoly(inner, [8, 8, 12], { alpha, light: 1, noGrade: true });
+}
+// A building's real cast shadow: its whole footprint extruded away from
+// the sun by a height-driven length (capped), one soft dark polygon.
+function addBuildingShadow(b, H) {
+  const corners = [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h]];
+  const len = clamp(H * 0.55 * (F.shadowK || 1), 50, 380);
+  const { hull } = shadowHull(corners, len);
+  if (hull.length >= 3) addPoly(hull.map(([px, py]) => [px, py, 0.35]), [10, 9, 12], { alpha: 0.30, light: 1, noGrade: true });
+  // Ambient-occlusion contact band: a slightly larger dark footprint
+  // directly under the walls so the box meets the ground with weight.
+  const m = 5;
+  addPoly([[b.x - m, b.y - m, 0.45], [b.x + b.w + m, b.y - m, 0.45], [b.x + b.w + m, b.y + b.h + m, 0.45], [b.x - m, b.y + b.h + m, 0.45]], [10, 10, 12], { alpha: 0.22, light: 1, noGrade: true });
 }
 function addDisc(x, y, z, radius, base, opts = {}) {
   const pts = [];
@@ -330,7 +396,8 @@ function drawBuilding(b) {
   const base = rgb(b.color);
   const roofC = rgb(b.roof);
   const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-  addBox(cx, cy, H / 2, b.w / 2, b.h / 2, H / 2, 0, base, { top: roofC });
+  addBuildingShadow(b, H); // real cast shadow + AO contact band (brief B)
+  addBox(cx, cy, H / 2, b.w / 2, b.h / 2, H / 2, 0, base, { top: roofC, vGrad: true });
   // Parapet: a slightly oversized thin box capping the roofline.
   addBox(cx, cy, H + 2, b.w / 2 + 2.5, b.h / 2 + 2.5, 2.5, 0, roofC, { top: roofC });
   // Roof props (AC boxes), deterministic per building.
@@ -352,8 +419,59 @@ function drawBuilding(b) {
   const winOff = hash01(bid * 47) * colW;
   const neon = (b.kind === 'club' || b.kind === 'casino') ? [255, 113, 206] : [255, 196, 92];
   const distC = Math.hypot(dx, dy);
+  let signDone = false;
   for (const face of faces) {
-    const mk = (along, z) => face.axis === 'y' ? [along, face.fixed, z] : [face.fixed, along, z];
+    // Embedded-face guard: the city lots overlap, so one building's
+    // face can sit INSIDE a neighbour's footprint — its windows and
+    // shopfronts would painter-sort through the neighbour's wall and
+    // read as floating slabs. Detail only faces whose outward strip
+    // is open air.
+    if (F.city) {
+      const midA = (face.from + face.to) / 2;
+      const probe = face.axis === 'y'
+        ? [midA, face.fixed + face.out[1] * 10]
+        : [face.fixed + face.out[0] * 10, midA];
+      const host = insideBuilding(F.city, probe[0], probe[1], 0);
+      if (host && host.id !== b.id) continue;
+    }
+    // Canyon-wall guard: a face passing right beside the camera (the
+    // chase canyon walls) gets its wall polygon near-plane-clipped
+    // away while its window quads — each sorted by its own centroid —
+    // survive and explode into giant floating slabs. Faces closer
+    // than ~110 units to the camera keep their graduated wall only.
+    {
+      const perp = face.axis === 'y' ? Math.abs(F.cam[1] - face.fixed) : Math.abs(F.cam[0] - face.fixed);
+      const alongCam = face.axis === 'y' ? F.cam[0] : F.cam[1];
+      if (perp < 110 && alongCam > face.from - 40 && alongCam < face.to + 40) continue;
+    }
+    // mk(along, z, off): off nudges the quad along the face normal —
+    // frames sit at off -0.22 (recessed against the wall), glass at 0
+    // (proud of the frame), so windows read INSET, never floating slabs.
+    const mk = (along, z, off = 0) => face.axis === 'y'
+      ? [along, face.fixed + face.out[1] * off, z]
+      : [face.fixed + face.out[0] * off, along, z];
+    // Readable signage for near buildings: the fascia band gets the
+    // building's real sign word projected as text in the post-pass
+    // (the GTA-texture equivalent), collected once per building. The
+    // mission TARGET also gets a street-level sign above its shopfront
+    // — tall roofs crop out of a low camera's frame, storefront signs
+    // are how real street signage reads.
+    if (b.sign && distC < 660 && !signDone) {
+      signDone = true;
+      const mid = (face.from + face.to) / 2;
+      const sp = mk(mid, H - 8.5, 0.4);
+      const pr = projectPoint(sp[0], sp[1], sp[2]);
+      if (pr && pr.x > -80 && pr.x < VIEW_W + 80 && pr.y > -30 && pr.y < VIEW_H + 30) {
+        F.signs.push({ x: pr.x, y: pr.y, dist: pr.dist, text: b.sign, name: b.name, neon: (b.kind === 'club' || b.kind === 'casino') });
+      }
+      if (b.id === F.targetId) {
+        const gp = mk(mid, 31, 0.4);
+        const gpr = projectPoint(gp[0], gp[1], gp[2]);
+        if (gpr && gpr.x > -40 && gpr.x < VIEW_W + 40 && gpr.y > -20 && gpr.y < VIEW_H + 20) {
+          F.signs.push({ x: gpr.x, y: gpr.y, dist: gpr.dist, text: b.name, name: b.name, neon: (b.kind === 'club' || b.kind === 'casino'), ground: true });
+        }
+      }
+    }
     // Sign band near the roof: lit letter-block rhythm on a dark fascia.
     addQuad(mk(face.from + 4, H - 14), mk(face.to - 4, H - 14), mk(face.to - 4, H - 3.5), mk(face.from + 4, H - 3.5), [16, 14, 26], { light: 0.9 });
     const segLen = 11;
@@ -362,26 +480,33 @@ function drawBuilding(b) {
         addQuad(mk(a0, H - 11.5), mk(a0 + segLen * 0.6, H - 11.5), mk(a0 + segLen * 0.6, H - 6), mk(a0, H - 6), neon, { light: 1.25 });
       }
     }
-    // Shopfront: glowing bays at ground level + a thin awning slab.
+    // Shopfront: FRAMED glass bays at ground level (dark frame + inset
+    // glass, warm-dim lit or reflective dark) + a thin awning slab —
+    // never one flat slab of colour.
     for (let a0 = face.from + 7; a0 < face.to - 14; a0 += colW + 12) {
-      if (hash01(bid * 83 + Math.floor(a0 / (colW + 12)) * 19) < 0.82) {
-        addQuad(mk(a0, 3.5), mk(a0 + colW, 3.5), mk(a0 + colW, 22), mk(a0, 22), [255, 188, 104], { light: 1.05 });
-      } else {
-        addQuad(mk(a0, 3.5), mk(a0 + colW, 3.5), mk(a0 + colW, 22), mk(a0, 22), [24, 32, 48], { light: 0.9 });
-      }
+      const litBay = hash01(bid * 83 + Math.floor(a0 / (colW + 12)) * 19) < 0.78;
+      addQuad(mk(a0, 3.5, -0.22), mk(a0 + colW, 3.5, -0.22), mk(a0 + colW, 20), mk(a0, 20, -0.22), [26, 27, 33], { light: 0.9 });
+      addQuad(mk(a0 + 1.6, 5), mk(a0 + colW - 1.6, 5), mk(a0 + colW - 1.6, 18.5), mk(a0 + 1.6, 18.5), litBay ? [226, 168, 108] : [58, 70, 86], { light: litBay ? 0.98 : 0.95 });
+      addQuad(mk(a0 + colW / 2 - 0.8, 5), mk(a0 + colW / 2 + 0.8, 5), mk(a0 + colW / 2 + 0.8, 18.5), mk(a0 + colW / 2 - 0.8, 18.5), [26, 27, 33], { light: 0.9 });
     }
     addQuad(mk(face.from + 3, 23), mk(face.to - 3, 23), mk(face.to - 3, 26), mk(face.from + 3, 26), roofC, { light: 0.8 });
-    // Windows: small projected quads in a per-building rhythm.
-    if (distC < 760) {
+    // Windows: INSET, FRAMED quads in a strict regular rhythm (brief E4)
+    // — a recessed dark frame slightly larger than the glass, drawn on
+    // every facade that faces the camera, full height and width.
+    if (distC < 820) {
+      const frameC = [44, 45, 52];
       for (let a0 = face.from + 9 + winOff; a0 < face.to - 12; a0 += colW) {
         const colSeed = Math.floor((a0 + winOff) / colW);
         for (let z0 = 34; z0 < H - 20; z0 += rowH) {
           const wh = hash01(bid * 131 + Math.floor(z0 / rowH) * 17 + colSeed * 7 + (face.axis === 'x' ? 900 : 0));
           const litWin = wh < F.sky.lit;
+          // Unlit glass is a mid blue-grey SKY REFLECTION, never a black
+          // hole — black window slabs were the phase-1/2 facade defect.
           const wc = litWin
             ? (hash01(bid * 139 + Math.floor(z0 / rowH) + colSeed * 3) < 0.3 ? [168, 204, 255] : [255, 196, 104])
-            : [34, 44, 62];
-          addQuad(mk(a0, z0), mk(a0 + colW * 0.52, z0), mk(a0 + colW * 0.52, z0 + rowH * 0.52), mk(a0, z0 + rowH * 0.52), wc, { light: litWin ? 1.15 : 1.0 });
+            : [94, 110, 130];
+          addQuad(mk(a0, z0, -0.22), mk(a0 + colW * 0.58, z0, -0.22), mk(a0 + colW * 0.58, z0 + rowH * 0.58, -0.22), mk(a0, z0 + rowH * 0.58, -0.22), frameC, { light: 0.95 });
+          addQuad(mk(a0 + colW * 0.06, z0 + rowH * 0.06), mk(a0 + colW * 0.52, z0 + rowH * 0.06), mk(a0 + colW * 0.52, z0 + rowH * 0.52), mk(a0 + colW * 0.06, z0 + rowH * 0.52), wc, { light: litWin ? 1.15 : 1.02 });
         }
       }
     }
@@ -401,14 +526,44 @@ function drawCar(car, world, isHero) {
   const yaw = car.angle;
   const body = car.disabled ? [85, 91, 102] : rgb(car.color);
   const bodyTop = body.map((v) => Math.min(255, v * 1.22));
-  addShadow(car.x, car.y, 24, 13, yaw, 26, 0.32);
-  addBox(car.x, car.y, 9, 23, 12, 6, yaw, body, { top: bodyTop });
-  // Cabin (glass): lower and narrower than the body, toward the front.
-  const cabOff = [Math.cos(yaw) * 3, Math.sin(yaw) * 3];
-  addBox(car.x + cabOff[0], car.y + cabOff[1], 17.8, 11, 9, 3.2, yaw, GLASS, { top: [22, 30, 46] });
-  // Wheels: dark boxes at the four corners.
+  addShadow(car.x, car.y, 24, 13, yaw, 30, 0.32);
+  // PHASE 2 vehicle detail (brief D): the car is assembled from a lower
+  // body, SLOPED hood and trunk faces, a TAPERED cabin (frame, glass,
+  // narrower roof), wheel-arch darkening, bumpers, mirrors and door
+  // seams — it must read as a vehicle, not a box on wheels.
   const c = Math.cos(yaw), s = Math.sin(yaw);
+  const L = (lx, ly, lz) => [car.x + lx * c - ly * s, car.y + lx * s + ly * c, lz];
+  addBox(car.x, car.y, 8.5, 23, 12, 5.5, yaw, body, { top: bodyTop, vGrad: true });
+  // Sloped hood (front, +x) and trunk (rear) top faces.
+  addQuad(L(23, -11, 11.5), L(23, 11, 11.5), L(9, 10.4, 14.2), L(9, -10.4, 14.2), bodyTop, {});
+  addQuad(L(-9, -10.4, 14.2), L(-9, 10.4, 14.2), L(-23, 11, 11.8), L(-23, -11, 11.8), bodyTop, {});
+  // Bumpers front/rear + dark side skirt strip.
+  addBox(car.x + c * 23.6, car.y + s * 23.6, 5.2, 1.7, 11.2, 2.4, yaw, [30, 31, 36], {});
+  addBox(car.x - c * 23.6, car.y - s * 23.6, 5.2, 1.7, 11.2, 2.4, yaw, [30, 31, 36], {});
+  addBox(car.x, car.y, 3.1, 19, 12.18, 1.1, yaw, [24, 25, 30], {});
+  // Cabin: body-colour frame, inset glass, narrower roof (the taper),
+  // sloped windshield + rear glass.
+  const cabOff = [Math.cos(yaw) * 2, Math.sin(yaw) * 2];
+  addBox(car.x + cabOff[0], car.y + cabOff[1], 16.6, 10.2, 9.5, 3.4, yaw, body.map((v) => v * 0.82), { top: bodyTop });
+  addBox(car.x + cabOff[0], car.y + cabOff[1], 16.8, 9.4, 8.7, 3.0, yaw, GLASS, { top: [22, 30, 46] });
+  addBox(car.x + cabOff[0], car.y + cabOff[1], 20.3, 8.4, 8.1, 0.9, yaw, bodyTop, {});
+  addQuad(L(11.5, -8.2, 14.4), L(11.5, 8.2, 14.4), L(7.5, 7.6, 19.6), L(7.5, -7.6, 19.6), GLASS, { light: 1.05 });
+  addQuad(L(-3.5, -7.6, 19.6), L(-3.5, 7.6, 19.6), L(-7.5, 8.2, 14.4), L(-7.5, -8.2, 14.4), GLASS, { light: 1.05 });
+  // Mirrors on the cabin's front corners.
+  for (const sy of [1, -1]) {
+    const mp = L(10.5, sy * 10.8, 17.6);
+    addBox(mp[0], mp[1], mp[2], 1.3, 2.3, 1.7, yaw, [22, 23, 28], {});
+  }
+  // Door seams: two thin dark verticals per side + a handle tick.
+  for (const sy of [1, -1]) {
+    for (const lx of [-3, 6.5]) {
+      addQuad(L(lx, sy * 12.14, 4.5), L(lx + 0.7, sy * 12.14, 4.5), L(lx + 0.7, sy * 12.14, 13.6), L(lx, sy * 12.14, 13.6), [16, 17, 21], { light: 0.9 });
+    }
+    addQuad(L(4.6, sy * 12.14, 11.6), L(7.6, sy * 12.14, 11.6), L(7.6, sy * 12.14, 12.6), L(4.6, sy * 12.14, 12.6), [16, 17, 21], { light: 0.9 });
+  }
+  // Wheel arches (dark, slightly proud of the body) + wheels inside.
   for (const [lx, ly] of [[15, 12.2], [15, -12.2], [-15, 12.2], [-15, -12.2]]) {
+    addBox(car.x + lx * c - ly * s, car.y + lx * s + ly * c, 4.4, 5.6, 2.3, 4.4, yaw, [13, 13, 16], {});
     addBox(car.x + lx * c - ly * s, car.y + lx * s + ly * c, 3.6, 4.6, 1.9, 3.6, yaw, TYRE, {});
   }
   // Light quads on the rear / front faces.
@@ -442,7 +597,7 @@ function drawCar(car, world, isHero) {
     addBox(car.x + wingOff[0], car.y + wingOff[1], 24.2, 2.2, 11, 1.2, yaw, DARK, {});
     for (const sy of [7, -7]) {
       const stOff = [Math.cos(yaw) * -20 - Math.sin(yaw) * sy, Math.sin(yaw) * -20 + Math.cos(yaw) * sy];
-      addBox(car.x + stOff[0], car.y + stOff[1], 21.8, 1.4, 1.4, 1.8, yaw, DARK, {});
+      addBox(car.x + stOff[0], car.y + stOff[1], 18.6, 1.4, 1.4, 4.6, yaw, DARK, {});
     }
     quadAt(-23.4, 0, 11.5, 10, 1.9, [255, 36, 56], 1.6);   // tail bar
     quadAt(-23.4, 0, 6.2, 4.6, 2.4, [232, 236, 241], 1.1); // plate
@@ -503,61 +658,71 @@ function drawFigure(o) {
   const pose = o.pose, ph = o.phase || 0;
   const crouch = pose === 'aim' ? 2 : 0;
   const lean = pose === 'run' ? 4.5 : pose === 'aim' ? 2.5 : pose === 'walk' ? 1.2 : 0;
-  const hipZ = 18 - crouch, shoZ = 30.5 - crouch;
-  // Legs: thigh + shin per side.
+  // PHASE 2 proportions (brief C): longer legs, slimmer torso, smaller
+  // head — total height ~42 world units with a ~6.6-unit head, separated
+  // shoe/hand tones and a shaped hair mass, so figures stop reading as
+  // block mannequins. Shoulders sit narrower than the old build; hips
+  // narrower than shoulders.
+  const hipZ = 19.5 - crouch, shoZ = 33 - crouch;
+  // Legs: thigh + shin per side (segments 9.5 + 9.5).
   for (const sideSign of [1, -1]) {
-    const hip = P(0, sideSign * 3.2, hipZ);
+    const hip = P(0, sideSign * 2.7, hipZ);
     let knee, foot;
     if (pose === 'walk' || pose === 'run') {
       const amp = pose === 'run' ? 0.85 : 0.52;
       const sw = Math.sin(ph + (sideSign > 0 ? 0 : Math.PI)) * amp;
       const sw2 = sw - (pose === 'run' ? 0.55 : 0.38);
-      knee = P(Math.sin(sw) * 8, sideSign * 3.2, hipZ - Math.cos(sw) * 8);
-      foot = P(Math.sin(sw) * 8 + Math.sin(sw2) * 8, sideSign * 3.2, Math.max(1.2, hipZ - Math.cos(sw) * 8 - Math.cos(sw2) * 8));
+      knee = P(Math.sin(sw) * 9.5, sideSign * 2.7, hipZ - Math.cos(sw) * 9.5);
+      foot = P(Math.sin(sw) * 9.5 + Math.sin(sw2) * 9.5, sideSign * 2.7, Math.max(1.2, hipZ - Math.cos(sw) * 9.5 - Math.cos(sw2) * 9.5));
     } else if (pose === 'aim') {
-      if (sideSign > 0) { knee = P(5, 3.6, hipZ - 7.5); foot = P(10, 4, 1.2); }
-      else { knee = P(-3, -3.6, hipZ - 8); foot = P(-7.5, -4.2, 1.2); }
+      if (sideSign > 0) { knee = P(5.5, 3, hipZ - 9); foot = P(11, 3.4, 1.2); }
+      else { knee = P(-3.5, -3, hipZ - 9.5); foot = P(-8.5, -3.6, 1.2); }
     } else {
-      knee = P(0.4, sideSign * 3.5, hipZ - 8);
-      foot = P(0.8, sideSign * 4.4, 1.2);
+      knee = P(0.4, sideSign * 2.9, hipZ - 9.5);
+      foot = P(0.8, sideSign * 3.6, 1.2);
     }
-    addLimb(hip, knee, 4.4, 4.4, pants, [0, 0, 1]);
-    addLimb(knee, foot, 3.8, 3.8, pants, [0, 0, 1]);
-    addBox(foot[0] + f[0] * 1.6, foot[1] + f[1] * 1.6, 1.1, 3.2, 2, 1.1, a, [17, 18, 22], {}); // shoe
+    addLimb(hip, knee, 3.5, 3.5, pants, [0, 0, 1]);
+    addLimb(knee, foot, 2.9, 2.9, pants, [0, 0, 1]);
+    // Shoe: its own dark tone, longer than wide, toe forward.
+    addBox(foot[0] + f[0] * 1.9, foot[1] + f[1] * 1.9, 1.1, 3.4, 1.9, 1.1, a, [26, 22, 19], {});
   }
-  // Pelvis + torso.
-  addBox(o.x, o.y, hipZ - 1.5, 4.6, 5.6, 2.6, a, pants, {});
+  // Pelvis (narrow) + torso (slimmer, shallower than phase 1).
+  addBox(o.x, o.y, hipZ - 1.5, 3.9, 4.7, 2.4, a, pants, {});
   const hipC = P(0, 0, hipZ + 1), shoC = P(lean, 0, shoZ);
-  addLimb(hipC, shoC, 9.5, 6, shirt, [s[0], s[1], 0]);
-  // Head + hair cap (+ uniform cap for officers, + cap option).
-  const headC = P(lean + 0.4, 0, shoZ + 6.2);
-  addBox(headC[0], headC[1], headC[2], 3.7, 3.9, 4.1, a, skin, {});
+  addLimb(hipC, shoC, 7.4, 4.6, shirt, [s[0], s[1], 0]);
+  // Head: smaller relative to the body; hair is a shaped mass (top +
+  // back fall), not a flat box cap. Officers keep the uniform cap.
+  const headC = P(lean + 0.4, 0, shoZ + 5.4);
+  addBox(headC[0], headC[1], headC[2], 2.9, 3.05, 3.3, a, skin, {});
   if (o.cap) {
-    addBox(headC[0], headC[1], headC[2] + 4.3, 4.1, 4.2, 1.4, a, o.cap, {});
-    const brim = P(lean + 5, 0, shoZ + 10);
-    addBox(brim[0], brim[1], brim[2], 3.2, 4, 0.7, a, o.cap, {});
+    addBox(headC[0], headC[1], headC[2] + 3.5, 3.2, 3.3, 1.2, a, o.cap, {});
+    const brim = P(lean + 4.6, 0, shoZ + 8.6);
+    addBox(brim[0], brim[1], brim[2], 2.8, 3.4, 0.6, a, o.cap, {});
   } else {
-    addBox(headC[0], headC[1], headC[2] + 3.6, 4, 4.2, 1.8, a, hair, {});
+    addBox(headC[0], headC[1], headC[2] + 2.9, 3.05, 3.2, 1.5, a, hair, {});
+    const back = P(lean - 1.1, 0, shoZ + 6.4);
+    addBox(back[0], back[1], back[2], 2.2, 3.2, 2.4, a, hair, {});
   }
-  // Arms: upper + forearm per side.
+  // Arms: slimmer segments, shoulder line at ±4.9, hands in skin tone.
   for (const sideSign of [1, -1]) {
-    const sho = P(lean, sideSign * 5.9, shoZ - 0.5);
+    const sho = P(lean, sideSign * 4.9, shoZ - 0.5);
     let elbow, hand;
     if (pose === 'aim') {
-      elbow = P(lean + 7, sideSign * 4.6, shoZ - 1.5);
-      hand = P(lean + 14, sideSign * 1.6, shoZ - 0.5);
+      elbow = P(lean + 7, sideSign * 3.9, shoZ - 1.5);
+      hand = P(lean + 14.5, sideSign * 1.4, shoZ - 0.5);
     } else if (pose === 'walk' || pose === 'run') {
       const amp = pose === 'run' ? 0.8 : 0.45;
       const sw = Math.sin(ph + (sideSign > 0 ? Math.PI : 0)) * amp; // opposite to the same-side leg
-      elbow = P(lean + Math.sin(sw) * 7, sideSign * 6.2, shoZ - 0.5 - Math.cos(sw) * 7);
+      elbow = P(lean + Math.sin(sw) * 7.5, sideSign * 5.2, shoZ - 0.5 - Math.cos(sw) * 7.5);
       const sw2 = sw * 0.7 - 0.35;
-      hand = P(lean + Math.sin(sw) * 7 + Math.sin(sw2) * 6.5, sideSign * 6.2, shoZ - 0.5 - Math.cos(sw) * 7 - Math.cos(sw2) * 6.5);
+      hand = P(lean + Math.sin(sw) * 7.5 + Math.sin(sw2) * 7, sideSign * 5.2, shoZ - 0.5 - Math.cos(sw) * 7.5 - Math.cos(sw2) * 7);
     } else {
-      elbow = P(lean + 1, sideSign * 6.2, shoZ - 7.5);
-      hand = P(lean + 2.2, sideSign * 6, shoZ - 14);
+      elbow = P(lean + 1, sideSign * 5.2, shoZ - 8);
+      hand = P(lean + 2.2, sideSign * 5, shoZ - 15);
     }
-    addLimb(sho, elbow, 3.6, 3.6, shirt, [0, 0, 1]);
-    addLimb(elbow, hand, 3, 3, skin, [0, 0, 1]);
+    addLimb(sho, elbow, 2.9, 2.9, shirt, [0, 0, 1]);
+    addLimb(elbow, hand, 2.4, 2.4, skin, [0, 0, 1]);
+    addBox(hand[0], hand[1], hand[2], 1.7, 1.7, 1.7, a, skin, {}); // hand
     if (pose === 'aim' && sideSign > 0) { // pistol in the lead hand
       const g0 = hand, g1 = P(lean + 20, 1, shoZ - 0.5);
       addLimb(g0, g1, 2.2, 3.2, [24, 26, 32], [0, 0, 1]);
@@ -631,41 +796,58 @@ function drawHeli(world) {
 function drawProp(pr) {
   const dx = pr.x - F.cam[0], dy = pr.y - F.cam[1];
   if (dx * dx + dy * dy > 640 * 640) return;
-  // A prop right at the camera projects as a frame-long sliver (near-
+  // A prop right at the camera projects as a frame-filling box (near-
   // plane stretch) — skip the closest dressing, it would be cropped
   // out of the frame anyway.
-  if (dx * dx + dy * dy < 55 * 55) return;
+  if (dx * dx + dy * dy < 130 * 130) return;
   const seed = Math.floor(Math.abs(pr.x) * 3 + Math.abs(pr.y) * 7);
   if (pr.kind === 'palm') {
-    const variant = hash01(seed) < 0.5 ? 1 : 1.9;
+    // PHASE 2 palm rebuild (brief E3): fronds are BROAD drooping planes
+    // joined at the crown — wide at the base, widest at the mid-bend,
+    // falling to the tip — in two lean variants. No more spike/glitch
+    // lines: every frond is a 6-point bent plane with real width.
+    const variant = hash01(seed) < 0.5 ? 0.55 : 1.5; // two lean variants
     const leanA = hash01(seed + 5) * Math.PI * 2;
     const ld = [Math.cos(leanA), Math.sin(leanA)];
     let px = pr.x, py = pr.y, pz = 0;
-    for (let i = 0; i < 4; i++) {
-      const nx = px + ld[0] * 2.3 * variant, ny = py + ld[1] * 2.3 * variant, nz = pz + 12;
-      addLimb([px, py, pz + 1], [nx, ny, nz], 5.4 - i * 0.5, 5.4 - i * 0.5, [90, 62, 34], [0, 0, 1]);
+    for (let i = 0; i < 5; i++) {
+      const nx = px + ld[0] * 2.1 * variant, ny = py + ld[1] * 2.1 * variant, nz = pz + 11;
+      addLimb([px, py, pz + 1], [nx, ny, nz], 5.6 - i * 0.55, 5.6 - i * 0.55, [96, 74, 48], [0, 0, 1]);
       px = nx; py = ny; pz = nz;
     }
-    addBox(px, py, pz + 1, 3.4, 3.4, 3, 0, [70, 48, 26], {}); // crown
+    addBox(px, py, pz + 1, 3.6, 3.6, 3, 0, [80, 60, 34], {}); // crown
+    // Coconut cluster tucked under the crown.
+    for (let i = 0; i < 3; i++) {
+      const ca = (i / 3) * Math.PI * 2 + hash01(seed + 21) * 2;
+      addBox(px + Math.cos(ca) * 3.4, py + Math.sin(ca) * 3.4, pz - 1.5, 2.2, 2.2, 2.2, 0, [104, 84, 44], {});
+    }
     const crownCamZ = toCam([px, py, pz])[2];
-    for (let i = 0; i < 6; i++) {
-      const la = (i / 6) * Math.PI * 2 + hash01(seed + i) * 0.5;
+    const frond = (la, len, drop, wBase, wMid, col) => {
       const dir = [Math.cos(la), Math.sin(la)];
       const perp = [-dir[1], dir[0]];
-      const tip = [px + dir[0] * 33, py + dir[1] * 33, pz - 10];
+      const tip = [px + dir[0] * len, py + dir[1] * len, pz + 2 - drop];
       // A frond pointing straight at the camera projects as a long
       // floating plank — skip fronds aimed at the lens.
-      if (toCam(tip)[2] < crownCamZ * 0.45) continue;
-      // One tapered frond: wide at the crown, pointed at the drooping tip.
+      if (toCam(tip)[2] < crownCamZ * 0.45) return;
+      const mid = [px + dir[0] * len * 0.52, py + dir[1] * len * 0.52, pz + 5];
       addPoly([
-        [px + perp[0] * 3, py + perp[1] * 3, pz + 1],
-        [px + dir[0] * 17 + perp[0] * 2.2, py + dir[1] * 17 + perp[1] * 2.2, pz + 4],
+        [px + perp[0] * wBase, py + perp[1] * wBase, pz + 1],
+        [mid[0] + perp[0] * wMid, mid[1] + perp[1] * wMid, mid[2]],
         tip,
-        [px + dir[0] * 17 - perp[0] * 2.2, py + dir[1] * 17 - perp[1] * 2.2, pz + 4],
-        [px - perp[0] * 3, py - perp[1] * 3, pz + 1],
-      ], i % 2 ? [26, 96, 44] : [21, 80, 38], {});
+        [mid[0] - perp[0] * wMid, mid[1] - perp[1] * wMid, mid[2]],
+        [px - perp[0] * wBase, py - perp[1] * wBase, pz + 1],
+      ], col, {});
+    };
+    for (let i = 0; i < 8; i++) {
+      const la = (i / 8) * Math.PI * 2 + hash01(seed + i) * 0.45;
+      frond(la, 34 + hash01(seed + i * 3) * 7, 13 + hash01(seed + i * 7) * 5, 4.4, 6.6, i % 2 ? [52, 84, 40] : [44, 74, 36]);
     }
-    addShadow(pr.x, pr.y, 4, 4, 0, 20, 0.22);
+    // Two dead hanging fronds, narrower and browner, below the crown.
+    for (let i = 0; i < 2; i++) {
+      const la = hash01(seed + 31 + i * 9) * Math.PI * 2;
+      frond(la, 24, 24, 2.2, 2.8, [110, 88, 50]);
+    }
+    addShadow(pr.x, pr.y, 4, 4, 0, 22, 0.22);
   } else if (pr.kind === 'lamp') {
     addLimb([pr.x, pr.y, 0], [pr.x, pr.y, 38], 1.7, 1.7, [30, 33, 40], [0, 0, 1]);
     const lit = F.sky.lit > 0.2;
@@ -699,22 +881,25 @@ export function drawView3D(ctx, world, mode) {
   const isDrive = mode ? mode === 'drive' : !!p.car;
   const anchor = isDrive && p.car ? p.car : p;
   const yaw = isDrive && p.car ? p.car.angle : (p.aimAngle || p.angle || 0);
-  const back = isDrive ? 120 : 110;
-  const camH = isDrive ? 58 : 52;
+  // PHASE 2 camera (Rect's GTA reference): LOW third-person, pulled
+  // back — the subject anchors in the lower third of the frame, the
+  // street and skyline open up above it, and the helicopter (altitude
+  // 135) fits whole inside the vertical field of view.
+  const back = isDrive ? 158 : 128;
+  const camH = isDrive ? 64 : 46;
   const targetZ = isDrive ? 10 : 20;
   const fh = [Math.cos(yaw), Math.sin(yaw)];
   let camX = anchor.x - fh[0] * back, camY = anchor.y - fh[1] * back;
   const fixed = collideWorld(world.city, camX, camY, 26);
   camX = fixed.x; camY = fixed.y;
-  // Explicit shallow pitch: a target-aimed camera pitched ~18 degrees
-  // down pushed the helicopter (altitude 135) out of the top of the
-  // frame; ~7.5 degrees down keeps the hero car anchored at the bottom
-  // AND the heli + sunset inside the vertical field of view.
-  const pitch = isDrive ? 0.13 : 0.22;
+  const pitch = isDrive ? 0.10 : 0.17;
   void targetZ;
   F = newFrame([camX, camY, camH], [fh[0] * Math.cos(pitch), fh[1] * Math.cos(pitch), -Math.sin(pitch)]);
   F.sky = sky;
   F.sunDir = norm3([Math.cos(sky.sunAz) * Math.cos(sky.sunEl), Math.sin(sky.sunAz) * Math.cos(sky.sunEl), Math.sin(sky.sunEl)]);
+  // Long-shadow factor from the sun's elevation: low dusk sun throws
+  // shadows several times the object's size; midday sun keeps them short.
+  F.shadowK = clamp(0.55 / Math.max(0.09, Math.tan(sky.sunEl)), 0.8, 3.4);
 
   // Sky: gradient + soft-glow sun disc (never a bare flat disc).
   const grad = ctx.createLinearGradient(0, 0, 0, VIEW_H * 0.72);
@@ -743,6 +928,8 @@ export function drawView3D(ctx, world, mode) {
     }
   }
 
+  F.targetId = world.mission && world.mission.building ? world.mission.building.id : -1;
+  F.city = world.city;
   // World faces.
   drawGround();
   for (const b of world.city.buildings) drawBuilding(b);
@@ -805,7 +992,13 @@ export function drawView3D(ctx, world, mode) {
     ctx.save();
     for (const f of F.faces) {
       if (f.pts.length < 3) continue;
-      ctx.fillStyle = f.col;
+      if (f.colTop) {
+        let mn = 1e9, mx = -1e9;
+        for (const pt of f.pts) { if (pt[1] < mn) mn = pt[1]; if (pt[1] > mx) mx = pt[1]; }
+        const gr = ctx.createLinearGradient(0, mn, 0, Math.max(mn + 1, mx));
+        gr.addColorStop(0, f.colTop); gr.addColorStop(1, f.colBot);
+        ctx.fillStyle = gr;
+      } else ctx.fillStyle = f.col;
       ctx.beginPath();
       ctx.moveTo(f.pts[0][0], f.pts[0][1]);
       for (let i = 1; i < f.pts.length; i++) ctx.lineTo(f.pts[i][0], f.pts[i][1]);
@@ -816,6 +1009,23 @@ export function drawView3D(ctx, world, mode) {
     F.faces = [];
   };
   paintFaces();
+  // Signage post-pass: near buildings get their real sign word lettered
+  // on the fascia (projected position collected in drawBuilding), sized
+  // by distance, on a dark band — the texture-sign equivalent.
+  if (F.signs.length) {
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const s of F.signs) {
+      const size = clamp(5600 / s.dist, 10, 27);
+      ctx.font = `800 ${size}px system-ui, sans-serif`;
+      const tw = ctx.measureText(s.text).width + size * 0.9;
+      ctx.fillStyle = 'rgba(12,12,18,0.88)';
+      ctx.fillRect(s.x - tw / 2, s.y - size * 0.72, tw, size * 1.44);
+      ctx.fillStyle = s.neon ? '#e88bb8' : '#f0c98a';
+      ctx.fillText(s.text, s.x, s.y + 1);
+    }
+    ctx.restore();
+  }
   // The helicopter flies above the rooftops: it is painted after the
   // world (its own faces sorted among themselves), so a building never
   // swallows it — same staging guarantee the old billboard view had.
@@ -833,6 +1043,18 @@ export function drawView3D(ctx, world, mode) {
       ctx.beginPath(); ctx.moveTo(h0.x, h0.y); ctx.lineTo(h1.x, h1.y); ctx.stroke();
       ctx.fillStyle = 'rgba(255,240,190,0.9)';
       ctx.beginPath(); ctx.arc(h0.x, h0.y, 7, 0, Math.PI * 2); ctx.fill();
+      // HIT feedback at the impact end: a short spark star so the shot
+      // visibly lands on the target in the still frame.
+      ctx.strokeStyle = 'rgba(255,196,80,0.95)'; ctx.lineWidth = 2.5;
+      for (let i = 0; i < 6; i++) {
+        const sa = (i / 6) * Math.PI * 2 + 0.4;
+        ctx.beginPath();
+        ctx.moveTo(h1.x + Math.cos(sa) * 4, h1.y + Math.sin(sa) * 4);
+        ctx.lineTo(h1.x + Math.cos(sa) * 15, h1.y + Math.sin(sa) * 15);
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(255,220,140,0.95)';
+      ctx.beginPath(); ctx.arc(h1.x, h1.y, 4.5, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     }
   }

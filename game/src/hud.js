@@ -14,9 +14,83 @@ export function drawStars(ctx, stars, x, y, size = 26) {
   ctx.restore();
 }
 
-export function drawHud(ctx, world, W, H) {
+export function drawHud(ctx, world, W, H, opts = {}) {
   const p = world.player;
   const save = world.save;
+  // PHASE 2 minimal GTA-style HUD for the 3D play views (Rect's 20:49
+  // directive): no wide banner, no big panels — stars + cash compact at
+  // the top-right, one small objective line at the top-centre, minimap
+  // small at the bottom-left, a thin health strip, small gadget chips
+  // at the bottom-right. All core info stays available.
+  if (opts.minimal && !world.results) {
+    ctx.save();
+    // Stars + cash, top-right, text only with a soft shadow.
+    ctx.shadowColor = 'rgba(0,0,0,0.65)'; ctx.shadowBlur = 5;
+    if (world.stars > 0) drawStars(ctx, world.stars, W - 168, 26, 24);
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#a8e063'; ctx.font = '900 23px system-ui, sans-serif';
+    ctx.fillText(save ? formatMoney(save.cash) : '$0', W - 16, 58);
+    ctx.fillStyle = 'rgba(238,241,245,0.92)'; ctx.font = '700 12px system-ui, sans-serif';
+    ctx.fillText(save ? `REP ${save.rep}` : 'REP 0', W - 16, 80);
+    // Objective: ONE small line, top-centre.
+    const obj = world.objective || '';
+    if (obj) {
+      ctx.font = '700 14.5px system-ui, sans-serif';
+      const label = obj.length > 72 ? obj.slice(0, 71) + '…' : obj;
+      const w = Math.min(620, ctx.measureText(label).width + 26);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(8,10,16,0.55)';
+      ctx.fillRect(W / 2 - w / 2, 10, w, 27);
+      ctx.fillStyle = '#f2f4f6'; ctx.textAlign = 'center';
+      ctx.fillText(label, W / 2, 24);
+    }
+    ctx.restore();
+    // Minimap bottom-left (GTA position), muted border.
+    drawMinimap(ctx, world, 14, H - MM_SMALL.h - 14, MM_SMALL.w, MM_SMALL.h, 'rgba(230,234,238,0.55)');
+    // Thin health strip + status line above the minimap.
+    ctx.save();
+    ctx.fillStyle = 'rgba(8,10,16,0.55)'; ctx.fillRect(14, H - MM_SMALL.h - 44, MM_SMALL.w, 20);
+    ctx.fillStyle = '#2c313a'; ctx.fillRect(18, H - MM_SMALL.h - 38, MM_SMALL.w - 8, 5);
+    ctx.fillStyle = p.health > 30 ? '#7fc97f' : '#ff6b81';
+    ctx.fillRect(18, H - MM_SMALL.h - 38, (MM_SMALL.w - 8) * Math.max(0, p.health) / 100, 5);
+    ctx.fillStyle = 'rgba(238,241,245,0.9)'; ctx.font = '700 9.5px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(p.car ? `CAR ${Math.ceil(p.car.health)}/${p.car.maxHealth} · ${p.car.spec.name}` : 'ON FOOT — E: enter car · mouse: aim · click: fire', 18, H - MM_SMALL.h - 29.5);
+    ctx.restore();
+    // Bust meter (small, centred low).
+    if (p.bust > 0.02) {
+      ctx.save(); ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(8,10,16,0.7)'; ctx.fillRect(W / 2 - 90, H - 120, 180, 26);
+      ctx.fillStyle = '#ff6b81'; ctx.fillRect(W / 2 - 84, H - 114, 168 * Math.min(1, p.bust), 8);
+      ctx.fillStyle = '#fff'; ctx.font = '900 11px system-ui, sans-serif';
+      ctx.fillText('BUSTED?', W / 2, H - 84);
+      ctx.restore();
+    }
+    // Gadget chips: small, bottom-right.
+    if (world.gadgets) {
+      const items = [['cutPower', '1'], ['jam', '2'], ['decoy', '3'], ['spikes', '4']];
+      ctx.save();
+      items.forEach(([id, key], i) => {
+        const g = world.gadgets[id];
+        const x = W - 14 - 4 * 40 + i * 40, y = H - 48;
+        ctx.fillStyle = g.cd > 0 ? 'rgba(20,22,30,0.62)' : 'rgba(14,30,26,0.62)';
+        ctx.fillRect(x, y, 34, 34);
+        ctx.strokeStyle = g.active > 0 ? '#7deeff' : 'rgba(230,234,238,0.4)'; ctx.lineWidth = 1; ctx.strokeRect(x, y, 34, 34);
+        ctx.fillStyle = '#fff'; ctx.font = '900 12px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(g.cd > 0 ? Math.ceil(g.cd) + 's' : key, x + 17, y + 13);
+        ctx.font = '700 6.5px system-ui, sans-serif';
+        ctx.fillText(g.name, x + 17, y + 25);
+      });
+      ctx.restore();
+    }
+    if (world.bribeNear) {
+      ctx.save(); ctx.textAlign = 'center'; ctx.font = '800 14px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(8,10,16,0.7)'; ctx.fillRect(W / 2 - 200, H - 170, 400, 30);
+      ctx.fillStyle = '#7deeff';
+      ctx.fillText(`${world.bribeNear.label}: press E — bribe $${world.bribeNear.cost} to shed heat`, W / 2, H - 154);
+      ctx.restore();
+    }
+    return;
+  }
   // Objective banner (top centre). Skipped on the results screen: the job
   // is over, so the live objective must not ghost through the panel.
   if (!world.results) {

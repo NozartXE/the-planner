@@ -158,7 +158,7 @@ function draw() {
     if (!save.settings.shake) { cam.x = Math.max(0, Math.min(3200 - VIEW_W, world.camera.x - VIEW_W / 2)); cam.y = Math.max(0, Math.min(2400 - VIEW_H, world.camera.y - VIEW_H / 2)); }
     drawWorld(ctx, world, cam);
   }
-  drawHud(ctx, world, VIEW_W, VIEW_H);
+  drawHud(ctx, world, VIEW_W, VIEW_H, { minimal: game.screen === 'play' && !!(world.player && (world.player.car || world.mission)) });
   if (game.screen === 'results') { game.rects = drawResults(ctx, VIEW_W, VIEW_H, world); return; }
   if (game.screen === 'gameover') { game.rects = drawGameOver(ctx, VIEW_W, VIEW_H, world); return; }
   if (game.overlay === 'pause') game.rects = drawPause(ctx, VIEW_W, VIEW_H, save);

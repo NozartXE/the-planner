@@ -53,51 +53,74 @@ export function stageShot(name, game) {
   }
 
   if (name === 'combat') {
+    // PHASE 2 restage (panel fix E1): the fight moves OFF the grass and
+    // onto HARBOR AVE, on the street in front of the target's named
+    // south facade (AURUM GRAND, door at 300,403; facade spans
+    // x 180..421, y 212..389). The player stands in the avenue at
+    // (215,520) aiming north: asphalt foreground, the facade filling
+    // the background with its street-level sign, two police cars in an
+    // echelon in front of the facade, a traffic car in the west lane,
+    // crew at the player's shoulder, the getaway on AURUM WAY behind.
     plan.timeOfDay = 'dusk';
     world.beginHeist(heist, plan);
     const m = world.mission;
     m.phase = 'grab'; m.alarmStarted = true; m.alarmT = 31;
     m.lootGrabbed = Math.round(m.lootTotal * 0.45);
-    world.player.x = m.building.doorX + 18; world.player.y = m.building.doorY + 38;
+    world.player.x = 215; world.player.y = 520;
     world.player.car = null;
     world.heat = 60; world.stars = 3;
-    // Crew beside the player, one carrying a bag. (3D restage: the old
-    // west-of-player slots sat between the foot camera and the player,
-    // filling the frame as cropped giants — the crew now stands ahead-
-    // north of the player, mid-frame at readable scale, still west of
-    // the police line to the east.)
-    world.crewMembers.forEach((c, i) => { c.x = world.player.x + 48 + i * 36; c.y = world.player.y - 58 + i * 10; c.hasBag = i === 0; });
-    // The getaway car and ambient traffic otherwise block the aim lane
-    // as foreground boxes in the foot camera: push the getaway south-
-    // east to the frame edge and clear non-police cars near the player.
-    if (world.getawayCar) { world.getawayCar.x = world.player.x + 165; world.getawayCar.y = world.player.y + 105; }
-    for (const car of world.cars) {
-      if (car.police || car === world.getawayCar) continue;
-      if (Math.hypot(car.x - world.player.x, car.y - world.player.y) < 230) { car.x = world.player.x + 430; car.y = world.player.y - 190; }
-    }
-    // Bystander peds on the pavements around the target (existing sim
-    // entities, repositioned by staging) so the street reads populated.
-    world.peds.slice(0, 6).forEach((pd, i) => {
-      // North-side peds at -34, not -86: -86 put them INSIDE the target
-      // building's footprint, where the 3D renderer showed only a head
-      // poking through the facade (painter interleaving).
-      pd.x = world.player.x - 150 + i * 58; pd.y = world.player.y + (i % 2 === 0 ? 92 : -34);
-      pd.down = 0;
-      pd.walkPhase = i * 1.1 + 0.3; // varied mid-stride poses
-      pd.angle = i % 2 === 0 ? 0 : Math.PI;
-    });
-    world.crewMembers.forEach((c, i) => { c.walkPhase = i * 1.3 + 0.5; });
-    // Police arriving at the street.
-    world.forcePolice(2, m.building.doorX + 210, m.building.doorY + 120);
-    const cop = world.cars.find((c) => c.police);
-    const aim = cop ? { x: cop.x, y: cop.y } : { x: world.player.x + 200, y: world.player.y };
-    // Fire the REAL sim at the nearest police car: shots, muzzle flashes,
-    // tracers, police return fire, fleeing pedestrians.
+    world.forcePolice(2, 232, 452);
+    const cops = world.cars.filter((c) => c.police);
+    const aim = { x: 230, y: 446 };
+    // Fire the REAL sim at the police line: shots, tracers, return fire.
     for (let i = 0; i < 80; i++) world.step(1 / 60, fakeInput([], [], { down: true }), aim);
-    // Freeze one fresh exchange on screen: the player's muzzle + tracer and
-    // the nearest police car's return fire (the sim's zone-based rule).
+    // Post-step freeze: exact placements (no further steps run).
     const p = world.player;
-    const a = Math.atan2(aim.y - p.y, aim.x - p.x);
+    p.x = 215; p.y = 520; p.car = null;
+    m.phase = 'grab'; m.alarmStarted = true; m.alarmT = 30;
+    m.lootGrabbed = Math.round(m.lootTotal * 0.45);
+    world.heat = 60; world.stars = 3;
+    world.heli.active = false;
+    const copSlots = [[214, 436], [302, 466]];
+    cops.forEach((cp, i) => {
+      const sl = copSlots[i % copSlots.length];
+      cp.x = sl[0]; cp.y = sl[1];
+      cp.angle = Math.atan2(p.y - cp.y, p.x - cp.x);
+      cp.speed = 0; cp.disabled = false;
+    });
+    p.bust = 0; // the frozen frame is mid-firefight, not mid-arrest
+    // Traffic in frame: one southbound car in the avenue's west lane,
+    // beside the aim lane, headlights toward the camera.
+    const traffic = world.cars.filter((c) => !c.police && c !== world.getawayCar);
+    if (traffic[0]) { traffic[0].x = 172; traffic[0].y = 482; traffic[0].angle = Math.PI / 2; traffic[0].speed = 0; }
+    if (traffic[1]) { traffic[1].x = 356; traffic[1].y = 606; traffic[1].angle = Math.PI; traffic[1].speed = 0; }
+    for (let i = 2; i < traffic.length; i++) {
+      if (Math.hypot(traffic[i].x - p.x, traffic[i].y - p.y) < 260) { traffic[i].x = p.x + 520; traffic[i].y = p.y - 260; }
+    }
+    if (world.getawayCar) { world.getawayCar.x = 392; world.getawayCar.y = 588; world.getawayCar.angle = 0.3; }
+    // Crew AHEAD of the player (north, toward the fight — never between
+    // the low foot camera and the player, where they loom as giants),
+    // east of the aim lane, one carrying the loot bag.
+    world.crewMembers.forEach((c, i) => {
+      c.x = 232 + i * 14; c.y = 505 - i * 10;
+      c.hasBag = i === 0;
+      c.angle = Math.atan2(446 - c.y, 230 - c.x);
+      c.walkPhase = i * 1.3 + 0.5;
+      c.down = 0;
+    });
+    // Bystanders on both avenue sidewalks, mid-stride, all in the
+    // camera's forward half (nothing spawns on top of the lens).
+    const pedSlots = [[142, 478], [260, 505], [268, 428], [138, 430]];
+    world.peds.slice(0, 4).forEach((pd, i) => {
+      pd.x = pedSlots[i][0]; pd.y = pedSlots[i][1];
+      pd.down = 0; pd.walkPhase = i * 1.1 + 0.3;
+      pd.angle = i % 2 === 0 ? -Math.PI / 2 : Math.PI / 2;
+    });
+    // Freeze one fresh exchange: aim exactly at the lead police car so
+    // the tracer + HIT spark land on it in the still.
+    const cop = cops[0];
+    const a = Math.atan2((cop ? cop.y : 446) - p.y, (cop ? cop.x : 230) - p.x);
+    p.aimAngle = a; p.angle = a;
     world.lastShotT = 0;
     world.particles.muzzle(p.x + Math.cos(a) * 24, p.y + Math.sin(a) * 24, a);
     world.particles.tracer(p.x + Math.cos(a) * 120, p.y + Math.sin(a) * 120, a, 110);
@@ -107,17 +130,7 @@ export function stageShot(name, game) {
       world.particles.muzzle(cop.x + Math.cos(pa) * 26, cop.y + Math.sin(pa) * 26, pa);
       world.particles.tracer((cop.x + p.x) / 2, (cop.y + p.y) / 2, pa, d / 2, '#ffb3c1', 0.14);
     }
-    // Post-step freeze (no further steps run, so these placements are
-    // exact): the 80 sim steps dragged the crew into the follow slots
-    // right at the foot camera, where they loomed and overlapped.
-    // Restage them ahead-south-east of the player (the camera faces
-    // east-south-east, so south reads as frame-right) at readable scale.
-    world.crewMembers.forEach((c, i) => {
-      c.x = world.player.x + 92 + i * 36; c.y = world.player.y + 58 + i * 16;
-      c.angle = Math.atan2(aim.y - c.y, aim.x - c.x);
-      c.walkPhase = i * 1.3 + 0.5;
-    });
-    world.camera.x = world.player.x; world.camera.y = world.player.y;
+    world.camera.x = p.x; world.camera.y = p.y;
     game.screen = 'play';
     return;
   }
@@ -292,14 +305,14 @@ export function stageShot(name, game) {
   const place = (car, x, y, ang) => { if (car) { car.x = x; car.y = y; car.angle = ang; } };
   const byId = (id) => world.cars.find((c) => c.id === id);
   place(byId(5999), 627, 992, Math.PI);
-  place(byId(6000), 806, 946, Math.PI);
-  place(byId(6001), 764, 1002, Math.PI);
-  place(byId(6201), 870, 915, Math.PI);
+  place(byId(6000), 800, 936, Math.PI);
+  place(byId(6001), 758, 1014, Math.PI);
+  place(byId(6201), 872, 902, Math.PI);
   place(byId(6202), 658, 962, Math.PI);
   place(byId(6203), 500, 876, Math.PI);
   const pursuers = world.cars.filter((c) => c.police && c.id >= 5000 && c.id < 5100).sort((a, b) => a.id - b.id);
   place(pursuers[0], 716, 892, Math.PI);
-  place(pursuers[1], 848, 1032, Math.PI);
+  place(pursuers[1], 852, 1042, Math.PI);
   place(pursuers[2], 207, 808, -Math.PI / 2);
   const trafficSlots = [
     [6101, 938, 922, Math.PI, '#e8d5c4'],
@@ -321,25 +334,29 @@ export function stageShot(name, game) {
   // measured slots: every figure fully visible from the chase camera
   // and clear of every vehicle — nobody stands in the road, in the
   // hero car's space, or inside the police echelon.
+  // PHASE 2 (panel fix E2): the right-side pavement crowd is THINNED
+  // from 16 to 11 and spread along both pavements — phase 1 piled a
+  // cluster under the minimap. The remaining staged peds park east of
+  // the camera, out of frame.
   const pedSlots = [
-    [810, 830], [855, 838], [726, 802], [792, 810], [552, 972], [756, 870],
-    [447, 768], [873, 870], [735, 800], [156, 766], [453, 764], [147, 884],
-    [561, 966], [672, 784], [546, 806], [141, 756],
+    [810, 830], [726, 802], [552, 972], [447, 768], [735, 800],
+    [156, 766], [453, 764], [147, 884], [561, 966], [672, 784], [141, 756],
   ];
   world.peds.slice(0, 16).forEach((pd, i) => {
-    pd.x = pedSlots[i][0];
-    pd.y = pedSlots[i][1];
+    if (i < pedSlots.length) { pd.x = pedSlots[i][0]; pd.y = pedSlots[i][1]; }
+    else { pd.x = 1500 + i * 60; pd.y = 300; }
     pd.down = 0;
     // Mid-stride, never a standing lineup: each figure gets its own
     // stride phase and walks along the street (east/west alternating).
     pd.walkPhase = i * 0.9 + 0.4;
     pd.angle = i % 2 === 0 ? 0 : Math.PI;
   });
-  // Freeze the helicopter in frame, ahead and above at readable scale,
-  // light on the player (its hover lag would otherwise leave it behind
-  // the camera).
+  // Freeze the helicopter WHOLE in the upper frame (panel fix E2):
+  // farther ahead and higher in the composition — with the pulled-back
+  // low camera its rotor disc now fits inside the vertical FOV.
   world.heli.active = true;
-  world.heli.x = gw.x - 260; world.heli.y = gw.y - 80;
+  world.heli.x = gw.x - 365; world.heli.y = gw.y - 40;
+  world.heli.lightAngle = Math.PI;
   world.heli.lightX = gw.x + 20; world.heli.lightY = gw.y + 10;
   world.heli.lightOnPlayer = true;
   game.screen = 'play';

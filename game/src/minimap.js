@@ -6,12 +6,12 @@ import { AVENUES, STREETS } from './city.js';
 export const MM = { w: 232, h: 174, pad: 14 };
 export const MM_SMALL = { w: 164, h: 123 };
 
-export function drawMinimap(ctx, world, x, y, w = MM.w, h = MM.h) {
+export function drawMinimap(ctx, world, x, y, w = MM.w, h = MM.h, border = '#ff71ce') {
   const sx = w / WORLD_W, sy = h / WORLD_H;
   ctx.save();
   ctx.fillStyle = '#0c101c';
   ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = '#ff71ce'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
+  ctx.strokeStyle = border; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
   // Water + land.
   ctx.fillStyle = '#274156'; ctx.fillRect(x, y, w, RIVER_Y * sy);
   ctx.fillStyle = '#1e7fb8'; ctx.fillRect(x, y + RIVER_Y * sy, w, h - RIVER_Y * sy);
