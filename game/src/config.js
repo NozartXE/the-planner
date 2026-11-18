@@ -1,34 +1,63 @@
-// config.js — THE PLANNER: shared tuning constants for the whole game.
+// config.js — view, world and tuning constants plus the muted night palette for MERIDIAN NIGHTS.
 export const VIEW_W = 1280;
 export const VIEW_H = 800;
-export const STEP = 1 / 60;
-export const MAX_STEPS_PER_FRAME = 5;
-export const WORLD_W = 3200;
-export const WORLD_H = 2400;
-export const BLOCK = 400;
-export const ROAD_W = 96;
-export const SIDEWALK = 18;
-export const RIVER_Y = 2080; // river occupies the south strip below this y
-export const PLAYER_SPEED = 150;
-export const PLAYER_RUN = 240;
-export const PLAYER_RADIUS = 13;
-export const CAR_LENGTH = 46;
-export const CAR_WIDTH = 24;
-export const HEAT_MAX = 100;
-export const HEAT_DECAY_PER_SEC = 1.7;
-export const BUST_TIME = 2.2;
-export const COLORS = {
-  road: '#3a3f4a', roadLine: '#f5d76e', sidewalk: '#9aa3ad', grass: '#3fae5a',
-  water: '#1e7fb8', sand: '#e8cf8f', player: '#ffd23f', police: '#2f6fed',
-  danger: '#ef476f', loot: '#06d6a0', gold: '#ffb703',
+export const WORLD_SIZE = 3760;
+export const BLOCK_PITCH = 470;
+export const BLOCKS_PER_SIDE = 8;
+export const ROAD_W = 92;
+export const SIDEWALK_W = 16;
+export const WORLD_SEED = 20261119;
+export const CAMERA_ZOOM = 0.92;
+export const PLAYER_SPEED_WALK = 148;
+export const PLAYER_SPEED_SPRINT = 228;
+export const PLAYER_RADIUS = 8;
+export const CAR_LENGTH = 38;
+export const CAR_WIDTH = 19;
+export const PED_W = 11;
+export const PED_H = 15;
+export const CIVILIAN_TARGET = 26;
+export const MAX_COPS = 8;
+export const COPS_PER_STAR = 2;
+export const WANTED_DECAY_MS = 7500;
+export const SAVE_KEY = 'meridian-nights-save-v1';
+export const PALETTE = {
+  ground: '#171a21',
+  road: '#23262e',
+  roadEdge: '#2e323c',
+  dash: '#8a8f7a',
+  crosswalk: '#9aa0a8',
+  sidewalk: '#33363d',
+  sidewalkEdge: '#41454e',
+  parkGrass: '#1d2b22',
+  parkPath: '#2c2f28',
+  treeDark: '#24382a',
+  treeLight: '#314d36',
+  roofA: '#2a2e38',
+  roofB: '#323642',
+  roofC: '#262a33',
+  wallLight: '#3d434f',
+  wallDark: '#22252d',
+  lampGlow: 'rgba(255,196,110,0.55)',
+  lampCore: '#ffd9a0',
+  headlight: 'rgba(255,240,200,0.5)',
+  taillight: '#e5484d',
+  neonColors: ['#57c7d4', '#d48ec2', '#8ecae6', '#e0a458', '#9db38a'],
+  playerShirt: '#c9a86a',
+  playerSkin: '#d9b48f',
+  markerPickup: '#e8c832',
+  markerDeliver: '#4fc96a',
+  hudText: '#e8e6df',
+  hudMuted: '#9aa0a8',
+  money: '#8fd18b',
+  danger: '#e5484d',
 };
-export const HEIST_IDS = ['casino-vault','bank-vault','jewelry-exchange','museum-gem','port-container','data-centre','armored-ambush','racetrack-strongroom'];
-export const SAVE_KEY = 'the-planner-save-v1';
-export const TIMES_OF_DAY = ['dawn', 'day', 'dusk', 'night'];
-// Per time-of-day: sky tint, traffic density, patrol multiplier, darkness.
-export const DAY_PHASES = {
-  dawn:  { sky: '#f2a65a', tint: 'rgba(242,140,60,0.12)', traffic: 0.7, patrols: 0.8, dark: 0.15, label: 'DAWN' },
-  day:   { sky: '#7ec8e3', tint: 'rgba(0,0,0,0)', traffic: 1.0, patrols: 1.0, dark: 0, label: 'DAY' },
-  dusk:  { sky: '#e76f51', tint: 'rgba(120,40,90,0.20)', traffic: 0.85, patrols: 1.0, dark: 0.38, label: 'DUSK' },
-  night: { sky: '#14213d', tint: 'rgba(5,10,40,0.46)', traffic: 0.45, patrols: 1.25, dark: 0.68, label: 'NIGHT' },
+export const PLACES = {
+  port: { name: 'Port Meridian', x: 516, y: 3336 },
+  neonTower: { name: 'Neon Tower', x: 3336, y: 516 },
+  garage: { name: "Venn's Garage", x: 1926, y: 1926 },
+  gazette: { name: 'Gazette Plaza', x: 986, y: 986 },
+  hotel: { name: 'Hotel Aurelia', x: 2866, y: 1456 },
+  hospital: { name: 'St. Sable Hospital', x: 1456, y: 2396 },
+  depot: { name: 'South Depot', x: 986, y: 2866 },
+  market: { name: 'Low Market', x: 2396, y: 986 },
 };

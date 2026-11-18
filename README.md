@@ -1,18 +1,35 @@
-# the-planner
-
 [![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![rank](https://make.fun/badge/gta6-01/NozartXE/the-planner/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/NozartXE/the-planner/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-**THE PLANNER** is a top-down 2D open-world crime game set in MERIDIAN, a sun-soaked riverport city. You are the Planner: fixer Mara Voss brings the jobs, and you work both sides of every heist — first on the **planning board**, then live in the streets of the Meridian Mile.
+# MERIDIAN NIGHTS
 
-**Plan it.** For each of the 8 campaign heists (casino vault, bank, jewelry exchange, museum gem, port container, data centre, armored-truck ambush, racetrack strongroom) you choose the entry point (3 per target), up to 3 crew from 6 specialists (each with a skill rating and a cut %), 3 gear items from 10, a getaway car from your garage, and a time of day. The board draws the district map with your escape route and live stats — LOOT estimate, ALARM delay, HEAT forecast, ESCAPE window — and every choice mechanically changes the job: patrol density, alarm length, loot grab rate, camera coverage, getaway spawn and police response delay.
+**MERIDIAN NIGHTS** is a top-down night-city open-world crime game set in Meridian, a port city that only wakes up after dark. You work for fixer **Dario Venn**: pick up packages, steal cars, move a reporter under heat, run a two-drop courier route, and lift an armored sedan — while traffic flows, pedestrians walk the sidewalks, and the police answer every star you earn.
 
-**Drive it.** Execute in a dense district of ~40 signed buildings, named streets, ambient traffic that follows the road graph, and pedestrians who flee danger. Six car classes with distinct speed/handling/durability, damage and smoke, handbrake drifts with skid marks, stealable parked cars. On foot you get mouse-aim pistol combat, crew commands (follow / wait / grab — watch the loot bags), and four gadgets on the number keys: CUT POWER, JAM, DECOY and SPIKES.
+**The city.** A seeded 8×8-block grid (3,760×3,760 world units) of roads, sidewalks, parks with trees, and buildings drawn with pseudo-depth — walls and roofs offset by height. Night is the presentation: a darkness pass cut by street lamps, headlights and your own light, with additive glows for taillights, flashing red/blue sirens, sparse rooftop neon and the pulsing mission marker, finished with a vignette.
 
-**Escape it.** The wanted system runs 1–5 stars: pursuit steering with PIT nudges, roadblocks, spike strips, and a helicopter searchlight from 3 stars. Heat decays when you're unseen; garages (Murphy's Body Shop, Turbo Wash) and bribe fixers shed it faster. Get surrounded at low speed and the bust meter fills. Results settle the fence fee and crew cuts, award a grade (S/A/B/C) and REP, and unlock the next job.
+**Systems, all live at once:**
 
-**Free roam** between jobs: street-race checkpoint runs against a par time, taxi fares, and chop-shop deliveries. Progress, cash, REP, garage and best grades persist in `localStorage`. The simulation is deterministic (seeded RNG, fixed 1/60 timestep), the audio is a generated WebAudio synth, and the whole game is plain ES modules with zero dependencies and zero network requests.
+- **Traffic AI** — about 26 civilian cars hold right-hand lanes, choose at intersections, and brake for cars and for you on foot; they recycle at distance so the streets never empty.
+- **Stealable cars** — five civilian types plus the police interceptor and a marked armored sedan. Press E beside any car to take it; stealing a moving car earns 1 star, a cop car 3.
+- **Wanted + police** — 0–5 stars. Cops spawn off-screen (2 per star, up to 8), pick junction turns that close on you, ram you on contact, and give up as heat decays when you stay clean and unseen.
+- **Pedestrians** — 64 walkers loop the sidewalks, flee gunfire and speeding cars, and harming one is a crime.
+- **Story missions** — Venn's 5-job chain with briefings, yellow pickup / green delivery markers and countdown timers. Finish the chain and it loops at +25% pay.
+- **Combat and consequences** — on-foot shooting, vehicle damage and destruction, WASTED and a respawn at St. Sable Hospital that costs 10% of your cash and clears your heat.
+- **HUD + minimap** — money, wanted stars, health (and vehicle health + speed while driving), mission line with timer, toasts, and a circular minimap with cop and objective markers.
+- **Save** — money, jobs completed and lifetime earnings persist in `localStorage`.
+- **Sound** — a small WebAudio synth (shots, crashes, pickups, jingles, stings, car entry), created on the first key press.
+
+## Controls
+
+| Keys | Action |
+| --- | --- |
+| WASD / arrows | Move on foot · drive |
+| E | Enter / exit car |
+| Space | Shoot (on foot) · handbrake (in car) |
+| Shift | Sprint |
+| P | Pause |
+| H | Help |
 
 ## Run it
 
@@ -20,8 +37,6 @@
 node serve.ts
 ```
 
-then open http://localhost:8080
+Then open http://localhost:8080 in a desktop browser. The game is plain ES modules with zero dependencies and zero network requests; it plays fully offline from the static files in `game/`.
 
-Controls: WASD/arrows move & drive · E enter/exit car · mouse aim, click fire · Shift run / handbrake · 1–4 gadgets · C crew orders · B planning board · P pause · H help.
-
-<sub>Entered on [make.fun](https://make.fun/?ref=hr2ehgtj&utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards</sub>
+Deterministic screenshot staging is built in: `?shot=title`, `?shot=chase`, `?shot=mission` and `?shot=roam` each build the seeded world, place a scene and step the real simulation to a fixed frame.

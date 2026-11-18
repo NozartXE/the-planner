@@ -1,103 +1,158 @@
-// hud.js — in-world HUD: objective banner, wanted stars, health, cash, gadget
-// icons with cooldown sweeps, bust meter, loot/alarm readouts, prompts.
-import { formatMoney } from './economy.js';
-import { drawMinimap, MM, MM_SMALL } from './minimap.js';
-
-export function drawStars(ctx, stars, x, y, size = 26) {
+// hud.js — money, wanted stars, health, mission line and timer, circular minimap, toasts and the menu screens.
+import { VIEW_W, VIEW_H, WORLD_SIZE, PALETTE } from './config.js';
+import { clamp } from './rng.js';
+function panel(ctx, x, y, w, h) {
+  ctx.fillStyle = 'rgba(10,12,18,0.66)';
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 8); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = 1; ctx.stroke();
+}
+function drawStars(ctx, game) {
+  const stars = game.police.stars;
+  const flash = game.police.decaying && Math.sin(game.time * 7) > 0;
+  ctx.font = '22px sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+  let label = '';
+  for (let i = 0; i < 5; i++) label += i < stars ? '★' : '☆';
+  panel(ctx, VIEW_W - 168, 14, 154, 40);
+  ctx.fillStyle = flash ? '#8a8f98' : (stars > 0 ? '#f2c14e' : '#5c626c');
+  ctx.fillText(label, VIEW_W - 24, 22);
+}
+export function drawHud(ctx, game) {
   ctx.save();
-  ctx.font = `${size}px system-ui, sans-serif`;
-  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  for (let i = 0; i < 5; i++) {
-    ctx.fillStyle = i < stars ? '#ffd60a' : 'rgba(255,255,255,0.22)';
-    ctx.fillText('★', x + i * (size + 2), y);
+  // Money, top-left.
+  panel(ctx, 14, 14, 168, 40);
+  ctx.fillStyle = PALETTE.money; ctx.font = '700 20px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillText('$' + Math.floor(game.money).toLocaleString('en-US'), 26, 23);
+  drawStars(ctx, game);
+  // Mission line and timer, top-centre.
+  if (game.missions.active) {
+    const text = game.missions.headline();
+    ctx.font = '600 15px system-ui, sans-serif';
+    const w = Math.min(560, ctx.measureText(text).width + 90);
+    panel(ctx, VIEW_W / 2 - w / 2, 14, w, 40);
+    ctx.fillStyle = PALETTE.hudText; ctx.textAlign = 'center';
+    ctx.fillText(text, VIEW_W / 2 - 18, 26);
+    const t = Math.max(0, Math.ceil(game.missions.timeLeft));
+    ctx.fillStyle = t <= 15 ? PALETTE.danger : '#f2c14e';
+    ctx.font = '700 15px system-ui, sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(t + 's', VIEW_W / 2 + w / 2 - 12, 26);
+  } else if (game.time > 2) {
+    ctx.font = '600 13px system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(232,230,223,0.75)';
+    ctx.fillText('Free roam — visit the yellow marker when a job is offered, or press Enter near Venn jobs', VIEW_W / 2, 20);
   }
+  // Briefing toast under the mission line.
+  if (game.nowMs < game.missions.briefUntil && game.missions.lastBrief) {
+    ctx.font = '600 14px system-ui, sans-serif';
+    const w = Math.min(680, ctx.measureText(game.missions.lastBrief).width + 36);
+    panel(ctx, VIEW_W / 2 - w / 2, 62, w, 34);
+    ctx.fillStyle = '#f0d9a0'; ctx.textAlign = 'center';
+    ctx.fillText(game.missions.lastBrief, VIEW_W / 2, 71);
+  }
+  // Toasts (centre-lower, never over the minimap).
+  ctx.font = '600 15px system-ui, sans-serif'; ctx.textAlign = 'center';
+  game.toasts.filter((t) => game.nowMs < t.until).slice(-2).forEach((t, i) => {
+    const w = Math.min(620, ctx.measureText(t.text).width + 36);
+    panel(ctx, VIEW_W / 2 - w / 2, VIEW_H - 148 - i * 40, w, 34);
+    ctx.fillStyle = PALETTE.hudText; ctx.fillText(t.text, VIEW_W / 2, VIEW_H - 139 - i * 40);
+  });
+  // Health, bottom-left; car health and speed while driving.
+  panel(ctx, 14, VIEW_H - 62, 208, 48);
+  ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('HEALTH', 26, VIEW_H - 54);
+  ctx.fillStyle = '#3a3e46'; ctx.fillRect(26, VIEW_H - 38, 184, 10);
+  ctx.fillStyle = game.player.hp > 30 ? '#7fc97f' : PALETTE.danger;
+  ctx.fillRect(26, VIEW_H - 38, 184 * clamp(game.player.hp / 100, 0, 1), 10);
+  if (game.player.inCar && game.player.car) {
+    panel(ctx, 14, VIEW_H - 116, 208, 48);
+    ctx.fillStyle = PALETTE.hudMuted; ctx.fillText('VEHICLE', 26, VIEW_H - 108);
+    ctx.fillStyle = '#3a3e46'; ctx.fillRect(26, VIEW_H - 92, 120, 10);
+    ctx.fillStyle = '#8ecae6'; ctx.fillRect(26, VIEW_H - 92, 120 * clamp(game.player.car.hp / game.player.car.maxHp, 0, 1), 10);
+    ctx.fillStyle = PALETTE.hudText; ctx.font = '700 14px system-ui, sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(Math.round(Math.abs(game.player.car.speed) * 0.62) + ' km/h', 210, VIEW_H - 96);
+  }
+  // Control hints for the first seconds of play.
+  if (game.playTime < 9 && game.screen === 'play') {
+    ctx.font = '13px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(232,230,223,0.8)';
+    ctx.fillText(game.player.inCar ? 'WASD drive · Space handbrake · E exit · P pause' : 'WASD move · Shift sprint · E enter car · Space shoot · P pause · H help', 16, VIEW_H - 128);
+  }
+  drawMinimap(ctx, game);
   ctx.restore();
 }
-
-export function drawHud(ctx, world, W, H) {
-  const p = world.player;
-  const save = world.save;
-  // Objective banner (top centre). Skipped on the results screen: the job
-  // is over, so the live objective must not ghost through the panel.
-  if (!world.results) {
-    ctx.save();
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const obj = world.objective || '';
-    ctx.font = '800 21px system-ui, sans-serif';
-    const w = Math.min(860, ctx.measureText(obj).width + 44);
-    ctx.fillStyle = 'rgba(10,12,22,0.82)';
-    ctx.fillRect(W / 2 - w / 2, 12, w, 44);
-    ctx.strokeStyle = '#ff71ce'; ctx.lineWidth = 2; ctx.strokeRect(W / 2 - w / 2, 12, w, 44);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(obj, W / 2, 35);
-    ctx.restore();
-  }
-  // Wanted stars top-right.
-  if (world.stars > 0) drawStars(ctx, world.stars, W - 190, 84, 30);
-  // Cash + REP top-left.
+export function drawMinimap(ctx, game) {
+  const cx = VIEW_W - 92, cy = VIEW_H - 92, r = 74;
   ctx.save();
-  ctx.fillStyle = 'rgba(10,12,22,0.78)'; ctx.fillRect(14, 12, 218, 64);
-  ctx.fillStyle = '#7deeff'; ctx.font = '900 24px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  ctx.fillText(save ? formatMoney(save.cash) : '$0', 26, 34);
-  ctx.fillStyle = '#e9ecef'; ctx.font = '700 14px system-ui, sans-serif';
-  ctx.fillText(save ? `REP ${save.rep}` : 'REP 0', 26, 60);
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+  ctx.fillStyle = '#14161c'; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  const scale = (r * 2) / 1500;
+  const drawDot = (wx, wy, color, size) => {
+    let dx = (wx - game.player.x) * scale, dy = (wy - game.player.y) * scale;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d > r - 7) { dx = dx / d * (r - 7); dy = dy / d * (r - 7); }
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx + dx, cy + dy, size, 0, Math.PI * 2); ctx.fill();
+  };
+  if (game.city.minimap) {
+    try {
+      const srcSize = 1500 / WORLD_SIZE * game.city.minimap.width;
+      const sx = clamp((game.player.x / WORLD_SIZE) * game.city.minimap.width - srcSize / 2, 0, game.city.minimap.width - srcSize);
+      const sy = clamp((game.player.y / WORLD_SIZE) * game.city.minimap.height - srcSize / 2, 0, game.city.minimap.height - srcSize);
+      ctx.drawImage(game.city.minimap, sx, sy, srcSize, srcSize, cx - r, cy - r, r * 2, r * 2);
+    } catch (e) {}
+  }
+  ctx.fillStyle = 'rgba(10,12,18,0.25)'; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  for (const cop of game.police.cops) if (!cop.dead) drawDot(cop.x, cop.y, Math.sin(game.time * 8) > 0 ? '#ff5040' : '#4f8ef7', 3.4);
+  const marker = game.missions.marker();
+  if (marker) drawDot(marker.x, marker.y, marker.color === 'pickup' ? '#e8c832' : '#4fc96a', 4.4);
+  // Player arrow at the centre.
+  ctx.translate(cx, cy); ctx.rotate(game.player.inCar && game.player.car ? game.player.car.angle : game.player.angle);
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-5, -4.4); ctx.lineTo(-5, 4.4); ctx.closePath(); ctx.fill();
   ctx.restore();
-  // Health bar bottom-left. During the grab phase on foot, the panel is
-  // tall enough that the bar and the hint text never share a row: bar
-  // H-114..H-100, text baseline H-82 (glyphs H-91..H-82) — the old
-  // layout put the bar over the top of the ON FOOT hint text. Every
-  // other frame keeps the old layout, so the chase cover and the
-  // results screen are pixel-identical.
-  ctx.save();
-  const grabFoot = !p.car && world.mission && world.mission.phase === 'grab';
-  const hp = grabFoot ? { y: H - 124, h: 50, barY: H - 114, textY: H - 82 }
-                      : { y: H - 118, h: 40, barY: H - 104, textY: H - 84 };
-  ctx.fillStyle = 'rgba(10,12,22,0.78)'; ctx.fillRect(14, hp.y, 218, hp.h);
-  ctx.fillStyle = '#3a3f4a'; ctx.fillRect(24, hp.barY, 198, 14);
-  ctx.fillStyle = p.health > 30 ? '#01cdfe' : '#ff6b81';
-  ctx.fillRect(24, hp.barY, 198 * Math.max(0, p.health) / 100, 14);
-  ctx.fillStyle = '#fff'; ctx.font = '700 12px system-ui, sans-serif'; ctx.textAlign = 'left';
-  ctx.fillText(p.car ? `CAR ${Math.ceil(p.car.health)}/${p.car.maxHealth} · ${p.car.spec.name}` : 'ON FOOT — E: enter car · mouse: aim · click: fire', 24, hp.textY);
-  ctx.restore();
-  // Bust meter.
-  if (p.bust > 0.02) {
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.fillStyle = 'rgba(10,12,22,0.85)'; ctx.fillRect(W / 2 - 130, H - 150, 260, 40);
-    ctx.fillStyle = '#ff6b81'; ctx.fillRect(W / 2 - 120, H - 138, 240 * Math.min(1, p.bust), 16);
-    ctx.fillStyle = '#fff'; ctx.font = '900 15px system-ui, sans-serif';
-    ctx.fillText('BUSTED?', W / 2, H - 100);
-    ctx.restore();
-  }
-  // Gadget icons bottom-right.
-  if (world.gadgets) {
-    const items = [['cutPower', '1'], ['jam', '2'], ['decoy', '3'], ['spikes', '4']];
-    ctx.save();
-    items.forEach(([id, key], i) => {
-      const g = world.gadgets[id];
-      const x = W - 264 + i * 62, y = H - 76;
-      ctx.fillStyle = g.cd > 0 ? 'rgba(30,34,48,0.85)' : 'rgba(16,40,34,0.9)';
-      ctx.fillRect(x, y, 54, 54);
-      ctx.strokeStyle = g.active > 0 ? '#01cdfe' : '#ff71ce'; ctx.lineWidth = 2; ctx.strokeRect(x, y, 54, 54);
-      ctx.fillStyle = '#fff'; ctx.font = '900 17px system-ui, sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText(key, x + 27, y + 17);
-      ctx.font = '700 9.5px system-ui, sans-serif';
-      ctx.fillText(g.name, x + 27, y + 33);
-      if (g.cd > 0) { ctx.font = '900 14px system-ui, sans-serif'; ctx.fillStyle = '#ffd60a'; ctx.fillText(Math.ceil(g.cd) + 's', x + 27, y + 47); }
-    });
-    ctx.restore();
-  }
-  // Bribe prompt.
-  if (world.bribeNear) {
-    ctx.save(); ctx.textAlign = 'center'; ctx.font = '800 19px system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(10,12,22,0.85)'; ctx.fillRect(W / 2 - 230, H - 200, 460, 38);
-    ctx.fillStyle = '#7deeff';
-    ctx.fillText(`${world.bribeNear.label}: press E — bribe $${world.bribeNear.cost} to shed heat`, W / 2, H - 180);
-    ctx.restore();
-  }
-  // Minimap: full size top-right while driving. On foot (top-down combat
-  // framing) it shrinks to the top-left, below the cash panel, so it never
-  // sits on a named building's roof.
-  if (p.car) drawMinimap(ctx, world, W - MM.w - 14, 118);
-  else drawMinimap(ctx, world, 14, 84, MM_SMALL.w, MM_SMALL.h);
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = 'rgba(232,230,223,0.75)'; ctx.font = '600 10px system-ui, sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('MERIDIAN', cx, cy + r + 4);
+}
+export function drawTitle(ctx, game) {
+  ctx.fillStyle = 'rgba(5,6,12,0.62)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#57c7d4'; ctx.font = '700 58px system-ui, sans-serif';
+  ctx.shadowColor = '#57c7d4'; ctx.shadowBlur = 18;
+  ctx.fillText('M E R I D I A N', VIEW_W / 2, 238);
+  ctx.fillStyle = '#e0a458'; ctx.shadowColor = '#e0a458';
+  ctx.fillText('N I G H T S', VIEW_W / 2, 302);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = PALETTE.hudText; ctx.font = '16px system-ui, sans-serif';
+  ctx.fillText('A night-city open world: steal cars, run jobs for fixer Dario Venn, outrun the law.', VIEW_W / 2, 344);
+  ctx.font = '15px system-ui, sans-serif'; ctx.fillStyle = '#c9cdd4';
+  ctx.fillText('WASD / arrows — move & drive      E — enter / exit car      Space — shoot / handbrake', VIEW_W / 2, 402);
+  ctx.fillText('Shift — sprint      P — pause      H — help', VIEW_W / 2, 428);
+  ctx.fillStyle = '#f2c14e'; ctx.font = '700 19px system-ui, sans-serif';
+  ctx.fillText('Press ENTER to start', VIEW_W / 2, 486);
+  ctx.fillStyle = PALETTE.hudMuted; ctx.font = '14px system-ui, sans-serif';
+  const s = game.saveData;
+  ctx.fillText(s.missionsCompleted > 0 ? `Saved progress: $${Math.floor(s.money)} · ${s.missionsCompleted} jobs done · $${Math.floor(s.totalEarned)} earned` : 'No saved progress yet — your first night in Meridian.', VIEW_W / 2, 524);
+}
+export function drawWasted(ctx, game) {
+  ctx.fillStyle = 'rgba(20,4,6,0.55)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.textAlign = 'center'; ctx.fillStyle = '#e5484d';
+  ctx.font = '700 54px system-ui, sans-serif'; ctx.fillText('WASTED', VIEW_W / 2, 380);
+  ctx.fillStyle = PALETTE.hudText; ctx.font = '16px system-ui, sans-serif';
+  ctx.fillText('You wake at St. Sable Hospital. The bill is 10% of your cash.', VIEW_W / 2, 422);
+}
+export function drawPause(ctx, game, help) {
+  ctx.fillStyle = 'rgba(5,6,12,0.66)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.textAlign = 'center'; ctx.fillStyle = PALETTE.hudText;
+  ctx.font = '700 34px system-ui, sans-serif'; ctx.fillText(help ? 'HELP' : 'PAUSED', VIEW_W / 2, 268);
+  ctx.font = '16px system-ui, sans-serif'; ctx.fillStyle = '#c9cdd4';
+  const lines = [
+    'WASD / arrows — move on foot, drive in a car',
+    'E — enter or exit the nearest car (stealing brings heat)',
+    'Space — shoot on foot · handbrake in a car',
+    'Shift — sprint · P — pause · H — help',
+    'Yellow marker: pickup · Green marker: deliver',
+    'Stars fade when you break line of sight and stay clean.',
+  ];
+  lines.forEach((l, i) => ctx.fillText(l, VIEW_W / 2, 322 + i * 28));
+  ctx.fillStyle = '#f2c14e'; ctx.font = '600 15px system-ui, sans-serif';
+  ctx.fillText('Press P to resume', VIEW_W / 2, 322 + lines.length * 28 + 12);
 }

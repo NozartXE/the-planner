@@ -1,31 +1,21 @@
-// save.js — localStorage persistence: cash, REP, unlocks, garage, best grades,
-// run history and settings. Defensive: storage failures degrade to memory.
+// save.js — localStorage persistence for money, completed missions and lifetime earnings.
 import { SAVE_KEY } from './config.js';
-
-export function defaultSave() {
-  return {
-    cash: 1500, rep: 0, unlocked: 1, // number of heists unlocked (campaign order)
-    garage: ['compact'], bestGrades: {}, history: [],
-    settings: { mute: false, shake: true },
-    stats: { heistsDone: 0, busted: 0, wasted: 0, racesWon: 0, fares: 0, chops: 0 },
-  };
-}
-
 export function loadSave() {
+  const fallback = { money: 250, missionsCompleted: 0, totalEarned: 0, chainsFinished: 0 };
   try {
-    const raw = window.localStorage.getItem(SAVE_KEY);
-    if (!raw) return defaultSave();
-    const data = JSON.parse(raw);
-    const base = defaultSave();
-    return { ...base, ...data, settings: { ...base.settings, ...(data.settings || {}) }, stats: { ...base.stats, ...(data.stats || {}) } };
-  } catch { return defaultSave(); }
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SAVE_KEY) : null;
+    if (!raw) return { ...fallback };
+    const parsed = JSON.parse(raw);
+    return {
+      money: typeof parsed.money === 'number' ? parsed.money : fallback.money,
+      missionsCompleted: parsed.missionsCompleted | 0,
+      totalEarned: typeof parsed.totalEarned === 'number' ? parsed.totalEarned : 0,
+      chainsFinished: parsed.chainsFinished | 0,
+    };
+  } catch (e) { return { ...fallback }; }
 }
-
-export function storeSave(save) {
-  try { window.localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch { /* private mode */ }
-}
-
-export function recordRun(save, entry) {
-  save.history.unshift(entry);
-  if (save.history.length > 12) save.history.length = 12;
+export function writeSave(data) {
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch (e) {}
 }
