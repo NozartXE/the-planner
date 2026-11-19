@@ -102,4 +102,6 @@ export const PLACES = {
   hospital: { name: 'St. Sable Hospital', x: 1456, y: 2396 },
   depot: { name: 'Palma Depot', x: 986, y: 2866 },
   market: { name: 'Palm Market', x: 2396, y: 986 },
+  airport: { name: 'Amber Field Airport', x: 3101, y: 3101 },
+  base: { name: 'Fort Sable', x: 751, y: 3101 },
 };

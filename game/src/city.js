@@ -38,6 +38,8 @@ export function generateCity(seed) {
       const oy = by * BLOCK_PITCH + ROAD_W;
       const inner = BLOCK_PITCH - ROAD_W;
       const idx = bx + by * BLOCKS_PER_SIDE;
+      const isSite = (bx === 6 && by === 6) || (bx === 1 && by === 6);
+      if (isSite) continue;
       const isPark = (idx % 11 === 3) || (idx === 27) || (idx === 44);
       if (isPark) {
         parks.push({ x: ox, y: oy, w: inner, h: inner, bx, by });
@@ -126,7 +128,11 @@ export function generateCity(seed) {
     { x: WORLD_SIZE + 190, y: 2240, s: 1.05, sail: '#e8c9c4' },
     { x: WORLD_SIZE + 260, y: 2980, s: 0.95, sail: '#f2e8d8' },
   ];
-  return { buildings, parks, trees, palms, boats, lamps, minimap: null };
+  const sites = [
+    { kind: 'airport', x: 6 * BLOCK_PITCH + ROAD_W, y: 6 * BLOCK_PITCH + ROAD_W, w: BLOCK_PITCH - ROAD_W, h: BLOCK_PITCH - ROAD_W, name: 'AMBER FIELD' },
+    { kind: 'base', x: 1 * BLOCK_PITCH + ROAD_W, y: 6 * BLOCK_PITCH + ROAD_W, w: BLOCK_PITCH - ROAD_W, h: BLOCK_PITCH - ROAD_W, name: 'FORT SABLE' },
+  ];
+  return { buildings, parks, trees, palms, boats, lamps, sites, minimap: null };
 }
 
 export function collideCircleBuildings(city, x, y, r) {
@@ -165,17 +171,37 @@ export function buildMinimapBase(city) {
     const g = c.getContext('2d');
     if (!g) return null;
     const s = size / WORLD_SIZE;
-    g.fillStyle = '#2e2118'; g.fillRect(0, 0, size, size);
-    g.fillStyle = '#3e3436';
+    // Vice City cartography pattern on OUR geography: teal ocean field,
+    // pastel land blocks, a pale beach band on the east shore, a light
+    // road network, mint parks. Original drawing, our own street grid.
+    g.fillStyle = '#3d8fa3'; g.fillRect(0, 0, size, size); // teal ocean
+    g.fillStyle = '#e9dcbc'; g.fillRect(0, 0, size, size); // pastel land base
+    g.fillStyle = '#f2e3bb';
+    for (let by = 0; by < BLOCKS_PER_SIDE; by++) for (let bx = 0; bx < BLOCKS_PER_SIDE; bx++) {
+      const tints = ['#eed9b8', '#e6d3ae', '#f0dcbc', '#eadfc0'];
+      g.fillStyle = tints[(bx + by * 3) % tints.length];
+      g.fillRect((bx * BLOCK_PITCH + ROAD_W) * s, (by * BLOCK_PITCH + ROAD_W) * s, (BLOCK_PITCH - ROAD_W) * s, (BLOCK_PITCH - ROAD_W) * s);
+    }
+    g.fillStyle = '#a9c795'; // mint parks
+    for (const pk of city.parks) g.fillRect(pk.x * s, pk.y * s, pk.w * s, pk.h * s);
+    g.fillStyle = '#fdf6e0'; // light road network
     for (let k = 0; k < BLOCKS_PER_SIDE; k++) {
       g.fillRect(k * BLOCK_PITCH * s, 0, ROAD_W * s, size);
       g.fillRect(0, k * BLOCK_PITCH * s, size, ROAD_W * s);
     }
     g.fillRect(size - ROAD_W * s, 0, ROAD_W * s, size);
     g.fillRect(0, size - ROAD_W * s, size, ROAD_W * s);
-    g.fillStyle = '#51603a';
-    for (const p of city.parks) g.fillRect(p.x * s, p.y * s, p.w * s, p.h * s);
-    for (const b of city.buildings) { g.fillStyle = b.color || '#3a3f4a'; g.fillRect(b.x * s, b.y * s, Math.max(2, b.w * s), Math.max(2, b.h * s)); }
+    g.strokeStyle = 'rgba(120,100,70,0.35)'; g.lineWidth = 1;
+    for (let k = 0; k < BLOCKS_PER_SIDE; k++) { g.strokeRect(k * BLOCK_PITCH * s, 0, ROAD_W * s, size); g.strokeRect(0, k * BLOCK_PITCH * s, size, ROAD_W * s); }
+    for (const b of city.buildings) { g.fillStyle = 'rgba(178,148,110,0.55)'; g.fillRect(b.x * s, b.y * s, Math.max(1.5, b.w * s), Math.max(1.5, b.h * s)); }
+    // Sites: airport tarmac + runway, base concrete.
+    if (city.sites) for (const st of city.sites) {
+      g.fillStyle = st.kind === 'airport' ? '#b9b4a6' : '#a8a894';
+      g.fillRect(st.x * s, st.y * s, st.w * s, st.h * s);
+      if (st.kind === 'airport') { g.fillStyle = '#5c5c60'; g.fillRect(st.x * s, (st.y + st.h / 2 - 14) * s, st.w * s, 28 * s); g.fillStyle = '#fdf6e0'; for (let dx = 8; dx < st.w - 8; dx += 30) g.fillRect((st.x + dx) * s, (st.y + st.h / 2 - 1) * s, 14 * s, 2 * s); }
+    }
+    // Beach band + ocean on the east edge (the world ends at the shore).
+    g.fillStyle = '#f4e3ae'; g.fillRect(size - 3, 0, 3, size);
     return c;
   } catch (e) { return null; }
 }

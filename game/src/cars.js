@@ -19,6 +19,27 @@ export function makeCar(rng, typeIdx, x, y, angle) {
     occupied: false, dead: false, sirenPhase: rng ? rng.range(0, 6) : 0,
   };
 }
+// Military / air vehicles (Rect's vehicle-variety directive): real entries in
+// the same car-object shape the sim drives, enters and collides, so the one
+// enter-vehicle path serves cars, tanks and planes alike.
+export function makeTank(x, y, angle) {
+  const id = nextCarId++;
+  return {
+    id, kind: 'tank', name: 'BASTION MBT', isCop: false, isArmored: true, isTank: true,
+    x, y, angle: angle || 0, speed: 0, steer: 0, color: '#5a6248',
+    maxSpeed: 118, accel: 130, hp: 650, maxHp: 650, len: 54, wid: 30,
+    occupied: false, dead: false, sirenPhase: 0, turret: angle || 0, cannonCd: 0, dir: 0, cruise: 0,
+  };
+}
+export function makePlane(x, y, angle) {
+  const id = nextCarId++;
+  return {
+    id, kind: 'plane', name: 'SKIPPER SEAPLANE', isCop: false, isArmored: false, isPlane: true,
+    x, y, angle: angle || 0, speed: 0, steer: 0, color: '#c8b89a',
+    maxSpeed: 300, accel: 190, hp: 260, maxHp: 260, len: 64, wid: 15,
+    occupied: false, dead: false, sirenPhase: 0, alt: 0, airborne: false, dir: 0, cruise: 0,
+  };
+}
 export function makeCopCar(x, y, angle) {
   const id = nextCarId++;
   return {

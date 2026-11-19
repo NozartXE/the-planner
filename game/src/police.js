@@ -53,7 +53,7 @@ export class Police {
   setStars(n, now) { this.stars = clamp(n, 0, 5); this.lastCrimeAt = now; }
   clear() { this.stars = 0; this.decaying = false; }
   desiredCops() { return Math.min(MAX_COPS, this.stars * COPS_PER_STAR); }
-  update(rng, dt, now, player, trafficCars, fx) {
+  update(rng, dt, now, player, trafficCars, fx, distraction) {
     // Spawn cops off-screen until the wanted level is matched.
     while (this.cops.filter((c) => !c.dead).length < this.desiredCops()) {
       const s = spawnOnRoad(rng, player.x, player.y, 680, 1080);
@@ -81,10 +81,14 @@ export class Police {
     const all = trafficCars.concat(this.cops);
     for (const cop of this.cops) {
       if (cop.dead) continue;
-      const dPlayer = dist(cop.x, cop.y, player.x, player.y);
+      if ((cop.stunUntil && now < cop.stunUntil) || (cop.gassedUntil && now < cop.gassedUntil)) { cop.speed = Math.max(0, cop.speed - 300 * dt); continue; }
+      // A live flare distraction pulls units that cannot see the player.
+      let aim = player;
+      if (distraction && now < distraction.until && dist(cop.x, cop.y, player.x, player.y) > 260) aim = distraction;
+      const dPlayer = dist(cop.x, cop.y, aim.x, aim.y);
       if (dPlayer < 250) {
-        // Direct pursuit: steer at the player and try to make contact.
-        const want = Math.atan2(player.y - cop.y, player.x - cop.x);
+        // Direct pursuit: steer at the aim point and try to make contact.
+        const want = Math.atan2(aim.y - cop.y, aim.x - cop.x);
         let diff = want - cop.angle;
         while (diff > Math.PI) diff -= Math.PI * 2;
         while (diff < -Math.PI) diff += Math.PI * 2;
@@ -102,7 +106,7 @@ export class Police {
           for (const cand of [car.dir, (car.dir + 1) % 4, (car.dir + 3) % 4]) {
             const dd = DIRS[cand];
             const px = cx + dd.x * 180, py = cy + dd.y * 180;
-            const score = dist(px, py, player.x, player.y);
+            const score = dist(px, py, aim.x, aim.y);
             if (score < bestScore) { bestScore = score; best = cand; }
           }
           return best;
@@ -111,7 +115,7 @@ export class Police {
       // Contact: ram damage.
       const targetCar = player.inCar ? player.car : null;
       const hitDist = targetCar ? 30 : 24;
-      if (dPlayer < hitDist && now - (cop._lastRamAt || 0) > 650) {
+      if (aim === player && dPlayer < hitDist && now - (cop._lastRamAt || 0) > 650) {
         cop._lastRamAt = now;
         if (fx) { fx.sparks(player.x, player.y); fx.addShake(6); }
         if (targetCar) targetCar.hp -= 9;

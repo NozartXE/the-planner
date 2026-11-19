@@ -14,8 +14,8 @@ import { planStats, settlePlan, weaponForPlan, jobPlanData } from './planning.js
 // job 3 (Front Page) is planned on the board and executed in the chase with
 // the SAME plan object values, job 4 runs at dusk with the extended mag,
 // and the results ledger settles all five with the house crew (Dex + Milo).
-export const STAGED_PLAN_J3 = { jobIndex: 2, entry: 2, crew: ['dex', 'milo'], gear: ['duffels', 'extmag'], getaway: 'coupe', timeOfDay: 'golden' };
-export const STAGED_PLAN_J4 = { jobIndex: 3, entry: 0, crew: ['dex', 'milo'], gear: ['duffels', 'extmag'], getaway: 'sedan', timeOfDay: 'dusk' };
+export const STAGED_PLAN_J3 = { jobIndex: 2, entry: 2, crew: ['dex', 'milo'], gear: ['duffels', 'extmag'], getaway: 'coupe', timeOfDay: 'golden', weaponId: 'rl-havoc' };
+export const STAGED_PLAN_J4 = { jobIndex: 3, entry: 0, crew: ['dex', 'milo'], gear: ['duffels', 'extmag'], getaway: 'sedan', timeOfDay: 'dusk', weaponId: 'venn-9mm' };
 function snapCamera(game) {
   game.camera.x = game.player.x; game.camera.y = game.player.y;
 }
@@ -264,89 +264,61 @@ export function applyShot(game, name, step) {
     return true;
   }
   if (name === 'mission') {
-    // On-foot firefight at the Palm Market intersection (Solana uptown): the player
-    // fires east along the avenue at a smoking sedan mid-stride, tracers in flight,
-    // pedestrians fleeing, cops closing from ahead. Jobs 1–3 are done ($2,250);
-    // the current job is 4, "Two Drops", first drop next.
-    // 3D framing: the player stands IN the intersection (roads cross at
-    // x 2350–2442 × y 940–1032) aiming east, so the foot chase cam ~72 units behind
-    // at ≈ (2324, 1015) is also in open intersection — the first 3D capture staged
-    // the player at a block edge and the camera landed inside a building, framing
-    // two walls. Every staged actor stands ahead of the camera in the road cross.
+    // DIRECTIVES ROUND — composition choice (disclosed in the record): the
+    // brief's alternative staging. A centred wheel occludes whatever sits
+    // at the vanishing point, so the frame is an ON-FOOT moment at FORT
+    // SABLE: the player stands on the base's south road with the WEAPON
+    // WHEEL open over live action — the tank large at the left foreground
+    // (turret traversed, muzzle smoke from its last round), a fresh cannon
+    // burst + molotov fire patch on the target sedan at the right, clear of
+    // the wheel, and the wanted roster reacting top-right (3 stars, 3
+    // units). Tank DRIVING/firing is proven in the smoke suite; this frame
+    // proves variety + arsenal + reaction in one composition.
     game.screen = 'play';
     run(150);
     game.screen = 'play';
     game.player.inCar = false; game.player.car = null;
-    game.player.x = 2396; game.player.y = 1006;
-    // Closer mid-shot re-stage: the target sedan is 74 units ahead (was 114),
-    // so the gun, muzzle, tracers and the struck car all read in one frame
-    // and the empty road foreground shrinks to the player's own street slice.
-    game.player.angle = Math.atan2(1000 - 1006, 2470 - 2396);
-    game.player.walkPhase = 1.1; game.player.vx = 30; game.player.vy = -4; game.player.hp = 88;
-    const a = game.player.angle;
-    setCar(game.traffic[1], 2470, 1000, -0.35, 0, { kind: 'sedan', color: '#54604f', hp: 22, maxHp: 100 });
-    setCar(game.traffic[2], 2735, 965, Math.PI, 0);
-    setCar(game.traffic[3], 2866, 850, Math.PI / 2, 40);
+    game.player.x = 700; game.player.y = 2887; game.player.angle = 0.12;
+    game.player.walkPhase = 0.6; game.player.vx = 0; game.player.vy = 0; game.player.hp = 92;
+    const tank = game.specials[0];
+    tank.x = 732; tank.y = 2860; tank.angle = -0.12; tank.turret = 0.55; tank.speed = 0; tank.dead = false; tank.hp = 590;
+    game.specials[1].x = 830; game.specials[1].y = 3060; game.specials[1].angle = -0.4;
+    // Target sedan south-east, clear of the wheel, burning.
+    setCar(game.traffic[1], 806, 2922, 0.5, 0, { kind: 'sedan', color: '#54604f', hp: 18, maxHp: 100 });
+    setCar(game.traffic[2], 3300, 3300, 0, 0);
+    setCar(game.traffic[3], 3300, 3300, 0, 0);
     game.police.cops = [];
-    // The roster's 2× ROADBLOCK, staged as what it claims: a pair swung
-    // PERPENDICULAR across both lanes of the avenue ahead (the road spans
-    // y 940–1032; unit A covers the north half, unit B the south half, a
-    // small gap between their inner ends), both fully visible in frame at
-    // mid-distance, flanking the target car's escape line.
-    const cop1 = addCop(game, 2648, 968, -Math.PI / 2); cop1.speed = 0;
-    const cop2 = addCop(game, 2662, 1012, Math.PI / 2); cop2.speed = 0;
+    const cop1 = addCop(game, 905, 2946, Math.PI); cop1.speed = 40;
+    const cop2 = addCop(game, 860, 2866, Math.PI); cop2.speed = 40;
+    const cop3 = addCop(game, 600, 2908, 0); cop3.speed = 60;
     game.police.assignTactics(game.player);
     game.police.lastSeenX = game.player.x; game.police.lastSeenY = game.player.y;
-    // Peds on sidewalks only — none stands on the road surface.
-    stagePed(game, 0, 2480, 922, 0.3, 2.2, 0);
-    stagePed(game, 1, 2560, 925, 1.2, 4.4, 0);
-    stagePed(game, 2, 2500, 1048, -2.4, 0.4, 0);
-    stagePed(game, 3, 2338, 960, -1.2, 1.9, 1);
-    stagePed(game, 4, 2462, 1050, 2.8, 3.6, 2);
-    stagePed(game, 5, 2660, 928, -Math.PI / 2, 5.1, 3);
-    stagePed(game, 6, 2720, 1090, Math.PI, 0.8, 1);
-    // (Was staged mid-roadway at the intersection's east edge; moved to the
-    // north sidewalk strip, y 934 — no staged pedestrian stands on the road
-    // surface in this frame.)
-    stagePed(game, 7, 2536, 934, 0, 2.9, 0);
-    // The three peds nearest the gunfire are caught mid-flee (run pose in the renderer).
-    for (const idx of [0, 1, 2]) {
-      const ped = game.peds[idx];
-      ped.fleeUntil = game.nowMs + 60000; ped.fleeX = game.player.x; ped.fleeY = game.player.y;
-    }
+    stagePed(game, 0, 620, 2840, 0.4, 2.2, 0);
+    stagePed(game, 1, 960, 2842, -2.2, 4.0, 1);
+    stagePed(game, 2, 1080, 2946, Math.PI, 1.1, 2);
+    for (const idx of [0, 1]) { const ped = game.peds[idx]; ped.fleeUntil = game.nowMs + 60000; ped.fleeX = 806; ped.fleeY = 2922; }
     game.money = 2250;
     game.police.setStars(3, game.nowMs);
     setMission(game, 3, 'dropA', 96);
-    game.lastShotAt = game.nowMs;
-    // Job 4's plan, executed at DUSK: the extended-mag gear built an
-    // 18-round VENN 9MM and three rounds are already fired — the readout
-    // (15 / 48) is the sim's own count. The grab is done (loot = the full
-    // $1,829 estimate) and Dex, the plan's lead pick, works beside the
-    // player in his own colour. The getaway sedan waits up the street.
     game.plan = { ...STAGED_PLAN_J4, crew: [...STAGED_PLAN_J4.crew], gear: [...STAGED_PLAN_J4.gear] };
     game.planStatsCache = planStats(3, game.plan, 0);
-    game.timeGrade = game.plan.timeOfDay;
+    game.timeGrade = 'golden';
     game.weapon = weaponForPlan(game.plan);
     game.weapon.mag = 15;
     game.missions.lootGrabbed = game.planStatsCache.loot;
-    game.crewMate = { id: 'dex', name: 'DEX RUIZ', color: '#e8c832', x: game.player.x + 16, y: game.player.y + 20, angle: a, walkPhase: 2.0, pose: 'aim' };
-    game.traffic[2].name = 'VANTARO SEDAN';
-    // Tracers in flight along the aim line and the muzzle flash, frozen at the capture tick.
-    const mx = game.player.x + Math.cos(a) * 16, my = game.player.y + Math.sin(a) * 16;
-    game.bullets = [26, 50, 70].map((d) => ({
-      x: game.player.x + Math.cos(a) * d, y: game.player.y + Math.sin(a) * d, angle: a, life: 0.5,
-    }));
-    // Hit feedback on the struck sedan: impact sparks + a bright flash at its
-    // flank, damage smoke (soft sprites) climbing off it.
+    game.crewMate = { id: 'dex', name: 'DEX RUIZ', color: '#e8c832', x: game.player.x - 20, y: game.player.y + 22, angle: 0.4, walkPhase: 2.0, pose: 'stand' };
+    game.projectiles = [];
+    game.zones = [{ kind: 'fire', x: 824, y: 2936, r: 30, until: game.nowMs + 60000, dps: 26 }];
     game.fx.particles = [
-      { x: mx, y: my, vx: 0, vy: 0, life: 0.07, maxLife: 0.07, color: '#ffd76a', size: 5.5, drag: 0 },
-      { x: 2452, y: 998, vx: 0, vy: 0, life: 0.4, maxLife: 0.4, color: '#f2c14e', size: 3.4, drag: 0 },
-      { x: 2458, y: 994, vx: 0, vy: 0, life: 0.32, maxLife: 0.32, color: '#ffd76a', size: 2.8, drag: 0 },
-      { x: 2450, y: 1002, vx: 0, vy: 0, life: 0.45, maxLife: 0.45, color: '#fff3c4', size: 4.2, drag: 0 },
-      { x: 2462, y: 990, vx: 0, vy: 0, life: 1.0, maxLife: 1.0, color: 'rgba(120,120,125,0.6)', size: 7, drag: 0 },
-      { x: 2472, y: 982, vx: 0, vy: 0, life: 0.9, maxLife: 0.9, color: 'rgba(120,120,125,0.5)', size: 5.5, drag: 0 },
+      { x: 752, y: 2862, vx: 0, vy: 0, life: 0.8, maxLife: 1.0, color: 'rgba(120,120,125,0.55)', size: 6, drag: 0 },
+      { x: 794, y: 2914, vx: 0, vy: 0, life: 0.4, maxLife: 0.4, color: '#f2c14e', size: 3.8, drag: 0 },
+      { x: 800, y: 2906, vx: 0, vy: 0, life: 0.34, maxLife: 0.34, color: '#fff3c4', size: 4.6, drag: 0 },
+      { x: 810, y: 2900, vx: 0, vy: 0, life: 1.0, maxLife: 1.0, color: 'rgba(120,120,125,0.6)', size: 7.5, drag: 0 },
+      { x: 818, y: 2892, vx: 0, vy: 0, life: 0.9, maxLife: 0.9, color: 'rgba(120,120,125,0.5)', size: 5.5, drag: 0 },
     ];
-    game.toasts = [];
+    // The wheel, open over the action: RL segment selected, HAVOC TUBE in hub.
+    game.wheelOpen = true; game.wheelClass = 5; game.wheelIndex = 0;
+    game.bullets = []; game.toasts = [];
     finish(game);
     return true;
   }
@@ -430,6 +402,30 @@ export function applyShot(game, name, step) {
     game.police.cops = [];
     game.police.setStars(0, game.nowMs);
     game.peds.forEach((ped, i) => { ped.x = 3350 + (i % 8) * 9; ped.y = 3350 + Math.floor(i / 8) * 9; ped.dead = false; ped.fleeUntil = 0; });
+    game.missions.active = false; game.missions.stage = 'idle'; game.missions.briefUntil = 0;
+    game.money = 0;
+    game.bullets = []; game.fx.particles = []; game.fx.skids = []; game.toasts = [];
+    finish(game);
+    return true;
+  }
+  if (name === 'scaletank' || name === 'scaleplane') {
+    // MEASUREMENT SCENES (never shipped): the player stands beside the tank
+    // (or the plane) at the same forward depth, ID-rendered like ?shot=scale.
+    game.screen = 'play';
+    run(150);
+    game.screen = 'play';
+    game.player.inCar = false; game.player.car = null;
+    game.player.x = 1000; game.player.y = 1477; game.player.angle = -Math.PI / 2;
+    game.player.walkPhase = 1.1; game.player.vx = 0; game.player.vy = -30; game.player.hp = 100;
+    const veh = name === 'scaletank' ? game.specials[0] : game.specials[2];
+    veh.x = 1034; veh.y = 1479; veh.angle = -Math.PI / 2; veh.dead = false;
+    if (veh.turret !== undefined) veh.turret = -Math.PI / 2;
+    if (veh.alt !== undefined) veh.alt = 0;
+    for (let i = 0; i < game.traffic.length; i++) setCar(game.traffic[i], 3300 + i * 12, 3300, 0, 0);
+    for (const sp of game.specials) if (sp !== veh) { sp.x = 3350; sp.y = 3350; }
+    game.police.cops = [];
+    game.police.setStars(0, game.nowMs);
+    game.peds.forEach((ped, i) => { ped.x = 3350 + (i % 8) * 9; ped.y = 3400 + Math.floor(i / 8) * 9; ped.dead = false; ped.fleeUntil = 0; });
     game.missions.active = false; game.missions.stage = 'idle'; game.missions.briefUntil = 0;
     game.money = 0;
     game.bullets = []; game.fx.particles = []; game.fx.skids = []; game.toasts = [];

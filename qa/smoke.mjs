@@ -1,4 +1,4 @@
-// smoke.mjs — stubbed-DOM smoke test (13 checks). Run: node qa/smoke.mjs
+// smoke.mjs — stubbed-DOM smoke test (21 checks). Run: node qa/smoke.mjs
 // Stubs document/canvas/localStorage just enough for the game's ES modules to
 // boot and render headlessly, then exercises the real systems.
 const grad = { addColorStop() {} };
@@ -113,5 +113,83 @@ hud.drawSummary(makeCtx(), g5);
 const led = g5.lastLedger;
 const ledOk = led && led.gross - led.fence - led.cutTotal === led.net && led.cuts.reduce((a, c) => a + c.amount, 0) === led.cutTotal;
 check('13 results: ledger reconciles (gross-fence-cuts=net); 5 history rows net $5,200; REP sums', ledOk && g5.lastSummary && g5.lastSummary.jobRows.length === 5 && g5.lastSummary.jobRows.reduce((a, r) => a + r.pay, 0) === 5200 && g5.lastSummary.repTotal === 360 && g5.chainLedger.every((l) => l.gross - l.fence - l.cutTotal === l.net));
+
+// ---- Directives round: arsenal, vehicles, wheel, explosives, maps ----
+const arsenal = await import('../game/src/arsenal.js');
+const counts = arsenal.classCounts();
+const names = new Set(arsenal.WEAPONS.map((w) => w.name));
+const statsSane = arsenal.WEAPONS.every((w) => w.damage > 0 && w.rps > 0 && w.range >= 40 && w.mag >= 1 && w.reserve >= 0 && w.reloadMs >= 400);
+check('14 arsenal: exact class counts 10/10/5/7/8/6 + 10 explosives = 56', counts.AR === 10 && counts.SMG === 10 && counts.MG === 5 && counts.SG === 7 && counts.SR === 8 && counts.RL === 6 && counts.EXP === 10 && arsenal.WEAPONS.length === 56);
+check('15 arsenal: 56 unique original names; stats sane; VENN 9MM is one entry', names.size === 56 && statsSane && arsenal.weaponById('venn-9mm').name === 'VENN 9MM' && arsenal.WEAPONS.filter((w) => w.cls === 'EXP').every((w) => !!w.behavior) && new Set(arsenal.WEAPONS.filter((w) => w.cls === 'EXP').map((w) => w.behavior)).size === 10);
+const wExt = planning.weaponForPlan({ gear: ['extmag'], weaponId: 'venn-9mm' });
+const wAr = planning.weaponForPlan({ gear: [], weaponId: 'ar-kestrel' });
+check('16 arsenal: table-driven weapon build; EXTENDED MAG = table mag x1.5 (12->18)', wExt.magSize === 18 && wAr.magSize === 30 && wAr.damage === 22 && wAr.name === 'KESTREL AR-7');
+// Tank: enter through the same path, drive, turret traverses, cannon fires a real shell
+const gt = createGame();
+gt.screen = 'play'; gt.idleMissionTimer = 99999;
+const tank = gt.specials[0];
+gt.player.x = tank.x + 20; gt.player.y = tank.y; gt.player.inCar = false; gt.player.car = null;
+gt.input.setKey('KeyE', true); step0(gt); gt.input.setKey('KeyE', false);
+function step0(g) { updateGame(g, 1 / 60); }
+const inTank = gt.player.inCar && gt.player.car === tank && gt.police.stars >= 3;
+gt.input.setKey('KeyW', true);
+for (let i = 0; i < 90; i++) step0(gt);
+gt.input.setKey('KeyW', false);
+const tankMoved = Math.hypot(tank.x - 691, tank.y - 3071) > 5 || tank.speed > 4;
+gt.input.setKey('Space', true); step0(gt); gt.input.setKey('Space', false);
+const shellOut = gt.projectiles.some((pr) => pr.behavior === 'cannon');
+for (let i = 0; i < 80; i++) step0(gt);
+check('17 tank: enter via E (heat 3), drives, cannon shell fired and resolved', inTank && tankMoved && shellOut);
+// Plane: enter, throttle down the runway, lift off, heat reacts
+const gp = createGame();
+gp.screen = 'play'; gp.idleMissionTimer = 99999;
+const plane = gp.specials[2];
+plane.x = 2960; plane.y = 3101; plane.angle = 0;
+gp.player.x = plane.x + 20; gp.player.y = plane.y; gp.player.inCar = false; gp.player.car = null;
+gp.input.setKey('KeyE', true); updateGame(gp, 1 / 60); gp.input.setKey('KeyE', false);
+const inPlane = gp.player.inCar && gp.player.car === plane;
+gp.input.setKey('KeyW', true);
+let lifted = false;
+for (let i = 0; i < 60 * 14; i++) { updateGame(gp, 1 / 60); if ((plane.alt || 0) > 12) { lifted = true; break; } }
+gp.input.setKey('KeyW', false);
+check('18 plane: enter via E, runway roll lifts off (alt>12), takeoff heat >=3', inPlane && lifted && gp.police.stars >= 3);
+// Wheel: opens, class/index cycling lands on a real weapon, equip builds it
+const gw = createGame();
+gw.screen = 'play';
+gw.wheelOpen = true; gw.wheelClass = 5; gw.wheelIndex = 0;
+const { equipWheelSelection, cycleWheel } = main;
+const equipped = equipWheelSelection(gw);
+cycleWheel(gw, 1, 0);
+let wheelRenderOk = true;
+try { hud.drawWeaponWheel(makeCtx(), gw); } catch (e) { wheelRenderOk = false; console.log('  wheel render error', e.message); }
+check('19 wheel: opens, RL segment equips HAVOC TUBE, cycling + render ok', equipped && equipped.id === 'rl-havoc' && gw.weapon.name === 'HAVOC TUBE' && gw.wheelClass === 6 && wheelRenderOk);
+// Explosives: grenade explodes, C4 plants+detonates, molotov leaves a fire zone, mine waits then triggers
+const ge = createGame();
+ge.screen = 'play'; ge.idleMissionTimer = 99999; ge.player.inCar = false; ge.player.car = null; ge.player.angle = 0;
+ge.weapon = arsenal.buildWeapon(arsenal.weaponById('exp-grenade'), null);
+ge.input.setKey('Space', true); updateGame(ge, 1 / 60); ge.input.setKey('Space', false);
+const thrown = ge.projectiles.length === 1;
+for (let i = 0; i < 150; i++) updateGame(ge, 1 / 60);
+const grenadeGone = ge.projectiles.length === 0;
+ge.player.shootCd = 0; ge.weapon = arsenal.buildWeapon(arsenal.weaponById('exp-c4'), null);
+ge.input.setKey('Space', true); updateGame(ge, 1 / 60); ge.input.setKey('Space', false);
+const planted = ge.placed.length === 1;
+ge.input.setKey('KeyX', true); updateGame(ge, 1 / 60); ge.input.setKey('KeyX', false);
+const detonated = ge.placed.length === 0;
+ge.player.shootCd = 0; ge.weapon = arsenal.buildWeapon(arsenal.weaponById('exp-molotov'), null);
+ge.input.setKey('Space', true); updateGame(ge, 1 / 60); ge.input.setKey('Space', false);
+for (let i = 0; i < 90; i++) updateGame(ge, 1 / 60);
+const fireZone = ge.zones.some((z) => z.kind === 'fire');
+check('20 explosives: grenade arc resolves, C4 plant + X detonate, molotov fire zone', thrown && grenadeGone && planted && detonated && fireZone);
+// Maps + mission-passed summary render
+let mapOk = true;
+try {
+  const gm = createGame();
+  hud.drawDistrictMap(makeCtx(), gm, 10, 10, 240, 140);
+  const g6 = createGame(); applyShot(g6, 'results', (dt) => updateGame(g6, dt || 1 / 60)); hud.drawSummary(makeCtx(), g6);
+  const g7 = createGame(); applyShot(g7, 'board', (dt) => updateGame(g7, dt || 1 / 60)); hud.drawPlanning(makeCtx(), g7);
+} catch (e) { mapOk = false; console.log('  map/summary error', e.message); }
+check('21 maps+results: district map, board (with map+arsenal), MISSION PASSED summary render', mapOk);
+
 console.log(`\n${pass}/${pass + fail} PASS`);
 process.exit(fail ? 1 : 0);

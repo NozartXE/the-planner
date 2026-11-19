@@ -46,6 +46,30 @@ const scale = await evaluate(`(() => {
 })()`);
 console.log('SCALE', JSON.stringify(scale));
 
+// (a2) figure vs tank / figure vs plane from their ID scenes (red / magenta)
+for (const [shot, key, pred] of [['scaletank', 'tank', (r, g, b) => r > 200 && g < 60 && b < 60], ['scaleplane', 'plane', (r, g, b) => r > 200 && g < 60 && b > 200]]) {
+  await load(shot);
+  const m2 = await evaluate(`(() => {
+    const g = window.__MN.game; g.idRender = true;
+    window.__MN.render(document.getElementById('game').getContext('2d'), g);
+    const cv = document.getElementById('game'); const cx = cv.getContext('2d');
+    const d = cx.getImageData(0, 0, cv.width, cv.height).data;
+    const box = { fig: null, veh: null }; const cnt = { fig: 0, veh: 0 };
+    const pred = ${shot === 'scaletank' ? '(r,g,b)=>r>200&&g<60&&b<60' : '(r,g,b)=>r>200&&g<60&&b>200'};
+    for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
+      const i = (y * cv.width + x) * 4, r = d[i], gg = d[i + 1], b = d[i + 2];
+      const k = (gg > 200 && r < 60 && b < 60) ? 'fig' : pred(r, gg, b) ? 'veh' : null;
+      if (!k) continue; cnt[k]++;
+      if (!box[k]) box[k] = { x0: x, x1: x, y0: y, y1: y };
+      const B = box[k]; B.x0 = Math.min(B.x0, x); B.x1 = Math.max(B.x1, x); B.y0 = Math.min(B.y0, y); B.y1 = Math.max(B.y1, y);
+    }
+    if (!box.fig || !box.veh) return { missing: true, cnt };
+    const fh = box.fig.y1 - box.fig.y0 + 1, vh = box.veh.y1 - box.veh.y0 + 1;
+    return { figH: fh, vehH: vh, hRatio: +(fh / vh).toFixed(3), figArea: cnt.fig, vehArea: cnt.veh, aRatio: +(cnt.fig / cnt.veh).toFixed(3) };
+  })()`);
+  console.log('SCALE-' + key.toUpperCase(), JSON.stringify(m2));
+}
+
 // (b) chase cops in frame + (c) blank estimate per shot
 for (const shot of ['board', 'chase', 'mission', 'results']) {
   await load(shot);

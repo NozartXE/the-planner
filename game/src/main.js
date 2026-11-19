@@ -10,20 +10,21 @@ import { loadSave, writeSave } from './save.js';
 import { populateTraffic, updateTraffic } from './traffic.js';
 import { Police } from './police.js';
 import { Fx } from './fx.js';
-import { makeCar } from './cars.js';
+import { makeCar, makeTank, makePlane } from './cars.js';
+import { weaponById, buildWeapon, WEAPON_CLASSES, weaponsByClass } from './arsenal.js';
 import { makeCamera, updateCamera, renderGame } from './render.js';
 import { projectPoint } from './view3d.js';
-import { drawHud, drawTitle, drawWasted, drawPause, drawSummary, drawPlanning } from './hud.js';
+import { drawHud, drawTitle, drawWasted, drawPause, drawSummary, drawPlanning, drawWeaponWheel } from './hud.js';
 import { applyShot } from './shots.js';
 import { Radio } from './radio.js';
-import { defaultPlan, planStats, settlePlan, weaponForPlan, decayIntervalForPlan, entrySpawn, cycleEntry, cycleGetaway, cycleTime, toggleCrew, toggleGear, crewById, getawayById, GEAR_POOL } from './planning.js';
+import { defaultPlan, planStats, settlePlan, weaponForPlan, decayIntervalForPlan, entrySpawn, cycleEntry, cycleGetaway, cycleTime, toggleCrew, toggleGear, crewById, getawayById, GEAR_POOL, cycleWeapon } from './planning.js';
 import { CIV_TYPES } from './cars.js';
 
 // The one weapon the player carries: a real magazine/reserve the shooting
 // code decrements and reloads from, so the HUD readout is the sim's truth.
 // Its size is built from the plan's gear (planning.js weaponForPlan).
 export function makeWeapon() {
-  return { name: 'VENN 9MM', magSize: 12, mag: 12, reserve: 48 };
+  return buildWeapon(weaponById('venn-9mm'), null);
 }
 
 const statusEl = typeof document !== 'undefined' ? document.getElementById('status') : null;
@@ -51,6 +52,7 @@ export function createGame() {
     carsStolen: saveData.carsStolen || 0,
     chainEarned: 0, jobsThisChain: 0, lastSummary: null, _heatStart: 0, _chainJustDone: false,
     traffic: [], peds: [], bullets: [], toasts: [],
+    specials: [], projectiles: [], placed: [], zones: [], distraction: null, wheelOpen: false, wheelClass: 1, wheelIndex: 0,
     weapon: makeWeapon(), radio: new Radio(), jobEarnings: [],
     police: new Police(), missions: new Missions(), fx: new Fx(rng),
     camera: makeCamera(), input: new Input(),
@@ -65,6 +67,14 @@ export function createGame() {
     crewMate: null, lootGrabbedTotal: 0,
   };
   game.traffic = populateTraffic(rng, player);
+  // Vehicle variety, parked where they belong: tanks at Fort Sable, planes
+  // on the Amber Field runway — all enterable through the same E path.
+  game.specials = [
+    makeTank(PLACES.base.x - 60, PLACES.base.y - 30, 0),
+    makeTank(PLACES.base.x + 70, PLACES.base.y + 55, Math.PI),
+    makePlane(PLACES.airport.x - 110, PLACES.airport.y, 0),
+    makePlane(PLACES.airport.x + 90, PLACES.airport.y + 52, 0),
+  ];
   game.peds = makePedestrians(rng, 64);
   game.camera.x = player.x; game.camera.y = player.y;
   game.toast = (text) => { game.toasts.push({ text, until: game.nowMs + 3800 }); if (game.toasts.length > 4) game.toasts.shift(); };
@@ -87,7 +97,7 @@ export function createGame() {
 }
 
 function allCars(game) {
-  const list = game.traffic.concat(game.police.cops);
+  const list = game.traffic.concat(game.police.cops).concat(game.specials || []);
   if (game.markedCarRef) list.push(game.markedCarRef);
   return list;
 }
@@ -109,6 +119,7 @@ export function enterCar(game, car) {
 function exitCar(game) {
   const car = game.player.car;
   if (!car) return;
+  if (car.kind === 'plane' && (car.alt || 0) > 10) { game.toast('Too high to climb out — descend first.'); return; }
   car.occupiedByPlayer = false;
   game.player.inCar = false; game.player.car = null;
   game.player.x = car.x + Math.cos(car.angle + Math.PI / 2) * 26;
@@ -124,7 +135,9 @@ function tryEnterExit(game) {
   const wasMoving = Math.abs(car.speed) > 24;
   enterCar(game, car);
   game.carsStolen += 1;
-  if (car.isCop) game.crime(3);
+  if (car.kind === 'tank') { game.crime(3); game.toast('Military hardware — Fort Sable wants it back. Heat rising.'); }
+  else if (car.kind === 'plane') { game.crime(2); game.toast('Aircraft taken from Amber Field. Heat rising.'); }
+  else if (car.isCop) game.crime(3);
   else if (wasMoving) game.crime(1);
   if (game.missions.markedCar && car === game.missions.markedCar) game.toast('That is the sedan Venn wants — drive!');
 }
@@ -197,6 +210,8 @@ export function updatePlanning(game, dt) {
   if (input.wasPressed('KeyG')) cycleGetaway(plan, 1);
   if (input.wasPressed('KeyT')) cycleTime(plan, 1);
   for (let i = 0; i < 6; i++) if (input.wasPressed('Digit' + (i + 1))) toggleCrew(plan, ['dex', 'priya', 'bo', 'sana', 'milo', 'ruth'][i]);
+  if (input.wasPressed('KeyJ')) cycleWeapon(plan, -1);
+  if (input.wasPressed('KeyK')) cycleWeapon(plan, 1);
   if (input.wasPressed('KeyF')) game.gearFocus = ((game.gearFocus || 0) + 1) % GEAR_POOL.length;
   if (input.wasPressed('Space')) toggleGear(plan, GEAR_POOL[game.gearFocus || 0].id);
   if (input.wasPressed('Enter')) executePlan(game);
@@ -282,6 +297,132 @@ function respawn(game) {
   game.screen = 'play';
   game.persist();
 }
+
+// ------------------------------------------------------------ explosives
+// One blast routine every explosive behaviour funnels into: real area
+// damage to cars and peds, a scorch of fx, and heat for the player.
+export function explodeAt(game, x, y, radius, damage) {
+  game.fx.explosion(x, y);
+  for (const car of allCars(game)) {
+    if (car.dead) continue;
+    const d = dist(x, y, car.x, car.y);
+    if (d < radius + 20) { car.hp -= damage * (1 - d / (radius + 40)); if (car.hp <= 0) car.dead = true; }
+  }
+  for (const ped of game.peds) {
+    if (!ped.dead && dist(x, y, ped.x, ped.y) < radius) { ped.dead = true; ped.respawnAt = game.nowMs + 9000; game.fx.blood(ped.x, ped.y); }
+  }
+  if (!game.player.inCar && dist(x, y, game.player.x, game.player.y) < radius * 0.7) game.player.hp -= damage * 0.35;
+  game.police.addStars(1, game.nowMs);
+}
+function throwProjectile(game, w, behavior) {
+  const p = game.player, a = p.angle;
+  game.projectiles.push({
+    behavior, defId: w.defId, name: w.name, damage: w.damage, blast: w.blast || 60,
+    x: p.x + Math.cos(a) * 14, y: p.y + Math.sin(a) * 14, z: 9,
+    vx: Math.cos(a) * 330, vy: Math.sin(a) * 330, vz: 130,
+    fuse: behavior === 'grenade' ? 1.15 : behavior === 'pipe' ? 0.6 : 99, stuckTo: null, life: 6,
+  });
+}
+function plantCharge(game, w, behavior) {
+  const p = game.player;
+  game.placed.push({ behavior, defId: w.defId, name: w.name, damage: w.damage, blast: w.blast || 90, x: p.x, y: p.y, armedAt: game.nowMs, timer: behavior === 'satchel' ? 5000 : 0 });
+  game.toast(w.name + ' planted' + (behavior === 'satchel' ? ' — 5 seconds!' : ' — X or fire again to detonate.'));
+}
+function detonatePlaced(game, filter) {
+  let n = 0;
+  for (const pl of game.placed) {
+    if (pl.dead) continue;
+    if (filter && !filter(pl)) continue;
+    pl.dead = true; n++; explodeAt(game, pl.x, pl.y, pl.blast, pl.damage);
+  }
+  game.placed = game.placed.filter((pl) => !pl.dead);
+  // Stuck bombs ride their car: detonate those too.
+  for (const pr of game.projectiles) {
+    if (pr.stuckTo && !pr.dead) { pr.dead = true; explodeAt(game, pr.stuckTo.x, pr.stuckTo.y, pr.blast, pr.damage); n++; }
+  }
+  game.projectiles = game.projectiles.filter((pr) => !pr.dead);
+  return n;
+}
+function fireExplosive(game, w) {
+  const b = w.behavior;
+  if (b === 'remote' || b === 'sticky') {
+    // Second press with a live charge out = the detonator, not a new throw.
+    const live = game.placed.some((pl) => pl.behavior === 'remote') || game.projectiles.some((pr) => pr.stuckTo);
+    if (live) { detonatePlaced(game, (pl) => pl.behavior === 'remote'); return true; }
+  }
+  if (b === 'remote' || b === 'mine' || b === 'satchel') { plantCharge(game, w, b); return true; }
+  throwProjectile(game, w, b);
+  return true;
+}
+function updateExplosives(game, dt) {
+  // Thrown projectiles: a real arc under gravity until they land or fuse out.
+  for (const pr of game.projectiles) {
+    if (pr.dead) continue;
+    if (pr.stuckTo) { pr.x = pr.stuckTo.x; pr.y = pr.stuckTo.y; pr.z = 8; if (pr.stuckTo.dead) { pr.dead = true; explodeAt(game, pr.x, pr.y, pr.blast, pr.damage); } continue; }
+    pr.life -= dt; pr.fuse -= dt;
+    pr.x += pr.vx * dt; pr.y += pr.vy * dt; pr.z += pr.vz * dt; pr.vz -= 520 * dt;
+    let landed = false;
+    if (pr.z <= 1) { pr.z = 1; landed = true; }
+    // Sticky bombs attach to the first car they touch.
+    if (pr.behavior === 'sticky') {
+      for (const car of allCars(game)) { if (!car.dead && dist(pr.x, pr.y, car.x, car.y) < 24) { pr.stuckTo = car; break; } }
+      if (pr.stuckTo) continue;
+    }
+    if (pr.behavior === 'rocket' || pr.behavior === 'cannon') {
+      for (const car of allCars(game)) { if (!car.dead && car !== game.player.car && dist(pr.x, pr.y, car.x, car.y) < 24) { pr.dead = true; explodeAt(game, pr.x, pr.y, pr.blast, pr.damage); break; } }
+      if (pr.dead || landed || pr.life <= 0) { if (!pr.dead) { pr.dead = true; explodeAt(game, pr.x, pr.y, pr.blast, pr.damage); } }
+      continue;
+    }
+    if (pr.fuse <= 0 || (landed && (pr.behavior === 'molotov' || pr.behavior === 'gas' || pr.behavior === 'flare' || pr.behavior === 'flash'))) {
+      pr.dead = true;
+      if (pr.behavior === 'grenade' || pr.behavior === 'pipe') explodeAt(game, pr.x, pr.y, pr.blast, pr.damage);
+      else if (pr.behavior === 'molotov') { game.zones.push({ kind: 'fire', x: pr.x, y: pr.y, r: 34, until: game.nowMs + 6000, dps: 26 }); game.fx.explosion(pr.x, pr.y); }
+      else if (pr.behavior === 'gas') { game.zones.push({ kind: 'gas', x: pr.x, y: pr.y, r: 52, until: game.nowMs + 8000, dps: 0 }); game.toast('Tear gas — the street clears its throat.'); }
+      else if (pr.behavior === 'flare') { game.zones.push({ kind: 'flare', x: pr.x, y: pr.y, r: 60, until: game.nowMs + 10000, dps: 0 }); game.distraction = { x: pr.x, y: pr.y, until: game.nowMs + 8000 }; }
+      else if (pr.behavior === 'flash') {
+        game.fx.explosion(pr.x, pr.y);
+        for (const cop of game.police.cops) if (dist(pr.x, pr.y, cop.x, cop.y) < pr.blast + 40) cop.stunUntil = game.nowMs + 3000;
+        for (const ped of game.peds) if (dist(pr.x, pr.y, ped.x, ped.y) < 120) { ped.fleeUntil = game.nowMs + 2200; ped.fleeX = pr.x; ped.fleeY = pr.y; }
+      }
+      continue;
+    }
+    if (landed) { pr.vx *= 0.4; pr.vy *= 0.4; pr.vz = 0; }
+    if (pr.life <= 0) pr.dead = true;
+  }
+  game.projectiles = game.projectiles.filter((pr) => !pr.dead);
+  // Planted charges: satchel timers run down; mines wait for a trigger.
+  for (const pl of game.placed) {
+    if (pl.dead) continue;
+    if (pl.behavior === 'satchel' && game.nowMs - pl.armedAt >= pl.timer) { pl.dead = true; explodeAt(game, pl.x, pl.y, pl.blast, pl.damage); continue; }
+    if (pl.behavior === 'mine') {
+      const trig = allCars(game).some((c) => !c.dead && c !== game.player.car && dist(pl.x, pl.y, c.x, c.y) < 27) || game.peds.some((pd) => !pd.dead && dist(pl.x, pl.y, pd.x, pd.y) < 18);
+      if (trig && game.nowMs - pl.armedAt > 700) { pl.dead = true; explodeAt(game, pl.x, pl.y, pl.blast, pl.damage); }
+    }
+  }
+  game.placed = game.placed.filter((pl) => !pl.dead);
+  // Lingering zones: fire patches burn what stands in them; gas slows the law.
+  game.zones = game.zones.filter((z) => game.nowMs < z.until);
+  for (const z of game.zones) {
+    if (z.kind === 'fire') {
+      if (game.rng.chance(0.3)) game.fx.smoke(z.x + game.rng.range(-14, 14), z.y + game.rng.range(-14, 14));
+      for (const car of allCars(game)) if (!car.dead && dist(z.x, z.y, car.x, car.y) < z.r) { car.hp -= z.dps * dt; if (car.hp <= 0) { car.dead = true; game.fx.explosion(car.x, car.y); } }
+      for (const ped of game.peds) if (!ped.dead && dist(z.x, z.y, ped.x, ped.y) < z.r) { ped.fleeUntil = game.nowMs + 900; ped.fleeX = z.x; ped.fleeY = z.y; }
+    }
+    if (z.kind === 'gas') for (const cop of game.police.cops) if (dist(z.x, z.y, cop.x, cop.y) < z.r) cop.gassedUntil = game.nowMs + 400;
+  }
+  if (game.distraction && game.nowMs > game.distraction.until) game.distraction = null;
+}
+// ------------------------------------------------------------ weapon wheel
+export function cycleWheel(game, dClass, dIndex) {
+  if (dClass) { game.wheelClass = (game.wheelClass + dClass + WEAPON_CLASSES.length) % WEAPON_CLASSES.length; game.wheelIndex = 0; }
+  if (dIndex) { const n = weaponsByClass(WEAPON_CLASSES[game.wheelClass].id).length; game.wheelIndex = (game.wheelIndex + dIndex + n) % n; }
+}
+export function equipWheelSelection(game) {
+  const def = weaponsByClass(WEAPON_CLASSES[game.wheelClass].id)[game.wheelIndex];
+  if (def) game.weapon = buildWeapon(def, game.plan);
+  return def;
+}
+
 function updatePlayerOnFoot(game, dt) {
   const p = game.player;
   const ix = game.input.axisX(), iy = game.input.axisY();
@@ -297,25 +438,93 @@ function updatePlayerOnFoot(game, dt) {
   p.vx = vx; p.vy = vy;
   const fixed = collideCircleBuildings(game.city, p.x + vx * dt, p.y + vy * dt, 8);
   p.x = fixed.x; p.y = fixed.y;
-  // Shooting: spends the weapon's magazine; an empty mag reloads from the
-  // reserve (and with no reserve left, the trigger simply clicks dry).
+  // Shooting: the arsenal table drives everything — interval from rps,
+  // spread fanned per pellet, bullet life from range, damage per hit.
+  // Reload is timed from the table; an empty mag refills after reloadMs.
   p.shootCd -= dt;
   const w = game.weapon;
-  if (w && w.mag <= 0 && w.reserve > 0) {
+  if (w && w.mag <= 0 && w.reserve > 0 && !w.reloadUntil) w.reloadUntil = game.nowMs + (w.reloadMs || 1200);
+  if (w && w.reloadUntil && game.nowMs >= w.reloadUntil) {
     const take = Math.min(w.magSize, w.reserve);
-    w.mag = take; w.reserve -= take;
+    w.mag = take; w.reserve -= take; w.reloadUntil = 0;
   }
-  if (game.input.isDown('Space') && p.shootCd <= 0 && w && w.mag > 0) {
-    p.shootCd = 0.18;
+  if (game.input.wasPressed('KeyX')) detonatePlaced(game, null);
+  if (game.input.isDown('Space') && p.shootCd <= 0 && w && w.mag > 0 && !w.reloadUntil) {
+    p.shootCd = 1 / Math.max(0.2, w.rps || 8);
     w.mag -= 1;
-    game.bullets.push({ x: p.x + Math.cos(p.angle) * 12, y: p.y + Math.sin(p.angle) * 12, angle: p.angle, life: 0.55 });
-    game.fx.muzzle(p.x, p.y, p.angle);
-    sfx.shoot();
+    if (w.cls === 'EXP') { fireExplosive(game, w); }
+    else if (w.cls === 'RL') {
+      game.projectiles.push({ behavior: 'rocket', defId: w.defId, name: w.name, damage: w.damage, blast: w.blast || 90, x: p.x + Math.cos(p.angle) * 16, y: p.y + Math.sin(p.angle) * 16, z: 10, vx: Math.cos(p.angle) * 560, vy: Math.sin(p.angle) * 560, vz: 0, fuse: 99, stuckTo: null, life: 1.4 });
+      game.fx.smoke(p.x, p.y); game.police.addStars(1, game.nowMs);
+    } else {
+      const pellets = w.pellets || 1;
+      for (let i = 0; i < pellets; i++) {
+        const ang = p.angle + game.rng.range(-(w.spread || 0.02), (w.spread || 0.02)) + (pellets > 1 ? (i - (pellets - 1) / 2) * 0.03 : 0);
+        game.bullets.push({ x: p.x + Math.cos(ang) * 12, y: p.y + Math.sin(ang) * 12, angle: ang, life: (w.range || 340) / 720, damage: w.damage || 13, speed: 720 });
+      }
+      game.fx.muzzle(p.x, p.y, p.angle);
+      sfx.shoot();
+    }
     game.lastShotAt = game.nowMs;
   }
 }
 function updatePlayerDriving(game, dt) {
   const p = game.player, car = p.car;
+  if (car.kind === 'tank') {
+    // Tank: heavy tracked drive; the turret traverses toward the nearest
+    // hostile and Space fires the cannon (a real explosive shell).
+    const fwdT = game.input.isDown('KeyW') || game.input.isDown('ArrowUp');
+    const backT = game.input.isDown('KeyS') || game.input.isDown('ArrowDown');
+    const leftT = game.input.isDown('KeyA') || game.input.isDown('ArrowLeft');
+    const rightT = game.input.isDown('KeyD') || game.input.isDown('ArrowRight');
+    if (fwdT) car.speed += car.accel * dt; else if (backT) car.speed -= car.accel * 0.7 * dt;
+    else car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), 60 * dt);
+    car.speed = clamp(car.speed, -55, car.maxSpeed);
+    car.angle += ((leftT ? -1 : 0) + (rightT ? 1 : 0)) * 0.85 * dt * (car.speed < 0 ? -1 : 1) * clamp(Math.abs(car.speed) / 40 + 0.35, 0, 1);
+    const nx = car.x + Math.cos(car.angle) * car.speed * dt, ny = car.y + Math.sin(car.angle) * car.speed * dt;
+    const fixedT = collideCircleBuildings(game.city, nx, ny, 17);
+    car.x = clamp(fixedT.x, 20, WORLD_SIZE - 20); car.y = clamp(fixedT.y, 20, WORLD_SIZE - 20);
+    p.x = car.x; p.y = car.y; p.angle = car.angle;
+    p.vx = Math.cos(car.angle) * car.speed; p.vy = Math.sin(car.angle) * car.speed;
+    let tgt = null, bd = 620;
+    for (const c of game.police.cops) { if (c.dead) continue; const d = dist(car.x, car.y, c.x, c.y); if (d < bd) { bd = d; tgt = c; } }
+    const want = tgt ? Math.atan2(tgt.y - car.y, tgt.x - car.x) : car.angle;
+    let diff = want - (car.turret || 0);
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    car.turret = (car.turret || 0) + clamp(diff, -1.5 * dt, 1.5 * dt);
+    car.cannonCd = (car.cannonCd || 0) - dt;
+    if (game.input.isDown('Space') && car.cannonCd <= 0) {
+      car.cannonCd = 1.4;
+      game.projectiles.push({ behavior: 'cannon', defId: 'tank-cannon', name: 'TANK CANNON', damage: 130, blast: 95, x: car.x + Math.cos(car.turret) * 34, y: car.y + Math.sin(car.turret) * 34, z: 11, vx: Math.cos(car.turret) * 620, vy: Math.sin(car.turret) * 620, vz: 0, fuse: 99, stuckTo: null, life: 1.1 });
+      game.fx.addShake(5); game.police.addStars(1, game.nowMs); sfx.shoot();
+    }
+    return;
+  }
+  if (car.kind === 'plane') {
+    // Plane: throttle with W/S, steer with A/D; past take-off speed the
+    // airframe lifts, buildings stop colliding, and it settles back when
+    // slow. Take-off itself draws heat — the roster reacts to air use.
+    const fwdP = game.input.isDown('KeyW') || game.input.isDown('ArrowUp');
+    const backP = game.input.isDown('KeyS') || game.input.isDown('ArrowDown');
+    const leftP = game.input.isDown('KeyA') || game.input.isDown('ArrowLeft');
+    const rightP = game.input.isDown('KeyD') || game.input.isDown('ArrowRight');
+    if (fwdP) car.speed += car.accel * dt; else if (backP) car.speed -= 240 * dt;
+    else car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), 18 * dt);
+    car.speed = clamp(car.speed, 0, car.maxSpeed + 60);
+    car.angle += ((leftP ? -1 : 0) + (rightP ? 1 : 0)) * (0.55 + (car.alt || 0) / 160) * dt * clamp(Math.abs(car.speed) / 90, 0, 1);
+    const wasAir = (car.alt || 0) > 10;
+    if (car.speed > 175) car.alt = Math.min(130, (car.alt || 0) + (car.speed - 175) * dt * 0.42);
+    else if (car.speed < 150) car.alt = Math.max(0, (car.alt || 0) - 55 * dt);
+    car.airborne = (car.alt || 0) > 10;
+    if (car.airborne && !wasAir) { game.police.setStars(Math.max(game.police.stars, 3), game.nowMs); game.toast('Airborne — ACPD is scrambling. 3 stars.'); }
+    const nx = car.x + Math.cos(car.angle) * car.speed * dt, ny = car.y + Math.sin(car.angle) * car.speed * dt;
+    if ((car.alt || 0) > 10) { car.x = clamp(nx, 24, WORLD_SIZE - 24); car.y = clamp(ny, 24, WORLD_SIZE - 24); }
+    else { const fx2 = collideCircleBuildings(game.city, nx, ny, 16); car.x = clamp(fx2.x, 24, WORLD_SIZE - 24); car.y = clamp(fx2.y, 24, WORLD_SIZE - 24); }
+    p.x = car.x; p.y = car.y; p.angle = car.angle;
+    p.vx = Math.cos(car.angle) * car.speed; p.vy = Math.sin(car.angle) * car.speed;
+    return;
+  }
   const fwd = game.input.isDown('KeyW') || game.input.isDown('ArrowUp');
   const back = game.input.isDown('KeyS') || game.input.isDown('ArrowDown');
   const left = game.input.isDown('KeyA') || game.input.isDown('ArrowLeft');
@@ -357,20 +566,21 @@ function updatePlayerDriving(game, dt) {
 }
 function updateBullets(game, dt) {
   for (const b of game.bullets) {
-    b.x += Math.cos(b.angle) * 640 * dt;
-    b.y += Math.sin(b.angle) * 640 * dt;
+    b.x += Math.cos(b.angle) * (b.speed || 640) * dt;
+    b.y += Math.sin(b.angle) * (b.speed || 640) * dt;
     b.life -= dt;
     for (const ped of game.peds) {
       if (!ped.dead && b.life > 0 && dist(b.x, b.y, ped.x, ped.y) < 10) {
-        ped.dead = true; ped.respawnAt = game.nowMs + 9000;
+        ped.hp = (ped.hp === undefined ? 30 : ped.hp) - (b.damage || 13);
         game.fx.blood(ped.x, ped.y);
-        game.police.addStars(1, game.nowMs);
+        if (ped.hp <= 0) { ped.dead = true; ped.respawnAt = game.nowMs + 9000; game.police.addStars(1, game.nowMs); }
+        else { ped.fleeUntil = game.nowMs + 1600; ped.fleeX = b.x; ped.fleeY = b.y; }
         b.life = 0;
       }
     }
     for (const car of allCars(game)) {
       if (b.life > 0 && !car.dead && dist(b.x, b.y, car.x, car.y) < 22) {
-        car.hp -= 13; game.fx.sparks(b.x, b.y); b.life = 0;
+        car.hp -= (b.damage || 13); game.fx.sparks(b.x, b.y); b.life = 0;
         if (car.isCop) game.police.addStars(1, game.nowMs);
         if (car.hp <= 0) { car.dead = true; game.fx.explosion(car.x, car.y); }
       }
@@ -379,7 +589,7 @@ function updateBullets(game, dt) {
   game.bullets = game.bullets.filter((b) => b.life > 0);
 }
 function updateCarCollisions(game) {
-  const cars = allCars(game).filter((c) => !c.dead);
+  const cars = allCars(game).filter((c) => !c.dead && !(c.kind === 'plane' && (c.alt || 0) > 10));
   for (let i = 0; i < cars.length; i++) {
     for (let j = i + 1; j < cars.length; j++) {
       const a = cars[i], b = cars[j];
@@ -464,7 +674,21 @@ export function updateGame(game, dt) {
   if (game.player.hp <= 0) { killPlayer(game); input.endFrame(); return; }
   updateBullets(game, dt);
   updateTraffic(game.rng, game.traffic, dt, game.player, allCars(game));
-  game.police.update(game.rng, dt, game.nowMs, game.player, game.traffic, game.fx);
+  game.police.update(game.rng, dt, game.nowMs, game.player, game.traffic, game.fx, game.distraction);
+  updateExplosives(game, dt);
+  // Weapon wheel (transient): Q opens, arrows/A-D pick the class segment,
+  // W/S pick within the class, Q or Enter equips and closes.
+  if (input.wasPressed('KeyQ')) {
+    game.wheelOpen = !game.wheelOpen;
+    if (!game.wheelOpen) equipWheelSelection(game);
+  }
+  if (game.wheelOpen) {
+    if (input.wasPressed('ArrowLeft') || input.wasPressed('KeyA')) cycleWheel(game, -1, 0);
+    if (input.wasPressed('ArrowRight') || input.wasPressed('KeyD')) cycleWheel(game, 1, 0);
+    if (input.wasPressed('ArrowUp') || input.wasPressed('KeyW')) cycleWheel(game, 0, -1);
+    if (input.wasPressed('ArrowDown') || input.wasPressed('KeyS')) cycleWheel(game, 0, 1);
+    if (input.wasPressed('Enter')) { equipWheelSelection(game); game.wheelOpen = false; }
+  }
   if (game.police.stars >= 2 && !game._heatStart) game._heatStart = game.nowMs;
   if (game.police.stars === 0 && game._heatStart) {
     const esc = game.nowMs - game._heatStart;
@@ -511,6 +735,7 @@ function boot() {
       ctx.clearRect(0, 0, VIEW_W, VIEW_H);
       renderGame(ctx, game);
       if (game.screen === 'play' || game.screen === 'paused') drawHud(ctx, game);
+      if (game.wheelOpen && game.screen === 'play') drawWeaponWheel(ctx, game);
       if (game.screen === 'planning') drawPlanning(ctx, game);
       if (game.screen === 'summary') drawSummary(ctx, game);
       if (game.screen === 'title') { drawHudTitleSafe(ctx, game); }

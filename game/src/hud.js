@@ -1,8 +1,9 @@
 // hud.js — money, wanted stars, health, mission line and timer, circular minimap, toasts and the menu screens.
-import { VIEW_W, VIEW_H, WORLD_SIZE, PALETTE } from './config.js';
+import { VIEW_W, VIEW_H, WORLD_SIZE, PALETTE, BLOCK_PITCH, ROAD_W } from './config.js';
 import { clamp } from './rng.js';
 import { CHAIN } from './missions.js';
 import { CREW_POOL, GEAR_POOL, GETAWAYS, TIMES, jobPlanData, planStats, formatMoney } from './planning.js';
+import { WEAPON_CLASSES, WEAPONS, weaponsByClass, weaponById } from './arsenal.js';
 function panel(ctx, x, y, w, h) {
   ctx.fillStyle = 'rgba(26,14,12,0.66)';
   ctx.beginPath(); ctx.roundRect(x, y, w, h, 8); ctx.fill();
@@ -231,11 +232,104 @@ export function drawMinimap(ctx, game) {
   ctx.fillStyle = '#ffffff';
   ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-5, -4.4); ctx.lineTo(-5, 4.4); ctx.closePath(); ctx.fill();
   ctx.restore();
-  ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(61,143,163,0.95)'; ctx.lineWidth = 2.4;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
   ctx.fillStyle = 'rgba(245,234,216,0.8)'; ctx.font = '600 10px system-ui, sans-serif'; ctx.textAlign = 'center';
   ctx.fillText('AMBER COAST', cx, cy + r + 4);
 }
+
+// The board's district map: Vice City cartography pattern (pastel land,
+// teal ocean, pale beach band, light road network) drawn over OUR OWN city
+// geography — the real road grid, the job's target, and the escape route
+// from target to delivery as a dashed amber line. Airport + base marked.
+export function drawDistrictMap(ctx, game, x, y, w, h) {
+  ctx.save();
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 6); ctx.clip();
+  ctx.fillStyle = '#3d8fa3'; ctx.fillRect(x, y, w, h); // teal ocean field
+  const sx = (wx) => x + (wx / WORLD_SIZE) * w, sy = (wy) => y + (wy / WORLD_SIZE) * h;
+  ctx.fillStyle = '#e9dcbc'; ctx.fillRect(x, y, w * 0.985, h); // pastel land
+  const tints = ['#eed9b8', '#e6d3ae', '#f0dcbc', '#eadfc0'];
+  for (let by = 0; by < 8; by++) for (let bx = 0; bx < 8; bx++) {
+    ctx.fillStyle = tints[(bx + by * 3) % 4];
+    ctx.fillRect(sx(bx * BLOCK_PITCH + ROAD_W), sy(by * BLOCK_PITCH + ROAD_W), (BLOCK_PITCH - ROAD_W) / WORLD_SIZE * w, (BLOCK_PITCH - ROAD_W) / WORLD_SIZE * h);
+  }
+  ctx.fillStyle = '#a9c795';
+  for (const pk of game.city.parks) ctx.fillRect(sx(pk.x), sy(pk.y), pk.w / WORLD_SIZE * w, pk.h / WORLD_SIZE * h);
+  if (game.city.sites) for (const st of game.city.sites) {
+    ctx.fillStyle = st.kind === 'airport' ? '#b9b4a6' : '#a8a894';
+    ctx.fillRect(sx(st.x), sy(st.y), st.w / WORLD_SIZE * w, st.h / WORLD_SIZE * h);
+    if (st.kind === 'airport') { ctx.fillStyle = '#5c5c60'; ctx.fillRect(sx(st.x), sy(st.y + st.h / 2 - 14), st.w / WORLD_SIZE * w, 28 / WORLD_SIZE * h); }
+  }
+  ctx.strokeStyle = '#fdf6e0'; ctx.lineWidth = 1.4;
+  for (let k = 0; k <= 8; k++) {
+    const rxp = sx(k === 8 ? WORLD_SIZE - ROAD_W / 2 : k * BLOCK_PITCH + ROAD_W / 2);
+    ctx.beginPath(); ctx.moveTo(rxp, y); ctx.lineTo(rxp, y + h); ctx.stroke();
+    const ryp = sy(k === 8 ? WORLD_SIZE - ROAD_W / 2 : k * BLOCK_PITCH + ROAD_W / 2);
+    ctx.beginPath(); ctx.moveTo(x, ryp); ctx.lineTo(x + w, ryp); ctx.stroke();
+  }
+  ctx.fillStyle = '#f4e3ae'; ctx.fillRect(x + w * 0.985 - 3, y, 3, h); // beach band
+  // Escape route: target (pickup) -> delivery, dashed amber over the grid.
+  const def = CHAIN[game.missions.index % CHAIN.length];
+  const from = def.pickup || def.deliver, to = def.deliver || def.pickup;
+  if (from && to) {
+    ctx.strokeStyle = '#e8930c'; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(sx(from.x), sy(from.y)); ctx.lineTo(sx(to.x), sy(to.y)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#e8c832'; ctx.beginPath(); ctx.arc(sx(from.x), sy(from.y), 4.4, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#7a5c10'; ctx.lineWidth = 1.4; ctx.stroke();
+    ctx.fillStyle = '#4fc96a'; ctx.beginPath(); ctx.arc(sx(to.x), sy(to.y), 4.4, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#1d5c2e'; ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(38,30,18,0.85)'; ctx.font = '700 8.5px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillText('AMBER FIELD', sx(2912) + 2, sy(2912) + 2);
+  ctx.fillText('FORT SABLE', sx(562) + 2, sy(2912) + 2);
+  ctx.restore();
+  ctx.strokeStyle = 'rgba(255,214,170,0.25)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 6); ctx.stroke();
+}
+// ------------------------------------------------------------ weapon wheel
+// GTA-style radial selection: a TRANSIENT overlay while open — seven class
+// segments with their counts around a hub that shows the highlighted
+// weapon's real table stats. The world stays visible around it.
+export function drawWeaponWheel(ctx, game) {
+  const cx = VIEW_W / 2, cy = VIEW_H / 2, R = 196, r0 = 74;
+  ctx.save();
+  ctx.fillStyle = 'rgba(16,8,8,0.30)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  const selCls = WEAPON_CLASSES[game.wheelClass || 0];
+  WEAPON_CLASSES.forEach((cls, i) => {
+    const a0 = -Math.PI / 2 + (i / WEAPON_CLASSES.length) * Math.PI * 2 + 0.03;
+    const a1 = -Math.PI / 2 + ((i + 1) / WEAPON_CLASSES.length) * Math.PI * 2 - 0.03;
+    const sel = cls.id === selCls.id;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, a0, a1); ctx.arc(cx, cy, r0, a1, a0, true); ctx.closePath();
+    ctx.fillStyle = sel ? 'rgba(242,193,78,0.88)' : 'rgba(26,16,14,0.82)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,220,170,0.5)'; ctx.lineWidth = 1.4; ctx.stroke();
+    const am = (a0 + a1) / 2, lx = cx + Math.cos(am) * (R + r0) / 2, ly = cy + Math.sin(am) * (R + r0) / 2;
+    ctx.fillStyle = sel ? '#2a1a08' : PALETTE.hudText; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '700 12px system-ui, sans-serif';
+    const short = { AR: 'AR', SMG: 'SMG', MG: 'MG', SG: 'SG', SR: 'SR', RL: 'RL', EXP: 'EXP' }[cls.id];
+    ctx.fillText(short + ' · ' + weaponsByClass(cls.id).length, lx, ly - 8);
+    ctx.font = '600 8.5px system-ui, sans-serif'; ctx.fillStyle = sel ? '#4a3410' : PALETTE.hudMuted;
+    ctx.fillText(cls.label, lx, ly + 7);
+  });
+  // Hub: the highlighted weapon and its real stats.
+  const list = weaponsByClass(selCls.id);
+  const def = list[(game.wheelIndex || 0) % list.length];
+  ctx.beginPath(); ctx.arc(cx, cy, r0 - 4, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(22,12,10,0.92)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(242,193,78,0.7)'; ctx.lineWidth = 1.4; ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#f2c14e'; ctx.font = '700 13px system-ui, sans-serif';
+  ctx.fillText(def.name, cx, cy - 26);
+  ctx.fillStyle = PALETTE.hudText; ctx.font = '600 10.5px system-ui, sans-serif';
+  ctx.fillText('DMG ' + def.damage + ' · ROF ' + def.rps + '/s', cx, cy - 8);
+  ctx.fillText('RNG ' + def.range + ' · MAG ' + def.mag + (def.behavior ? ' · ' + def.behavior.toUpperCase() : ''), cx, cy + 7);
+  ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 9.5px system-ui, sans-serif';
+  ctx.fillText(((game.wheelIndex || 0) + 1) + ' / ' + list.length + ' · ▲▼ · ◀▶', cx, cy + 24);
+  ctx.fillStyle = '#f2c14e'; ctx.font = '700 11px system-ui, sans-serif';
+  ctx.fillText('WEAPON WHEEL — Q / ENTER equips', cx, cy + R + 22);
+  ctx.restore();
+}
+
 export function drawTitle(ctx, game) {
   ctx.fillStyle = 'rgba(30,12,10,0.26)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.textAlign = 'center';
@@ -353,6 +447,21 @@ export function drawPlanning(ctx, game) {
   let stars = '';
   for (let i = 0; i < 5; i++) stars += i < st.heatStars ? '★' : '☆';
   ctx.fillStyle = '#f2c14e'; ctx.fillText(stars, rx + rw - 14, y);
+  // District map (VC-style cartography, our geography) under the stats.
+  panel(ctx, rx, 374, rw, 180);
+  ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('DISTRICT MAP — TARGET + ESCAPE ROUTE', rx + 14, 386);
+  drawDistrictMap(ctx, game, rx + 12, 406, rw - 24, 136);
+  // Arsenal strip: the mission weapon picked from the full 56-weapon table.
+  panel(ctx, rx, 566, rw, 62);
+  const wdef = weaponById(plan.weaponId || 'venn-9mm');
+  ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('ARSENAL — J / K · 56 WEAPONS', rx + 14, 576);
+  ctx.fillStyle = PALETTE.hudText; ctx.font = '700 13.5px system-ui, sans-serif';
+  ctx.fillText(wdef.name, rx + 14, 594);
+  ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10.5px system-ui, sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText('DMG ' + wdef.damage + ' · MAG ' + (plan.gear.includes('extmag') && wdef.cls !== 'EXP' && wdef.cls !== 'RL' ? Math.round(wdef.mag * 1.5) : wdef.mag), rx + rw - 14, 596);
+  ctx.textAlign = 'left';
   // Bottom centre: crew and gear over their slots.
   const bx = 356, bw = 568;
   panel(ctx, bx, 640, bw, 146);
@@ -400,18 +509,33 @@ export function drawSummary(ctx, game) {
   ctx.save();
   ctx.fillStyle = 'rgba(30,12,10,0.30)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   const jobRows = (s.jobRows && s.jobRows.length) ? s.jobRows : [];
-  const PH = jobRows.length ? 560 : 440;
+  const PH = jobRows.length ? 668 : 520;
   const px = VIEW_W / 2 - 310, py = VIEW_H / 2 - PH / 2;
+  ctx.fillStyle = 'rgba(18,8,8,0.52)'; ctx.beginPath(); ctx.roundRect(px, py, 620, PH, 8); ctx.fill();
   panel(ctx, px, py, 620, PH);
   ctx.textBaseline = 'top';
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#f28bb4'; ctx.font = '700 12px system-ui, sans-serif';
-  ctx.fillText('A M B E R   C O A S T', VIEW_W / 2, py + 14);
-  ctx.fillStyle = '#f2c14e'; ctx.font = '700 30px system-ui, sans-serif';
-  ctx.fillText('CHAIN COMPLETE', VIEW_W / 2, py + 36);
-  ctx.fillStyle = PALETTE.hudText; ctx.font = '15px system-ui, sans-serif';
-  ctx.fillText('Dario Venn — all five jobs delivered.', VIEW_W / 2, py + 72);
-  let statsY = py + 104;
+  ctx.fillStyle = '#f28bb4'; ctx.font = '700 11px system-ui, sans-serif';
+  ctx.fillText('A M B E R   C O A S T — CHAIN COMPLETE', VIEW_W / 2, py + 12);
+  // MISSION PASSED — the San Andreas results pattern, rendered originally:
+  // oversized condensed bold lettering (our own canvas type, horizontally
+  // squeezed), a RESPECT + line and the cash reward, over the full ledger.
+  const led0 = s.lastLedger;
+  ctx.save();
+  ctx.translate(VIEW_W / 2, py + 96); ctx.scale(0.60, 1);
+  ctx.font = '900 82px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.85)'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 5; ctx.shadowOffsetY = 5;
+  ctx.fillStyle = '#f5f2ea';
+  ctx.fillText('MISSION PASSED', 0, 0);
+  ctx.restore();
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#f2c14e'; ctx.font = '700 21px system-ui, sans-serif';
+  ctx.fillText('RESPECT +', VIEW_W / 2, py + 128);
+  ctx.fillStyle = PALETTE.money; ctx.font = '700 19px system-ui, sans-serif';
+  ctx.fillText((led0 ? '+' + formatMoney(led0.net) : '') + '   ·   REP +' + (led0 ? led0.repGain : 0), VIEW_W / 2, py + 154);
+  ctx.fillStyle = PALETTE.hudText; ctx.font = '13.5px system-ui, sans-serif';
+  ctx.fillText('Dario Venn — all five jobs delivered. Full ledger below.', VIEW_W / 2, py + 180);
+  let statsY = py + 208;
   // THE LEDGER for the chain's last job: gross, the fence's fee, each named
   // crew member's cut, the net banked and the REP earned — every line is
   // the previous line's arithmetic, so the column reconciles exactly.

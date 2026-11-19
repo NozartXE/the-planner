@@ -107,7 +107,7 @@ function addPoly(pts, base, opts = {}) {
   depth /= clipped.length;
   if (depth > MAX_DIST) return;
   if (F.idMode) {
-    const col = opts.cat === 'fig' ? 'rgb(0,255,0)' : opts.cat === 'car' ? 'rgb(0,0,255)' : 'rgb(22,22,22)';
+    const col = opts.cat === 'fig' ? 'rgb(0,255,0)' : opts.cat === 'car' ? 'rgb(0,0,255)' : opts.cat === 'tank' ? 'rgb(255,0,0)' : opts.cat === 'plane' ? 'rgb(255,0,255)' : 'rgb(22,22,22)';
     F.faces.push({ pts: clipped.map(projectCam), depth, col });
     return;
   }
@@ -127,9 +127,16 @@ function addPoly(pts, base, opts = {}) {
   const lScale = F.lightScale || 1;
   const shade = (L0) => {
     const L = L0 * lScale;
-    const rC = clamp(base[0] * L + (fogC[0] - base[0] * L) * fogT, 0, 255);
-    const gC = clamp(base[1] * L + (fogC[1] - base[1] * L) * fogT, 0, 255);
-    const bC = clamp(base[2] * L + (fogC[2] - base[2] * L) * fogT, 0, 255);
+    let rC = base[0] * L + (fogC[0] - base[0] * L) * fogT;
+    let gC = base[1] * L + (fogC[1] - base[1] * L) * fogT;
+    let bC = base[2] * L + (fogC[2] - base[2] * L) * fogT;
+    // Texture-pass colour grade (Rect 2026-11-19): deeper saturation and a
+    // touch more contrast so surfaces separate at thumbnail scale — kept
+    // mild (x1.13 / x1.05) so the sunset palette never turns neon.
+    const avg = (rC + gC + bC) / 3;
+    rC = clamp((avg + (rC - avg) * 1.13 - 128) * 1.05 + 128, 0, 255);
+    gC = clamp((avg + (gC - avg) * 1.13 - 128) * 1.05 + 128, 0, 255);
+    bC = clamp((avg + (bC - avg) * 1.13 - 128) * 1.05 + 128, 0, 255);
     return a >= 1 ? `rgb(${rC | 0},${gC | 0},${bC | 0})` : `rgba(${rC | 0},${gC | 0},${bC | 0},${a})`;
   };
   const face = { pts: clipped.map(projectCam), depth, col: shade(light) };
@@ -249,6 +256,7 @@ function addBuildingShadow(b, H) {
 
 // ------------------------------------------------------------------- ground
 function groundKind(game, x, y) {
+  if (game.city.sites) for (const st of game.city.sites) if (x >= st.x && x <= st.x + st.w && y >= st.y && y <= st.y + st.h) return st.kind === 'airport' ? [106, 104, 100] : [98, 100, 88];
   if (x > WORLD_SIZE + 72) return WATER_C;
   if (x >= WORLD_SIZE) return x > WORLD_SIZE + 56 ? [196, 164, 116] : SAND_C;
   if (isOnRoad(x, y)) return ASPHALT;
@@ -271,13 +279,35 @@ function drawGround(game) {
       const base = groundKind(game, cx, cy);
       const cellHash = hash01((Math.floor(cx / CELL) * 13 + Math.floor(cy / CELL) * 29));
       const v = 0.90 + cellHash * 0.20;
-      const col = base === WATER_C && hash01(Math.floor(cx / 46) * 7 + Math.floor(cy / 46) * 13) > 0.82
-        ? [86, 150, 158] : [base[0] * v, base[1] * v, base[2] * v];
+      const wHash = hash01(Math.floor(cx / 46) * 7 + Math.floor(cy / 46) * 13);
+      const col = base === WATER_C && wHash > 0.86 ? [110, 178, 182] : base === WATER_C && wHash > 0.68 ? [64, 138, 152] : [base[0] * v, base[1] * v, base[2] * v];
       const corners = [[-HALF, -HALF], [HALF, -HALF], [HALF, HALF], [-HALF, HALF]].map(([df, dl]) => [
         F.cam[0] + fh[0] * (fwd + df) + rh[0] * (lat + dl),
         F.cam[1] + fh[1] * (fwd + df) + rh[1] * (lat + dl), 0.12,
       ]);
       addPoly(corners, col, { light: 0.92 });
+      // Texture pass: asphalt grain speckle, sand speckle, grass mottling —
+      // small deterministic inset quads so no large surface reads as one
+      // flat tone, visible even at 320px because the value steps are bold.
+      if (base === ASPHALT && cellHash > 0.28 && cellHash <= 0.70) {
+        const gi = 12, gc = [[-HALF + gi, -HALF + gi], [0, -HALF + gi], [HALF - gi - 9, 0], [-HALF + gi, 2]].map(([df, dl]) => [
+          F.cam[0] + fh[0] * (fwd + df) + rh[0] * (lat + dl), F.cam[1] + fh[1] * (fwd + df) + rh[1] * (lat + dl), 0.18,
+        ]);
+        addPoly(gc, cellHash > 0.5 ? [96, 88, 84] : [30, 28, 30], { light: 0.92, alpha: 0.22 });
+      }
+      if (base === SAND_C && cellHash > 0.45) {
+        const sc = [[-HALF + 9, -HALF + 9], [HALF - 18, HALF - 18], [HALF - 18, -HALF + 9], [-HALF + 9, HALF - 18]].map(([df, dl]) => [
+          F.cam[0] + fh[0] * (fwd + df) + rh[0] * (lat + dl), F.cam[1] + fh[1] * (fwd + df) + rh[1] * (lat + dl), 0.18,
+        ]);
+        addPoly(sc, [168, 138, 96], { light: 0.95, alpha: 0.35 });
+      }
+      if (base === GRASS_C) {
+        const gv = 0.82 + cellHash * 0.36;
+        const gc2 = [[-HALF + 6, -HALF + 6], [HALF - 6, -HALF + 6], [HALF - 6, HALF - 6], [-HALF + 6, HALF - 6]].map(([df, dl]) => [
+          F.cam[0] + fh[0] * (fwd + df) + rh[0] * (lat + dl), F.cam[1] + fh[1] * (fwd + df) + rh[1] * (lat + dl), 0.16,
+        ]);
+        addPoly(gc2, [GRASS_C[0] * gv, GRASS_C[1] * gv, GRASS_C[2] * gv], { light: 0.92, alpha: 0.5 });
+      }
       // Asphalt repair patches on road cells: tonal rectangles inset from
       // the cell edge, deterministic per cell — real streets are patchwork,
       // and the patchwork keeps the road plane from reading as one flat
@@ -338,6 +368,31 @@ function drawGround(game) {
     if (!isOnRoad(l.x + 26, l.y + 8)) continue;
     addQuad([l.x + 4, l.y - 3.4, 0.32], [l.x + 52, l.y + 1.5, 0.32], [l.x + 52, l.y + 5.5, 0.32], [l.x + 4, l.y + 0.6, 0.32], [255, 176, 102], { alpha: 0.10, light: 1 });
   }
+  // Site markings: the airport runway (dark strip, centreline dashes,
+  // threshold bars) and the base's concrete pads, on our own geography.
+  if (game.city.sites) for (const st of game.city.sites) {
+    if (!inRange(st.x + st.w / 2, st.y + st.h / 2)) continue;
+    if (st.kind === 'airport') {
+      const ry = st.y + st.h / 2;
+      addQuad([st.x + 6, ry - 15, 0.3], [st.x + st.w - 6, ry - 15, 0.3], [st.x + st.w - 6, ry + 15, 0.3], [st.x + 6, ry + 15, 0.3], [52, 52, 56], { light: 0.95 });
+      for (let dx = 16; dx < st.w - 20; dx += 34) addQuad([st.x + dx, ry - 1.2, 0.36], [st.x + dx + 16, ry - 1.2, 0.36], [st.x + dx + 16, ry + 1.2, 0.36], [st.x + dx, ry + 1.2, 0.36], [238, 236, 226], { light: 1.0 });
+      for (const ex of [st.x + 10, st.x + st.w - 22]) for (let b = 0; b < 4; b++) addQuad([ex, ry - 13 + b * 7, 0.36], [ex + 10, ry - 13 + b * 7, 0.36], [ex + 10, ry - 9 + b * 7, 0.36], [ex, ry - 9 + b * 7, 0.36], [238, 236, 226], { light: 1.0 });
+      addQuad([st.x + 20, st.y + 24, 0.28], [st.x + 150, st.y + 24, 0.28], [st.x + 150, st.y + 74, 0.28], [st.x + 20, st.y + 74, 0.28], [122, 120, 114], { light: 0.95 });
+    } else {
+      for (const [px, py] of [[70, 70], [200, 70], [70, 220], [200, 220]]) addDisc(st.x + px, st.y + py, 0.3, 30, [116, 118, 104], { light: 0.95 });
+      addQuad([st.x + 24, st.y + st.h - 44, 0.3], [st.x + st.w - 24, st.y + st.h - 44, 0.3], [st.x + st.w - 24, st.y + st.h - 36, 0.3], [st.x + 24, st.y + st.h - 36, 0.3], [196, 178, 92], { light: 1.0 });
+    }
+  }
+  // Explosive zones on the ground: fire patches burn orange, gas hangs
+  // pale, a lit flare throws a bright pool.
+  for (const z of game.zones || []) {
+    if (!inRange(z.x, z.y)) continue;
+    if (z.kind === 'fire') { addDisc(z.x, z.y, 0.4, z.r, [214, 110, 40], { alpha: 0.5, light: 1.2 }); addDisc(z.x, z.y, 0.45, z.r * 0.55, [246, 178, 60], { alpha: 0.65, light: 1.35 }); }
+    else if (z.kind === 'gas') addDisc(z.x, z.y, 0.4, z.r, [168, 178, 150], { alpha: 0.30, light: 1.0 });
+    else if (z.kind === 'flare') { addDisc(z.x, z.y, 0.4, z.r, [255, 120, 90], { alpha: 0.4, light: 1.4 }); addDisc(z.x, z.y, 0.46, 7, [255, 226, 170], { alpha: 0.9, light: 1.5 }); }
+  }
+  for (const pl of game.placed || []) { if (inRange(pl.x, pl.y)) addBox(pl.x, pl.y, 1.6, 3.4, 3.4, 1.6, 0, [30, 30, 34], {}); }
+  for (const pr of game.projectiles || []) { if (inRange(pr.x, pr.y)) addSphere(pr.x, pr.y, pr.z || 6, pr.behavior === 'rocket' || pr.behavior === 'cannon' ? 2.6 : 1.9, [40, 38, 36], {}); }
   // Mission marker: ground ring + a soft light pillar so the objective reads in 3D.
   const marker = game.missions.marker();
   if (marker) {
@@ -440,6 +495,11 @@ function drawBuilding(game, b) {
         }
       }
     }
+    // Trim bands: a lighter horizontal band every ~50 units breaks the
+    // facade into storeys even where windows are sparse (texture pass).
+    if (distC < 860) for (let bz = 42; bz < H - 12; bz += 50) {
+      addQuad(mk(face.from + 3, bz, -0.25), mk(face.to - 3, bz, -0.25), mk(face.to - 3, bz + 2.6, -0.25), mk(face.from + 3, bz + 2.6, -0.25), wallSun.map((v) => Math.min(255, v * 1.22)), { light: 1.0 });
+    }
     // Windows: framed, inset quads in a strict rhythm; rows every ~24 units.
     if (distC < 860) {
       const frameC = [43, 44, 51];
@@ -463,7 +523,56 @@ function drawBuilding(game, b) {
 }
 
 // --------------------------------------------------------------------- cars
+function drawTank3D(car) {
+  const opts = { cat: 'tank' };
+  const yaw = car.angle, L = car.len, W = car.wid;
+  const camo = [92, 100, 74], camoD = [70, 78, 56], dark = [34, 36, 32];
+  addShadow(car.x, car.y, L / 2, W / 2, yaw, 12, 0.34);
+  const c = Math.cos(yaw), sn = Math.sin(yaw);
+  const LP = (lx, ly, lz) => [car.x + lx * c - ly * sn, car.y + lx * sn + ly * c, lz];
+  // Tracks: two long dark runs with road wheels.
+  for (const sy of [1, -1]) {
+    addBox(car.x - sn * sy * (W / 2 - 3.6), car.y + c * sy * (W / 2 - 3.6), 3.6, L / 2, 3.6, 3.6, yaw, dark, opts);
+    for (const wx of [-L * 0.32, -L * 0.11, L * 0.11, L * 0.32]) { const wp = LP(wx, sy * (W / 2 - 0.4), 3.4); addBox(wp[0], wp[1], wp[2], 2.6, 0.8, 2.6, yaw, [58, 60, 54], opts); }
+  }
+  // Hull with a sloped glacis, camo two-tone.
+  addBox(car.x, car.y, 7.6, L / 2 - 2, W / 2 - 6.5, 3.9, yaw, { top: camo, front: camoD, back: camoD, sideP: camo, sideM: camo }, { vGrad: true, ...opts });
+  addQuad(LP(L / 2 - 2, -W / 2 + 7, 4.2), LP(L / 2 - 2, W / 2 - 7, 4.2), LP(L * 0.18, W / 2 - 7.5, 11.4), LP(L * 0.18, -W / 2 + 7.5, 11.4), camoD, opts);
+  addBox(car.x, car.y, 11.2, L * 0.30, W / 2 - 6.0, 0.9, yaw, camoD, opts);
+  // Turret (traverses on car.turret) + barrel + muzzle brake + hatch.
+  const t = car.turret || yaw, tc = Math.cos(t), ts = Math.sin(t);
+  const tX = car.x - c * 2, tY = car.y - sn * 2;
+  addBox(tX, tY, 14.6, 11, 9.5, 3.4, t, { top: camo, front: camoD, back: camoD, sideP: camo, sideM: camo }, opts);
+  addBox(tX + tc * 3, tY + ts * 3, 18.4, 4.6, 4.6, 1.2, t, camoD, opts);
+  const b0 = [tX + tc * 10, tY + ts * 10, 15.2], b1 = [tX + tc * 34, tY + ts * 34, 15.6];
+  addTaperedLimb(b0, b1, 3.4, 2.4, 3.4, 2.4, dark, [0, 0, 1], opts);
+  addBox(b1[0], b1[1], b1[2], 3.4, 3.4, 2.0, t, dark, opts);
+  addLimb([tX - tc * 6, tY - ts * 6, 18], [tX - tc * 7.5, tY - ts * 7.5, 27], 0.7, 0.7, dark, [0, 0, 1], opts);
+}
+function drawPlane3D(car) {
+  const opts = { cat: 'plane' };
+  const yaw = car.angle, alt = car.alt || 0, zb = alt;
+  const body = rgb(car.color), bodyTop = body.map((v) => Math.min(255, v * 1.18));
+  addShadow(car.x, car.y, 30, 26, yaw, 8, Math.max(0.08, 0.30 - alt * 0.0016));
+  const c = Math.cos(yaw), sn = Math.sin(yaw);
+  const LP = (lx, ly, lz) => [car.x + lx * c - ly * sn, car.y + lx * sn + ly * c, (lz || 0) + zb];
+  // Fuselage: tapered nose-to-tail volume riding on two floats.
+  addTaperedLimb(LP(-30, 0, 9), LP(28, 0, 10), 11, 8.5, 11, 8.5, body, [0, 0, 1], opts);
+  addBox(LP(6, 0, 14.5)[0], LP(6, 0, 14.5)[1], 14.5 + zb, 9, 6.4, 3.4, yaw, { top: bodyTop, front: [24, 33, 48], back: [24, 33, 48], sideP: [24, 33, 48], sideM: [24, 33, 48] }, opts);
+  for (const sy of [1, -1]) addBox(LP(2, sy * 8.5, 3.4)[0], LP(2, sy * 8.5, 3.4)[1], 3.4 + zb, 17, 2.2, 2.6, yaw, [52, 56, 62], opts);
+  // Main wing + tailplane + fin.
+  addQuad(LP(10, -31, 11.5), LP(2, -31, 11.5), LP(0, 31, 11.5), LP(8, 31, 11.5), bodyTop, opts);
+  addQuad(LP(-26, -13, 12), LP(-31, -13, 12), LP(-31, 13, 12), LP(-26, 13, 12), bodyTop, opts);
+  addQuad(LP(-30, 0, 12), LP(-25, 0, 12), LP(-26.5, 0, 22), LP(-29.5, 0, 22), body, opts);
+  // Propeller disc at the nose (vertical, facing forward).
+  const nose = LP(31, 0, 10);
+  const seg = 10, propPts = [];
+  for (let i = 0; i < seg; i++) { const a = (i / seg) * Math.PI * 2; propPts.push([nose[0], nose[1] + Math.cos(a) * 8.6, nose[2] + Math.sin(a) * 8.6]); }
+  addPoly(propPts, [30, 30, 34], { alpha: 0.4, double: true, ...opts });
+}
 function drawCar3D(car, game) {
+  if (car.kind === 'tank') { const dx0 = car.x - F.cam[0], dy0 = car.y - F.cam[1]; if (dx0 * dx0 + dy0 * dy0 <= 1080 * 1080) drawTank3D(car); return; }
+  if (car.kind === 'plane') { const dx0 = car.x - F.cam[0], dy0 = car.y - F.cam[1]; if (dx0 * dx0 + dy0 * dy0 <= 1250 * 1250) drawPlane3D(car); return; }
   const dx = car.x - F.cam[0], dy = car.y - F.cam[1];
   if (dx * dx + dy * dy > 1080 * 1080) return;
   // Near-plane guard: a car at or behind the lens near-plane clips into huge
@@ -487,6 +596,9 @@ function drawCar3D(car, game) {
   addBox(car.x, car.y, bodyTopZ / 2 + 0.9, L / 2, W / 2, bodyTopZ / 2 - 0.9, yaw, { top: bodyTop, front: body, back: body, sideP: body, sideM: body }, { vGrad: true, ...opts });
   addQuad(LP(L / 2, -W / 2 + 1, bodyTopZ - 1.2), LP(L / 2, W / 2 - 1, bodyTopZ - 1.2), LP(L * 0.24, W / 2 - 1.6, bodyTopZ + 0.4), LP(L * 0.24, -W / 2 + 1.6, bodyTopZ + 0.4), bodyTop, opts);
   addQuad(LP(-L * 0.24, -W / 2 + 1.6, bodyTopZ + 0.4), LP(-L * 0.24, W / 2 - 1.6, bodyTopZ + 0.4), LP(-L / 2, W / 2 - 1, bodyTopZ - 0.9), LP(-L / 2, -W / 2 + 1, bodyTopZ - 0.9), bodyTop, opts);
+  // Paint highlight streak: a sun-caught gloss line along both flanks —
+  // the texture pass's vehicle-paint shading (subtle, never neon).
+  for (const sy of [1, -1]) addQuad(LP(-L * 0.42, sy * (W / 2 + 0.16), bodyTopZ - 1.0), LP(L * 0.40, sy * (W / 2 + 0.16), bodyTopZ - 1.0), LP(L * 0.40, sy * (W / 2 + 0.16), bodyTopZ - 2.6), LP(-L * 0.42, sy * (W / 2 + 0.16), bodyTopZ - 2.6), bodyTop, { light: 1.28, alpha: 0.5, ...opts });
   // Bumpers + side skirt.
   addBox(car.x + c * (L / 2 + 0.8), car.y + s * (L / 2 + 0.8), 3.6, 1.6, W / 2 - 0.6, 2.2, yaw, [30, 31, 36], opts);
   addBox(car.x - c * (L / 2 + 0.8), car.y - s * (L / 2 + 0.8), 3.6, 1.6, W / 2 - 0.6, 2.2, yaw, [30, 31, 36], opts);
@@ -884,6 +996,7 @@ export function renderView3D(ctx, game) {
   for (const bt of game.city.boats || []) drawBoat(bt);
   const allCars = [];
   for (const car of game.traffic) allCars.push(car);
+  for (const car of game.specials || []) allCars.push(car);
   for (const cop of game.police.cops) allCars.push(cop);
   if (game.markedCarRef && !allCars.includes(game.markedCarRef)) allCars.push(game.markedCarRef);
   for (const car of allCars) {

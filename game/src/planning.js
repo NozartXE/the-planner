@@ -8,6 +8,7 @@
 // The model (live-recomputing plan stats + a gross-to-net ledger) is adapted
 // from our own THE PLANNER design to this game's jobs, cars and police.
 import { CHAIN } from './missions.js';
+import { WEAPONS, weaponById, buildWeapon } from './arsenal.js';
 
 // Named crew: skill drives the grab rate, cut % is what the ledger deducts.
 export const CREW_POOL = [
@@ -21,7 +22,7 @@ export const CREW_POOL = [
 // Gear over three slots; every item's effect is a real sim input below.
 export const GEAR_POOL = [
   { id: 'duffels', name: 'BIG DUFFELS', desc: 'Grab rate +25%' },
-  { id: 'extmag', name: 'EXTENDED MAG', desc: 'VENN 9MM magazine 12 to 18' },
+  { id: 'extmag', name: 'EXTENDED MAG', desc: 'Weapon magazine x1.5 (table-driven)' },
   { id: 'quiet', name: 'QUIET KIT', desc: 'Heat -1 star, alarm +6 s' },
   { id: 'smoke', name: 'SMOKE POTS', desc: 'Escape window +6 s' },
   { id: 'plates', name: 'CLEAN PLATES', desc: 'Heat -1, fence fee -1%' },
@@ -73,6 +74,7 @@ export function defaultPlan(jobIndex) {
   return {
     jobIndex, entry: 0, crew: ['dex', 'milo'], gear: ['duffels'],
     getaway: cars[((jobIndex % 5) + 5) % 5], timeOfDay: 'golden',
+    weaponId: 'venn-9mm',
   };
 }
 // Live plan statistics — recomputed from the plan on every board change and
@@ -122,11 +124,17 @@ export function settlePlan(jobIndex, plan, gross) {
   const repGain = 20 + Math.round(net / 20);
   return { jobIndex, title: CHAIN[jobIndex % CHAIN.length].title, gross, fencePct: stats.fencePct, fence, cuts, cutTotal, net, repGain };
 }
-// The weapon the gear builds: the extended magazine is a real mag size the
-// shooting code spends, not a caption.
+// The weapon the plan picks from the arsenal: the board's gear picker draws
+// from the full 56-weapon table, and the extended-mag gear modifies the
+// table magazine (VENN 9MM: 12 -> 18, its original coupling). The returned
+// object is what the shooting code spends, stat for stat.
 export function weaponForPlan(plan) {
-  const magSize = plan && plan.gear.includes('extmag') ? 18 : 12;
-  return { name: 'VENN 9MM', magSize, mag: magSize, reserve: 48 };
+  const def = weaponById(plan && plan.weaponId ? plan.weaponId : 'venn-9mm');
+  return buildWeapon(def, plan);
+}
+export function cycleWeapon(plan, dir) {
+  const i = WEAPONS.findIndex((w) => w.id === (plan.weaponId || 'venn-9mm'));
+  plan.weaponId = WEAPONS[(i + dir + WEAPONS.length) % WEAPONS.length].id;
 }
 // Wanted-decay pacing from the escape window: a longer window (faster car,
 // smoke, Sana driving) cools the heat sooner. Returned in ms between star
