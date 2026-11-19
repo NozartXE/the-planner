@@ -78,6 +78,12 @@ export function applyShot(game, name, step) {
     game.missions.index = 2; game.missions.active = false; game.missions.stage = 'idle';
     game.plan = { ...STAGED_PLAN_J3, crew: [...STAGED_PLAN_J3.crew], gear: [...STAGED_PLAN_J3.gear] };
     game.gearFocus = 1;
+    // The full weapon wheel rides THIS frame now (final-fix composition
+    // choice, disclosed in the record): open over the board's street
+    // corridor with the RL segment selected — the same HAVOC TUBE the
+    // plan's ARSENAL strip picks — so the mission frame is free to prove
+    // combat instead of a menu. drawPlanning renders the inset.
+    game.wheelOpen = true; game.wheelClass = 5; game.wheelIndex = 0;
     game.planStatsCache = planStats(2, game.plan, 0);
     game.planTarget = { x: 986, y: 986 };
     game.planOrbitAngle = 0;
@@ -222,103 +228,164 @@ export function applyShot(game, name, step) {
     setMission(game, 2, 'pickup', 78);
     game.player.hp = 100;
     game.bullets = []; game.toasts = [];
-    // Skids: two curved-feeling tracks behind the hero (three short segments per side,
-    // angle opening as they trail back) and one pair behind the PIT cop.
+    // MOTION EVIDENCE (final-fix, staging/capture-moment only — the fix
+    // round's formation geometry above is untouched): the panels read the
+    // formation-correct chase as static, so the capture instant now carries
+    // the full motion vocabulary at readable scale. Skid ARCS: five longer,
+    // wider segments per side behind the hero, trailing ~95 units with the
+    // angle opening and the track drifting outward as it falls back, so the
+    // arc tails emerge from behind the hero's silhouette onto open road;
+    // three matching segments behind the PIT cop.
     game.fx.skids = [];
-    const skidAngles = [0.02, 0.08, 0.14];
+    const skidAngles = [0.04, 0.10, 0.18, 0.28, 0.40];
     for (const side of [-8, 8]) {
-      for (let i = 0; i < 3; i++) {
-        const p = at(hero, -14 - 6 - i * 16, side);
-        game.fx.skid(p.x, p.y, skidAngles[i], 18, 3.2);
+      for (let i = 0; i < 5; i++) {
+        const p = at(hero, -16 - i * 15, side * (1 + i * 0.85));
+        game.fx.skid(p.x, p.y, skidAngles[i], 24, 5.0);
       }
     }
+    const pitSkidAngles = [0.03, 0.10, 0.20];
     for (const side of [-8, 8]) {
-      const p = at(pit, -20, side);
-      game.fx.skid(p.x, p.y, pitAngle, 18, 3.2);
+      for (let i = 0; i < 3; i++) {
+        const p = at(pit, -18 - i * 14, side * (1 + i * 0.7));
+        game.fx.skid(p.x, p.y, pitAngle + pitSkidAngles[i], 22, 4.6);
+      }
     }
-    // Frozen effects: sparks at the contact point, smoke at the hero's rear tyres and
-    // the PIT cop's front tyres.
+    // Frozen effects: a denser spark burst at the contact point, a stacked
+    // contact-smoke PLUME at the PIT touch point (six puffs at staggered
+    // life ratios, so the soft-sprite renderer stacks them into a rising
+    // column at the exact point where the two bodies meet), and layered
+    // tyre smoke at the hero's rear tyres and the PIT cop's front tyres.
     const heroTyreL = at(hero, -14, -8), heroTyreR = at(hero, -14, 8);
     const pitTyreL = at(pit, 15, -7), pitTyreR = at(pit, 15, 7);
     const sparkCols = ['#ffd76a', '#f2c14e'];
-    const sparkSizes = [2, 2.6, 3.4, 2.4, 3.0];
-    const sparkLife = [0.7, 0.85, 1, 0.8, 0.9];
+    const sparkSizes = [2, 2.6, 3.4, 2.4, 3.0, 4.2, 2.8, 3.6, 2.2];
+    const sparkLife = [0.7, 0.85, 1, 0.8, 0.9, 0.75, 0.95, 0.65, 0.88];
     game.fx.particles = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < sparkSizes.length; i++) {
       game.fx.particles.push({
-        x: contact.x + (i - 2) * 1.6, y: contact.y + ((i % 3) - 1) * 1.6,
+        x: contact.x + (i - 4) * 1.3, y: contact.y + ((i % 3) - 1) * 1.6,
         vx: 0, vy: 0, life: 0.5 * sparkLife[i], maxLife: 0.5,
         color: sparkCols[i % 2], size: sparkSizes[i], drag: 0,
       });
     }
-    const smokePts = [heroTyreL, heroTyreR, pitTyreL, pitTyreR];
-    const smokeSizes = [5, 6.5, 8, 5.5];
-    smokePts.forEach((p, i) => {
-      game.fx.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.75, maxLife: 1.0, color: 'rgba(120,120,125,0.55)', size: smokeSizes[i], drag: 0 });
+    const plumeOff = [[0, 0], [2, -2], [-2, 1], [3, 2], [-3, -2], [1, 3]];
+    const plumeSizes = [7, 8.5, 10, 11, 9, 7.5];
+    const plumeRatio = [0.95, 0.82, 0.68, 0.52, 0.38, 0.24];
+    plumeOff.forEach((o, i) => {
+      game.fx.particles.push({ x: contact.x + o[0], y: contact.y + o[1], vx: 0, vy: 0, life: plumeRatio[i], maxLife: 1.0, color: 'rgba(120,120,125,0.55)', size: plumeSizes[i], drag: 0 });
     });
-    // Contact smoke at the PIT touch point itself: the impact reads as a
-    // live scrape, not two parked cars — smoke + the sparks above at the
-    // exact point where the two bodies meet.
-    game.fx.particles.push({ x: contact.x, y: contact.y, vx: 0, vy: 0, life: 0.85, maxLife: 1.0, color: 'rgba(120,120,125,0.55)', size: 7, drag: 0 });
+    const tyreSmoke = [
+      [heroTyreL, 6.5, 0.8], [heroTyreL, 9, 0.55], [heroTyreR, 6.5, 0.8], [heroTyreR, 9, 0.55],
+      [pitTyreL, 6, 0.75], [pitTyreL, 8.5, 0.5], [pitTyreR, 6, 0.75], [pitTyreR, 8.5, 0.5],
+    ];
+    tyreSmoke.forEach(([p, sz, lf]) => {
+      game.fx.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: lf, maxLife: 1.0, color: 'rgba(120,120,125,0.55)', size: sz, drag: 0 });
+    });
     finish(game);
     return true;
   }
   if (name === 'mission') {
-    // DIRECTIVES ROUND — composition choice (disclosed in the record): the
-    // brief's alternative staging. A centred wheel occludes whatever sits
-    // at the vanishing point, so the frame is an ON-FOOT moment at FORT
-    // SABLE: the player stands on the base's south road with the WEAPON
-    // WHEEL open over live action — the tank large at the left foreground
-    // (turret traversed, muzzle smoke from its last round), a fresh cannon
-    // burst + molotov fire patch on the target sedan at the right, clear of
-    // the wheel, and the wanted roster reacting top-right (3 stars, 3
-    // units). Tank DRIVING/firing is proven in the smoke suite; this frame
-    // proves variety + arsenal + reaction in one composition.
+    // FINAL-FIX — composition choice (disclosed in the record): the three
+    // directives panels converged — the centred wheel (~30% of frame width)
+    // erased the pack's only proven combat and the tank read as an olive
+    // slab. The wheel's full proof MOVES TO THE BOARD FRAME (open inset
+    // there, RL/HAVOC selected, matching that frame's plan and ARSENAL
+    // strip); this frame keeps only the compact weapon readout (VENN 9MM
+    // 15/48, the plan's real weapon and count) and returns to the
+    // pre-directive combat staging, restaged at FORT SABLE and solved
+    // projection-first against the foot cam (52 back / 30 up):
+    // the player stands ON THE BASE APRON (690,2952 — site concrete, NOT
+    // the roadway) firing east over-shoulder at a struck, smoking sedan
+    // 88 units ahead; Dex, the plan's lead pick, aims beside him in his
+    // own colour; the roster's 2× ROADBLOCK is a perpendicular pair across
+    // the east road at mid-distance, exactly what assignTactics labels
+    // them; and the BASTION tank sits left mid-ground in three-quarter
+    // flank profile — tracks, turret and barrel silhouette unobstructed,
+    // its muzzle still smoking from its last round.
     game.screen = 'play';
     run(150);
     game.screen = 'play';
     game.player.inCar = false; game.player.car = null;
-    game.player.x = 700; game.player.y = 2887; game.player.angle = 0.12;
-    game.player.walkPhase = 0.6; game.player.vx = 0; game.player.vy = 0; game.player.hp = 92;
+    game.player.x = 690; game.player.y = 2952;
+    // Aim line onto the target sedan: the tracers below fly this exact angle.
+    const a = Math.atan2(2956 - 2952, 778 - 690);
+    game.player.angle = a;
+    game.player.walkPhase = 1.1; game.player.vx = 30; game.player.vy = 2; game.player.hp = 92;
+    // The tank, left mid-ground: hull angled SSE so the camera reads its
+    // flank + front quarter (tracks low, turret high), turret traversed
+    // east toward the fight, barrel clear of every other silhouette.
     const tank = game.specials[0];
-    tank.x = 732; tank.y = 2860; tank.angle = -0.12; tank.turret = 0.55; tank.speed = 0; tank.dead = false; tank.hp = 590;
-    game.specials[1].x = 830; game.specials[1].y = 3060; game.specials[1].angle = -0.4;
-    // Target sedan south-east, clear of the wheel, burning.
-    setCar(game.traffic[1], 806, 2922, 0.5, 0, { kind: 'sedan', color: '#54604f', hp: 18, maxHp: 100 });
-    setCar(game.traffic[2], 3300, 3300, 0, 0);
-    setCar(game.traffic[3], 3300, 3300, 0, 0);
+    tank.x = 858; tank.y = 2902; tank.angle = 1.22; tank.turret = 0.5; tank.speed = 0; tank.dead = false; tank.hp = 590;
+    // The second tank parks far behind the camera, out of this frame.
+    game.specials[1].x = 430; game.specials[1].y = 3240; game.specials[1].angle = 0.8;
+    // Target sedan ahead on the apron's gate line, rear three-quarter to
+    // the camera, already struck (hp 18: the renderer climbs damage smoke
+    // off it) with a molotov fire patch burning at its nose.
+    setCar(game.traffic[1], 778, 2956, 0.5, 0, { kind: 'sedan', color: '#54604f', hp: 18, maxHp: 100 });
+    // Every other traffic car parks far south-east, out of the frame: the
+    // sim's deterministic wander otherwise leaves strays inside the base's
+    // sightlines (a coupe behind the tank, a sedan at the left edge).
+    for (let i = 0; i < game.traffic.length; i++) {
+      if (i === 1) continue;
+      setCar(game.traffic[i], 3300 + i * 10, 3300, 0, 0);
+    }
     game.police.cops = [];
-    const cop1 = addCop(game, 905, 2946, Math.PI); cop1.speed = 40;
-    const cop2 = addCop(game, 860, 2866, Math.PI); cop2.speed = 40;
-    const cop3 = addCop(game, 600, 2908, 0); cop3.speed = 60;
+    // The roster's 2× ROADBLOCK, staged as what it claims: a pair swung
+    // PERPENDICULAR (long axes north–south, side profiles to the camera)
+    // across the base's east road (x 940–1032), flanking the target's
+    // escape line at mid-distance. Exactly two units are fielded, so the
+    // dispatch header, its rows and the street all agree.
+    const cop1 = addCop(game, 986, 2935, -Math.PI / 2); cop1.speed = 0;
+    const cop2 = addCop(game, 986, 3010, Math.PI / 2); cop2.speed = 0;
     game.police.assignTactics(game.player);
     game.police.lastSeenX = game.player.x; game.police.lastSeenY = game.player.y;
-    stagePed(game, 0, 620, 2840, 0.4, 2.2, 0);
-    stagePed(game, 1, 960, 2842, -2.2, 4.0, 1);
-    stagePed(game, 2, 1080, 2946, Math.PI, 1.1, 2);
-    for (const idx of [0, 1]) { const ped = game.peds[idx]; ped.fleeUntil = game.nowMs + 60000; ped.fleeX = 806; ped.fleeY = 2922; }
+    // Peds on the apron only — none stands on a road surface; the two
+    // nearest the gunfire are caught mid-flee.
+    stagePed(game, 0, 812, 2988, 0.4, 2.2, 0);
+    stagePed(game, 1, 830, 2932, -2.2, 4.0, 1);
+    stagePed(game, 2, 648, 3024, Math.PI, 1.1, 2);
+    for (const idx of [0, 1]) { const ped = game.peds[idx]; ped.fleeUntil = game.nowMs + 60000; ped.fleeX = 778; ped.fleeY = 2956; }
     game.money = 2250;
     game.police.setStars(3, game.nowMs);
     setMission(game, 3, 'dropA', 96);
+    game.lastShotAt = game.nowMs;
+    // Job 4's plan, executed: the extended-mag gear built an 18-round
+    // VENN 9MM and three rounds are already fired — the readout (15/48)
+    // is the sim's own count, and with the wheel closed on this frame the
+    // readout and the fight agree. The grab is done; Dex works beside
+    // the player.
     game.plan = { ...STAGED_PLAN_J4, crew: [...STAGED_PLAN_J4.crew], gear: [...STAGED_PLAN_J4.gear] };
     game.planStatsCache = planStats(3, game.plan, 0);
     game.timeGrade = 'golden';
     game.weapon = weaponForPlan(game.plan);
     game.weapon.mag = 15;
     game.missions.lootGrabbed = game.planStatsCache.loot;
-    game.crewMate = { id: 'dex', name: 'DEX RUIZ', color: '#e8c832', x: game.player.x - 20, y: game.player.y + 22, angle: 0.4, walkPhase: 2.0, pose: 'stand' };
+    game.crewMate = { id: 'dex', name: 'DEX RUIZ', color: '#e8c832', x: 702, y: 2970, angle: a, walkPhase: 2.0, pose: 'aim' };
     game.projectiles = [];
-    game.zones = [{ kind: 'fire', x: 824, y: 2936, r: 30, until: game.nowMs + 60000, dps: 26 }];
+    game.zones = [{ kind: 'fire', x: 804, y: 2974, r: 26, until: game.nowMs + 60000, dps: 26 }];
+    // Tracers in flight along the aim line and the muzzle flash, frozen at
+    // the capture tick (the pre-directive frame's proven combat read).
+    game.bullets = [26, 50, 70].map((d) => ({
+      x: game.player.x + Math.cos(a) * d, y: game.player.y + Math.sin(a) * d, angle: a, life: 0.5,
+    }));
+    // Hit feedback: muzzle flash at the gun, impact sparks + flash on the
+    // struck sedan's flank, damage smoke climbing off it, and the tank's
+    // muzzle smoke at its barrel tip (turret traversed to 0.5).
+    const mx = game.player.x + Math.cos(a) * 16, my = game.player.y + Math.sin(a) * 16;
     game.fx.particles = [
-      { x: 752, y: 2862, vx: 0, vy: 0, life: 0.8, maxLife: 1.0, color: 'rgba(120,120,125,0.55)', size: 6, drag: 0 },
-      { x: 794, y: 2914, vx: 0, vy: 0, life: 0.4, maxLife: 0.4, color: '#f2c14e', size: 3.8, drag: 0 },
-      { x: 800, y: 2906, vx: 0, vy: 0, life: 0.34, maxLife: 0.34, color: '#fff3c4', size: 4.6, drag: 0 },
-      { x: 810, y: 2900, vx: 0, vy: 0, life: 1.0, maxLife: 1.0, color: 'rgba(120,120,125,0.6)', size: 7.5, drag: 0 },
-      { x: 818, y: 2892, vx: 0, vy: 0, life: 0.9, maxLife: 0.9, color: 'rgba(120,120,125,0.5)', size: 5.5, drag: 0 },
+      { x: mx, y: my, vx: 0, vy: 0, life: 0.07, maxLife: 0.07, color: '#ffd76a', size: 5.5, drag: 0 },
+      { x: 762, y: 2950, vx: 0, vy: 0, life: 0.4, maxLife: 0.4, color: '#f2c14e', size: 3.4, drag: 0 },
+      { x: 768, y: 2946, vx: 0, vy: 0, life: 0.32, maxLife: 0.32, color: '#ffd76a', size: 2.8, drag: 0 },
+      { x: 760, y: 2954, vx: 0, vy: 0, life: 0.45, maxLife: 0.45, color: '#fff3c4', size: 4.2, drag: 0 },
+      { x: 772, y: 2946, vx: 0, vy: 0, life: 1.0, maxLife: 1.0, color: 'rgba(120,120,125,0.6)', size: 7, drag: 0 },
+      { x: 784, y: 2938, vx: 0, vy: 0, life: 0.9, maxLife: 0.9, color: 'rgba(120,120,125,0.5)', size: 5.5, drag: 0 },
+      { x: 887, y: 2916, vx: 0, vy: 0, life: 0.8, maxLife: 1.0, color: 'rgba(120,120,125,0.55)', size: 6.5, drag: 0 },
+      { x: 893, y: 2919, vx: 0, vy: 0, life: 0.62, maxLife: 1.0, color: 'rgba(120,120,125,0.5)', size: 8, drag: 0 },
     ];
-    // The wheel, open over the action: RL segment selected, HAVOC TUBE in hub.
-    game.wheelOpen = true; game.wheelClass = 5; game.wheelIndex = 0;
-    game.bullets = []; game.toasts = [];
+    // The wheel is CLOSED on this frame — its proof lives on the board.
+    game.wheelOpen = false; game.wheelClass = 5; game.wheelIndex = 0;
+    game.toasts = [];
     finish(game);
     return true;
   }

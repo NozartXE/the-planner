@@ -289,11 +289,16 @@ export function drawDistrictMap(ctx, game, x, y, w, h) {
 // ------------------------------------------------------------ weapon wheel
 // GTA-style radial selection: a TRANSIENT overlay while open — seven class
 // segments with their counts around a hub that shows the highlighted
-// weapon's real table stats. The world stays visible around it.
-export function drawWeaponWheel(ctx, game) {
-  const cx = VIEW_W / 2, cy = VIEW_H / 2, R = 196, r0 = 74;
+// weapon's real table stats. The world stays visible around it. Placement
+// is a parameter: live play uses the centred full-size wheel (the default);
+// the Planning Board carries the same wheel as a smaller inset over its
+// street corridor, so the arsenal proof lives on the board frame and the
+// mission frame can stay a live firefight (final-fix composition choice).
+export function drawWeaponWheel(ctx, game, cx = VIEW_W / 2, cy = VIEW_H / 2, R = 196) {
+  const k = R / 196, r0 = 74 * k;
   ctx.save();
-  ctx.fillStyle = 'rgba(16,8,8,0.30)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  if (R >= 190) { ctx.fillStyle = 'rgba(16,8,8,0.30)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H); }
+  else { ctx.beginPath(); ctx.arc(cx, cy, R + 12, 0, Math.PI * 2); ctx.fillStyle = 'rgba(12,6,6,0.38)'; ctx.fill(); }
   const selCls = WEAPON_CLASSES[game.wheelClass || 0];
   WEAPON_CLASSES.forEach((cls, i) => {
     const a0 = -Math.PI / 2 + (i / WEAPON_CLASSES.length) * Math.PI * 2 + 0.03;
@@ -305,11 +310,11 @@ export function drawWeaponWheel(ctx, game) {
     ctx.strokeStyle = 'rgba(255,220,170,0.5)'; ctx.lineWidth = 1.4; ctx.stroke();
     const am = (a0 + a1) / 2, lx = cx + Math.cos(am) * (R + r0) / 2, ly = cy + Math.sin(am) * (R + r0) / 2;
     ctx.fillStyle = sel ? '#2a1a08' : PALETTE.hudText; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = '700 12px system-ui, sans-serif';
+    ctx.font = '700 ' + (12 * k).toFixed(1) + 'px system-ui, sans-serif';
     const short = { AR: 'AR', SMG: 'SMG', MG: 'MG', SG: 'SG', SR: 'SR', RL: 'RL', EXP: 'EXP' }[cls.id];
-    ctx.fillText(short + ' · ' + weaponsByClass(cls.id).length, lx, ly - 8);
-    ctx.font = '600 8.5px system-ui, sans-serif'; ctx.fillStyle = sel ? '#4a3410' : PALETTE.hudMuted;
-    ctx.fillText(cls.label, lx, ly + 7);
+    ctx.fillText(short + ' · ' + weaponsByClass(cls.id).length, lx, ly - 8 * k);
+    ctx.font = '600 ' + (8.5 * k).toFixed(1) + 'px system-ui, sans-serif'; ctx.fillStyle = sel ? '#4a3410' : PALETTE.hudMuted;
+    ctx.fillText(cls.label, lx, ly + 7 * k);
   });
   // Hub: the highlighted weapon and its real stats.
   const list = weaponsByClass(selCls.id);
@@ -318,15 +323,15 @@ export function drawWeaponWheel(ctx, game) {
   ctx.fillStyle = 'rgba(22,12,10,0.92)'; ctx.fill();
   ctx.strokeStyle = 'rgba(242,193,78,0.7)'; ctx.lineWidth = 1.4; ctx.stroke();
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#f2c14e'; ctx.font = '700 13px system-ui, sans-serif';
-  ctx.fillText(def.name, cx, cy - 26);
-  ctx.fillStyle = PALETTE.hudText; ctx.font = '600 10.5px system-ui, sans-serif';
-  ctx.fillText('DMG ' + def.damage + ' · ROF ' + def.rps + '/s', cx, cy - 8);
-  ctx.fillText('RNG ' + def.range + ' · MAG ' + def.mag + (def.behavior ? ' · ' + def.behavior.toUpperCase() : ''), cx, cy + 7);
-  ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 9.5px system-ui, sans-serif';
-  ctx.fillText(((game.wheelIndex || 0) + 1) + ' / ' + list.length + ' · ▲▼ · ◀▶', cx, cy + 24);
-  ctx.fillStyle = '#f2c14e'; ctx.font = '700 11px system-ui, sans-serif';
-  ctx.fillText('WEAPON WHEEL — Q / ENTER equips', cx, cy + R + 22);
+  ctx.fillStyle = '#f2c14e'; ctx.font = '700 ' + (13 * k).toFixed(1) + 'px system-ui, sans-serif';
+  ctx.fillText(def.name, cx, cy - 26 * k);
+  ctx.fillStyle = PALETTE.hudText; ctx.font = '600 ' + (10.5 * k).toFixed(1) + 'px system-ui, sans-serif';
+  ctx.fillText('DMG ' + def.damage + ' · ROF ' + def.rps + '/s', cx, cy - 8 * k);
+  ctx.fillText('RNG ' + def.range + ' · MAG ' + def.mag + (def.behavior ? ' · ' + def.behavior.toUpperCase() : ''), cx, cy + 7 * k);
+  ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 ' + (9.5 * k).toFixed(1) + 'px system-ui, sans-serif';
+  ctx.fillText(((game.wheelIndex || 0) + 1) + ' / ' + list.length + ' · ▲▼ · ◀▶', cx, cy + 24 * k);
+  ctx.fillStyle = '#f2c14e'; ctx.font = '700 ' + (11 * k).toFixed(1) + 'px system-ui, sans-serif';
+  ctx.fillText('WEAPON WHEEL — Q / ENTER equips', cx, cy + R + 22 * k);
   ctx.restore();
 }
 
@@ -498,6 +503,11 @@ export function drawPlanning(ctx, game) {
   const entryName = data.entries[plan.entry];
   ctx.fillText(entryName + ' · ' + gw.name + ' · ' + (TIMES.find((t) => t.id === plan.timeOfDay) || TIMES[0]).label, VIEW_W - 270, 674);
   ctx.restore();
+  // The wheel as the board's inset (staged captures open it here): the full
+  // 7-segment arsenal proof — counts 10/10/5/7/8/6/10, the plan's launcher
+  // highlighted, hub stats — over the street corridor, clear of every panel,
+  // so the mission frame never has to spend itself on a menu again.
+  if (game.wheelOpen) drawWeaponWheel(ctx, game, 676, 338, 158);
 }
 export function drawSummary(ctx, game) {
   const s = game.lastSummary || {
@@ -511,7 +521,11 @@ export function drawSummary(ctx, game) {
   const jobRows = (s.jobRows && s.jobRows.length) ? s.jobRows : [];
   const PH = jobRows.length ? 668 : 520;
   const px = VIEW_W / 2 - 310, py = VIEW_H / 2 - PH / 2;
-  ctx.fillStyle = 'rgba(18,8,8,0.52)'; ctx.beginPath(); ctx.roundRect(px, py, 620, PH, 8); ctx.fill();
+  // Backing raised to near-opaque (final-fix): at 0.52 the backdrop hero
+  // car's silhouette — dark body + red tail strip — ghosted through the
+  // ledger's centre rows. 0.95 under the panel's own 0.66 leaves ~1% of
+  // the backdrop, under the pixel-check threshold (verified in-browser).
+  ctx.fillStyle = 'rgba(14,6,6,0.95)'; ctx.beginPath(); ctx.roundRect(px, py, 620, PH, 8); ctx.fill();
   panel(ctx, px, py, 620, PH);
   ctx.textBaseline = 'top';
   ctx.textAlign = 'center';
