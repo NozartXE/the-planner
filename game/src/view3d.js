@@ -77,7 +77,7 @@ function lin(triple) {
 function linColor(triple) { return new THREE.Color().setRGB(triple[0] / 255, triple[1] / 255, triple[2] / 255, THREE.SRGBToLinearColorSpace); }
 const ASPHALT = [60, 53, 55], SIDEWALK_C = [122, 102, 80], PLOT = [93, 79, 60];
 const GRASS_C = [84, 100, 60], SAND_C = rgb(PALETTE.sand), WATER_C = rgb(PALETTE.water);
-const GLASS = [16, 23, 34], TYRE = [12, 12, 15];
+const GLASS = [27, 40, 54], TYRE = [12, 12, 15];
 
 // ------------------------------------------------------------ WebGL boot
 // The renderer is created lazily and ONCE. Support is probed by asking a
@@ -561,8 +561,8 @@ export function projectPoint(x, y, z) {
 }
 // Camera framing, matched to the previous build: planning = elevated
 // orbit of the target block; driving = 84 back / 30 up looking 40 ahead;
-// on foot = 52 / 30; aiming = OTS right (≈30 back / 21 up, +24 lateral to
-// the gun side, look swung −11 to the opposite side).
+// on foot = 52 / 30; aiming = OTS right (31 back / 19 up, +30 lateral to
+// the gun side, look swung −17 to the opposite side).
 function frameCamera(game) {
   const p = game.player;
   const isDrive = !!p.inCar && !!p.car;
@@ -575,11 +575,16 @@ function frameCamera(game) {
     return { cam: [camX, camY, camH], look: [t.x, t.y, 6], isDrive };
   }
   const aiming = !isDrive && ((game.bullets && game.bullets.length > 0) || (game.lastShotAt && game.nowMs - game.lastShotAt < 700));
-  const back = isDrive ? 84 : aiming ? 30 : 52;
-  const camH = isDrive ? 30 : aiming ? 21 : 30;
+  // Phase 2 aim framing: OTS-right — the single shooter fills the
+  // lower-left foreground (head + right shoulder large to camera, scene
+  // ahead still wide). Back 31 keeps the whole figure in frame (26
+  // cropped him at the shoulders); the lateral pair (cam +30 gun-side,
+  // look −17) swings the aim line onto the HUD reticle at 0.536W.
+  const back = isDrive ? 84 : aiming ? 31 : 52;
+  const camH = isDrive ? 30 : aiming ? 19 : 30;
   const fh = [Math.cos(yaw), Math.sin(yaw)];
   const sh = [-fh[1], fh[0]];
-  const camLat = aiming ? 24 : 0;
+  const camLat = aiming ? 30 : 0;
   let camX = anchor.x - fh[0] * back + sh[0] * camLat;
   let camY = anchor.y - fh[1] * back + sh[1] * camLat;
   if (!game.frozen) {
@@ -597,7 +602,7 @@ function frameCamera(game) {
       if (!pointInBuilding(game.city, tx, ty)) { camX = tx; camY = ty; break; }
     }
   }
-  const lookLat = aiming ? -11 : 0;
+  const lookLat = aiming ? -17 : 0;
   const lookFwd = aiming ? 55 : 40;
   return {
     cam: [camX, camY, camH],
@@ -707,7 +712,7 @@ function buildGround(gl, game, B) {
   const actorNear = (x, y, r) => actors.some((a) => { const dx = a.x - x, dy = a.y - y; return dx * dx + dy * dy < r * r; });
   // --- Rect 2026-11-20 road pattern: planted medians, double yellow centre
   // lines flanking them, dashed white lane lines, zebra crossings.
-  const YELLOW = lin([198, 166, 88]), LANEWHITE = lin([216, 213, 205]);
+  const YELLOW = lin([218, 182, 94]), LANEWHITE = lin([226, 223, 215]);
   const MED_SIDE = lin([150, 146, 138]), MED_TOP = lin([86, 104, 62]);
   const BUSH = lin([70, 102, 52]), BUSH_L = lin([96, 128, 66]);
   for (const c of centers) {
@@ -752,7 +757,7 @@ function buildGround(gl, game, B) {
     }
   }
   // Zebra crossings at intersections.
-  const ZEBRA = [...lin([216, 207, 192]), 0.55];
+  const ZEBRA = [...lin([224, 216, 202]), 0.72];
   for (const cx of centers) for (const cy of centers) {
     if (!inRange(cx, cy)) continue;
     for (let i = 0; i < 5; i++) {
@@ -832,17 +837,26 @@ function buildSkyline(gl, game, B) {
   const camX = F.cam[0], camY = F.cam[1];
   const tx = 1691, ty = 1691;
   if (Math.hypot(tx - camX, ty - camY) < 1500) {
-    const RED = lin([168, 44, 40]), WHT = lin([232, 230, 224]);
+    // Phase 2 legibility: the Phase 1 mast (r ≤15 tapering to 1.1, thin
+    // crossarm discs) vanished at action-frame distance — a few pixels of
+    // fog-washed red on an orange sky. The mast keeps its proportions at
+    // the base but carries WIDE crossarm bars and bigger band discs, the
+    // classic radio-tower silhouette that survives the contact sheet.
+    const RED = lin([178, 36, 32]), WHT = lin([236, 234, 228]);
     limb(B.flat, [tx, ty, 0], [tx, ty, 235], 15, 2.6, RED, 4);
-    for (const [z, r] of [[58, 10.6], [116, 7.6], [174, 4.9]]) {
-      const g = new THREE.CylinderGeometry(r, r, 13, 4);
+    for (const [z, r] of [[58, 15], [116, 11.5], [174, 8]]) {
+      const g = new THREE.CylinderGeometry(r, r, 15, 4);
       B.flat.push(g, mat4(tx, z, ty, Math.PI / 4), WHT);
       g.dispose();
     }
+    for (const [z, len] of [[150, 112], [202, 86]]) {
+      box(B.flat, tx, ty, z, len / 2, 3.2, 3.2, 0, RED);
+      box(B.flat, tx, ty, z, 3.2, len / 2, 3.2, 0, RED);
+    }
     for (const sx of [-1, 1]) for (const sy of [-1, 1]) limb(B.flat, [tx + sx * 13, ty + sy * 13, 0], [tx + sx * 2, ty + sy * 2, 120], 0.9, 0.7, RED, 4);
-    limb(B.flat, [tx, ty, 235], [tx, ty, 268], 1.1, 0.4, RED, 5);
-    ball(B.flat, tx, ty, 244, 2.6, RED);
-    addGlow(gl, tx, ty, 246, 9, lin([255, 70, 60]), 0.5);
+    limb(B.flat, [tx, ty, 235], [tx, ty, 268], 1.6, 0.5, RED, 5);
+    ball(B.flat, tx, ty, 244, 3.4, RED);
+    addGlow(gl, tx, ty, 246, 11, lin([255, 70, 60]), 0.55);
   }
   // Bridge silhouette over the eastern water (deck + two pylons + cables).
   const SIL = lin([56, 62, 76]);
@@ -885,10 +899,14 @@ function buildBuildings(gl, game, B) {
       { n: [-1, 0], tint: tintOf(wallSun), wid: b.h, fixed: b.x, mk: (z0, z1) => [[b.x, b.y, z0], [b.x, b.y + b.h, z0], [b.x, b.y + b.h, z1], [b.x, b.y, z1]] },
     ];
     const isCyl = isGlass && hash01(bid * 3.1) < 0.45;
+    // Phase 2 facade variation: every building samples its window grid at
+    // its OWN offset, so neighbouring towers never share an aligned grid,
+    // and ~40% carry a mid-height trim band in a muted accent.
+    const uOff = hash01(bid * 5.3) * 0.61, vOff = hash01(bid * 9.1) * 0.43;
     if (isCyl) {
       const r = Math.min(b.w, b.h) / 2 * 0.96;
       const g = new THREE.CylinderGeometry(r, r, H, 20, 1, true);
-      FB.push(g, mat4(cx, H / 2, cy, 0), tintOf(wallSun), [(2 * Math.PI * r) / 95, H / 95], [0, 0]);
+      FB.push(g, mat4(cx, H / 2, cy, 0), tintOf(wallSun), [(2 * Math.PI * r) / 95, H / 95], [uOff, vOff]);
       g.dispose();
       disc(B.roof, cx, cy, H, r, lin(roofC));
       const rim = new THREE.CylinderGeometry(r + 1.6, r + 1.6, 3.2, 20, 1, true);
@@ -901,12 +919,27 @@ function buildBuildings(gl, game, B) {
         if (shopBand) {
           const uRepS = Math.max(1, Math.round(w.wid / 95));
           const sp = w.mk(0, 17);
-          B.shop.quad(sp[0], sp[1], sp[2], sp[3], w.tint, [0, 0, uRepS, 1]);
+          B.shop.quad(sp[0], sp[1], sp[2], sp[3], w.tint, [uOff, 0, uOff + uRepS, 1]);
           const up = w.mk(17, H);
-          FB.quad(up[0], up[1], up[2], up[3], w.tint, [0, 0, uRep, Math.max(1, Math.round((H - 17) / 95))]);
+          const vRep = Math.max(1, Math.round((H - 17) / 95));
+          FB.quad(up[0], up[1], up[2], up[3], w.tint, [uOff, vOff, uOff + uRep, vOff + vRep]);
         } else {
           const fp = w.mk(0, H);
-          FB.quad(fp[0], fp[1], fp[2], fp[3], w.tint, [0, 0, uRep, Math.max(1, Math.round(H / 95))]);
+          const vRep = Math.max(1, Math.round(H / 95));
+          FB.quad(fp[0], fp[1], fp[2], fp[3], w.tint, [uOff, vOff, uOff + uRep, vOff + vRep]);
+        }
+      }
+      // Mid-height trim band on hash-selected buildings: a flat accent
+      // stripe proud of every wall, breaking the repeated grid.
+      if (hash01(bid * 17.7) < 0.42 && H > 52) {
+        const ACCENTS = [[64, 110, 116], [168, 96, 72], [206, 188, 158], [120, 84, 110]];
+        const acc = lin(ACCENTS[Math.floor(hash01(bid * 23.3) * 4) % 4]);
+        const bz = H * (0.48 + hash01(bid * 29.7) * 0.14);
+        for (const w of walls) {
+          const bp = w.mk(bz, bz + 3.2);
+          const off = [w.n[0] * 0.35, w.n[1] * 0.35, 0];
+          const sh = (p) => [p[0] + off[0], p[1] + off[1], p[2]];
+          B.flat.quad(sh(bp[0]), sh(bp[1]), sh(bp[2]), sh(bp[3]), acc);
         }
       }
       // Roof + parapet cap + stored rooftop props.
@@ -969,8 +1002,9 @@ function buildBuildings(gl, game, B) {
 }
 
 // --------------------------------------------------------------- vehicles
-const TYRE_G = new THREE.CylinderGeometry(3.3, 3.3, 3.0, 14).rotateX(Math.PI / 2);
-const HUB_G = new THREE.CylinderGeometry(1.9, 1.9, 3.25, 10).rotateX(Math.PI / 2);
+const TYRE_G = new THREE.CylinderGeometry(3.3, 3.3, 3.8, 14).rotateX(Math.PI / 2);
+const HUB_G = new THREE.CylinderGeometry(2.05, 2.05, 4.0, 10).rotateX(Math.PI / 2);
+const CAP_G = new THREE.CylinderGeometry(0.85, 0.85, 4.15, 8).rotateX(Math.PI / 2);
 function buildTank(gl, game, B, car) {
   curCat = 'tank';
   const yaw = car.angle, L = car.len, W = car.wid;
@@ -1041,11 +1075,14 @@ function buildCar(gl, game, B, car) {
   // Bumpers.
   part(UNIT_BOX, mat4(L / 2 + 0.8, 3.6, 0, 0, 3.2, 4.4, W - 1.2), lin([30, 31, 36]));
   part(UNIT_BOX, mat4(-L / 2 - 0.8, 3.6, 0, 0, 3.2, 4.4, W - 1.2), lin([30, 31, 36]));
-  // Cabin: painted frame, inset glass, narrower roof.
+  // Cabin: painted frame, glasshouse band, narrower roof. Phase 2: the
+  // glass band sits nearly flush with the frame (inset 0.9, not 2.0) and
+  // runs deeper, so the glasshouse reads as its own band against the body
+  // colour from the rear three-quarter — not as a dark box on a slab.
   const cabLen = isVan ? L * 0.52 : L * 0.46, cabWid = W - 3.4;
   const cabOff = isVan ? -L * 0.08 : L * 0.03;
   part(UNIT_BOX, mat4(cabOff, (bodyTopZ + roofZ) / 2, 0, 0, cabLen, roofZ - bodyTopZ, cabWid), car.dead ? body : lin(rgb(car.color).map((v) => v * 0.85)));
-  part(UNIT_BOX, mat4(cabOff, (bodyTopZ + roofZ) / 2, 0, 0, cabLen - 2.2, roofZ - bodyTopZ - 1.0, cabWid - 2.0), lin(GLASS));
+  part(UNIT_BOX, mat4(cabOff, (bodyTopZ + roofZ) / 2 - 0.2, 0, 0, cabLen - 1.1, roofZ - bodyTopZ - 0.5, cabWid - 0.9), lin(GLASS));
   part(UNIT_BOX, mat4(cabOff, roofZ - 0.4, 0, 0, cabLen - 4.4, 1.1, cabWid - 3.8), bodyTop);
   // Mirrors + door seams.
   for (const sy of [1, -1]) {
@@ -1055,19 +1092,26 @@ function buildCar(gl, game, B, car) {
       B.flat.quad(LP(lx, sy * (W / 2 + 0.14), 2.6), LP(lx + 0.8, sy * (W / 2 + 0.14), 2.6), LP(lx + 0.8, sy * (W / 2 + 0.14), bodyTopZ - 0.6), LP(lx, sy * (W / 2 + 0.14), bodyTopZ - 0.6), lin([16, 17, 21]));
     }
   }
-  // FOUR REAL WHEELS: cylinder tyres + hubs, spinning with travel
-  // (angle = speed × sim time / radius — a pure function of state) and
-  // the front pair yawing with the car's steer value.
+  // FOUR REAL WHEELS: cylinder tyres + bright hubs + dark lug caps,
+  // spinning with travel (angle = speed × sim time / radius — a pure
+  // function of state) and the front pair yawing with the car's steer
+  // value. Phase 2: wider tyres track proud of the body (offset W/2−0.35)
+  // behind a dark arch flare, so tyre/hub/body separation survives the
+  // 320 px thumbnail instead of melting into the slab.
   const spin = ((car.speed || 0) * (game.time || 0)) / 3.3;
   const steer = car.steer || 0;
-  for (const [lx, lz, front] of [[L / 2 - 7.5, W / 2 - 0.7, 1], [L / 2 - 7.5, -W / 2 + 0.7, 1], [-L / 2 + 7.5, W / 2 - 0.7, 0], [-L / 2 + 7.5, -W / 2 + 0.7, 0]]) {
+  for (const [lx, lz, front] of [[L / 2 - 7.5, W / 2 - 0.35, 1], [L / 2 - 7.5, -W / 2 + 0.35, 1], [-L / 2 + 7.5, W / 2 - 0.35, 0], [-L / 2 + 7.5, -W / 2 + 0.35, 0]]) {
+    part(UNIT_BOX, mat4(lx, 6.9, Math.sign(lz) * (W / 2 + 0.15), 0, 9.4, 2.6, 1.5), lin([15, 15, 18])); // fender lip over the wheel
     const wm = new THREE.Matrix4().makeTranslation(lx, 3.3, lz)
       .multiply(new THREE.Matrix4().makeRotationY(front ? -steer : 0))
       .multiply(new THREE.Matrix4().makeRotationZ(spin));
     B.flat.push(TYRE_G, M.clone().multiply(wm), lin(TYRE));
-    B.flat.push(HUB_G, M.clone().multiply(wm), lin([168, 172, 180]));
+    B.flat.push(HUB_G, M.clone().multiply(wm), lin([190, 194, 202]));
+    B.flat.push(CAP_G, M.clone().multiply(wm), lin([38, 40, 46]));
   }
-  // Lights: emissive quads, head pale / tail red.
+  // Lights: emissive quads, head pale / tail red — Phase 2 clusters:
+  // TWO lamp units per corner with a dark gap between them, so each
+  // corner reads as a cluster, not one smeared bar.
   const quadAt = (lx, ly, z, wHalf, hHalf, colLin) => {
     const px = car.x + c * lx - s * ly, py = car.y + s * lx + c * ly;
     const side = [-s * wHalf, c * wHalf];
@@ -1075,25 +1119,34 @@ function buildCar(gl, game, B, car) {
     B.basic.quad([px + side[0] + out[0], py + side[1] + out[1], z - hHalf], [px - side[0] + out[0], py - side[1] + out[1], z - hHalf],
       [px - side[0] + out[0], py - side[1] + out[1], z + hHalf], [px + side[0] + out[0], py + side[1] + out[1], z + hHalf], colLin);
   };
-  quadAt(-L / 2 - 0.4, W / 2 - 3.4, 5.6, 2.9, 1.4, lin([255, 52, 60]));
-  quadAt(-L / 2 - 0.4, -W / 2 + 3.4, 5.6, 2.9, 1.4, lin([255, 52, 60]));
-  quadAt(L / 2 + 0.4, W / 2 - 3.4, 5.8, 2.9, 1.4, lin([255, 243, 190]));
-  quadAt(L / 2 + 0.4, -W / 2 + 3.4, 5.8, 2.9, 1.4, lin([255, 243, 190]));
+  for (const sy of [1, -1]) {
+    quadAt(-L / 2 - 0.4, sy * (W / 2 - 2.3), 5.6, 1.55, 1.35, lin([255, 52, 60]));
+    quadAt(-L / 2 - 0.4, sy * (W / 2 - 5.6), 5.6, 1.35, 1.35, lin([226, 36, 46]));
+    quadAt(L / 2 + 0.4, sy * (W / 2 - 2.3), 5.8, 1.55, 1.35, lin([255, 243, 190]));
+    quadAt(L / 2 + 0.4, sy * (W / 2 - 5.6), 5.8, 1.35, 1.35, lin([240, 226, 168]));
+  }
   if (!car.dead) {
     const hg1 = LP(L / 2 + 0.4, W / 2 - 3.4, 5.8), hg2 = LP(L / 2 + 0.4, -W / 2 + 3.4, 5.8);
     addGlow(gl, hg1[0], hg1[1], 5.8, 5.5, lin([255, 243, 190]), 0.15);
     addGlow(gl, hg2[0], hg2[1], 5.8, 5.5, lin([255, 243, 190]), 0.15);
   }
-  // Rear LEONIDA plate (registration derived from the car's own id).
+  // Rear LEONIDA plate in a dark recess (registration derived from the
+  // car's own id): the recess box sits proud of the bumper, the plate
+  // face proud of the recess, so the plate reads as set INTO the car.
   {
     const id = car.id || 1;
     if (!gl.paintedPlates.has(id)) { paintPlateCell(gl.plateC, id); gl.paintedPlates.add(id); gl.plateTex.needsUpdate = true; }
     const uv = plateUV(id);
-    const plx = -L / 2 - 2.55, pw2 = 4.3, pz = 4.4, ph2 = 1.35;
+    const rec = LP(-L / 2 - 2.15, 0, 4.4);
+    box(B.flat, rec[0], rec[1], rec[2], 0.55, 5.3, 2.05, yaw, lin([17, 17, 21]));
+    const plx = -L / 2 - 2.78, pw2 = 4.3, pz = 4.4, ph2 = 1.35;
     B.plate.quad(LP(plx, -pw2, pz - ph2), LP(plx, pw2, pz - ph2), LP(plx, pw2, pz + ph2), LP(plx, -pw2, pz + ph2), WHITE, [uv.u0, uv.v0, uv.u1, uv.v1]);
   }
   if (car.isCop) {
-    part(UNIT_BOX, mat4(0, 5.4, 0, 0, L * 0.60, 6.8, W + 0.44), lin([236, 239, 243]));
+    // Per-unit shade variation (id hash): no two interceptors wear the
+    // exact same white — the Phase 1 row of identical boxes is gone.
+    const copShade = 0.90 + hash01((car.id || 1) * 3.7) * 0.10;
+    part(UNIT_BOX, mat4(0, 5.4, 0, 0, L * 0.60, 6.8, W + 0.44), lin([236 * copShade, 239 * copShade, 243 * copShade]));
     const flash = Math.sin((game.time || 0) * 10 + (car.sirenPhase || 0)) > 0;
     if (!car.dead) {
       const lb1 = LP(cabOff, 4.4, roofZ + 0.9), lb2 = LP(cabOff, -4.4, roofZ + 0.9);
@@ -1107,8 +1160,11 @@ function buildCar(gl, game, B, car) {
     const wing = LP(-L * 0.44, 0, roofZ - 0.6);
     box(B.flat, wing[0], wing[1], wing[2], 2.0, W / 2 - 0.8, 1.0, yaw, lin([24, 25, 30]));
     for (const sy of [6.4, -6.4]) { const st = LP(-L * 0.44, sy, roofZ - 3.4); box(B.flat, st[0], st[1], st[2], 1.3, 1.3, 2.4, yaw, lin([24, 25, 30])); }
-    quadAt(-L / 2 - 0.5, 0, 7.6, W / 2 - 1.6, 1.1, lin([226, 44, 54]));
-    if (!car.dead) { const tb = LP(-L / 2 - 0.5, 0, 7.6); addGlow(gl, tb[0], tb[1], 7.6, 11, lin([226, 44, 54]), 0.20); }
+    // Hero tail strip — Phase 2 toned down: a NARROW deep-red strip
+    // between the lamp clusters (was a full-width bright bar whose glow
+    // bloomed into a pink plank across the hero's rear).
+    quadAt(-L / 2 - 0.5, 0, 7.6, W / 2 - 4.6, 0.8, lin([168, 30, 40]));
+    if (!car.dead) { const tb = LP(-L / 2 - 0.5, 0, 7.6); addGlow(gl, tb[0], tb[1], 7.6, 8, lin([200, 36, 46]), 0.09); }
   }
   // Damage smoke: soft sprites climbing off the hood.
   if (!car.dead && car.hp < car.maxHp * 0.35) {
@@ -1134,11 +1190,19 @@ function buildVehicles(gl, game, B) {
 // ---------------------------------------------------------------- figures
 // ONE figure builder for player, crew and peds. Proportions per Rect's
 // 2026-11-20 anime reference (superseding the Polygon War big-head card):
-// tall and slim, long legs, wide shoulders, SMALL head (≈2 units of the
-// 15.4 total). Method follows the reference too: box-modelled torso/head,
-// mirror symmetry, smooth-shaded segmented limbs with extra joint volumes
-// at elbows/knees so bends read cleanly, hair as a SEPARATE spiky cap mesh,
-// eyes as small inset shapes on the face. Poses: walk / run (walkPhase),
+// tall and slim, wide shoulders, SMALL head (≈2 units of the 15.4 total).
+// Phase 2 re-proportion (panel defects 2/4): legs carry real thickness
+// (thigh r 1.22, shin r 0.98 — no more stilts), the aim stance is a compact
+// athletic brace (foot spread ≈12 units fore-aft, lateral ≤1.35 — inside
+// the 2.62 shoulder line), feet land ON the ground plane, and the hair is
+// a shaped spiky cap — two stacked slabs + seven chunky 4-sided spikes +
+// a forward fringe — whose silhouette separates from the head at chase
+// distance. Background peds get a contrast lift (shirt up, pants down in
+// value) so head/torso/leg separation survives to the back of the frame.
+// Method follows the reference too: box-modelled torso/head, mirror
+// symmetry, smooth-shaded segmented limbs with extra joint volumes at
+// elbows/knees so bends read cleanly, hair as a SEPARATE cap mesh, eyes
+// as small inset shapes on the face. Poses: walk / run (walkPhase),
 // stand, aim (two-handed long gun at shoulder height, OTS presentation).
 const HIP_Z = 8.6, SHO_Z = 13.1;
 function buildFigure(gl, game, B, o) {
@@ -1149,7 +1213,12 @@ function buildFigure(gl, game, B, o) {
   const f = [Math.cos(a), Math.sin(a)], s = [-Math.sin(a), Math.cos(a)];
   const P = (fu, sv, z) => [o.x + f[0] * fu + s[0] * sv, o.y + f[1] * fu + s[1] * sv, z];
   disc(B.alpha, o.x, o.y, 0.22, 6.2, [...lin([8, 8, 10]), 0.30]);
-  const shirt = lin(o.shirt), skin = lin(o.skin), pants = lin(o.pants), hair = lin(o.hair);
+  // Background peds (no tactical gear) get a value-contrast lift so the
+  // shirt reads against the pants and the street at chase distance.
+  const shirt = o.gear ? lin(o.shirt) : lin(o.shirt.map((v) => Math.min(255, v * 1.10 + 6)));
+  const skin = lin(o.skin);
+  const pants = o.gear ? lin(o.pants) : lin(o.pants.map((v) => v * 0.82));
+  const hair = lin(o.hair);
   if (o.dead) {
     box(B.flat, o.x, o.y, 1.6, 8.6, 2.6, 1.6, a, shirt);
     const hc = P(10.4, 0, 1.4);
@@ -1161,7 +1230,9 @@ function buildFigure(gl, game, B, o) {
   }
   const pose = o.pose, ph = o.phase || 0;
   const lean = pose === 'run' ? 2.4 : pose === 'aim' ? 1.5 : pose === 'walk' ? 0.7 : 0;
-  // Legs: thigh 4.4 + shin 4.2, slim, knee joint volume at the bend.
+  // Legs: thigh 4.4 + shin 4.2 with believable thickness, knee joint volume
+  // at the bend, hip attachment at ±1.05 and feet grounded at z 0.55 (the
+  // shoe box spans z 0–1.1, so the sole sits ON the ground plane).
   for (const sideSign of [1, -1]) {
     const hip = P(0, sideSign * 1.05, HIP_Z);
     let knee, foot;
@@ -1170,18 +1241,21 @@ function buildFigure(gl, game, B, o) {
       const sw = Math.sin(ph + (sideSign > 0 ? 0 : Math.PI)) * amp;
       const sw2 = sw - (pose === 'run' ? 0.55 : 0.40);
       knee = P(Math.sin(sw) * 4.4, sideSign * 1.05, HIP_Z - Math.cos(sw) * 4.4);
-      foot = P(Math.sin(sw) * 4.4 + Math.sin(sw2) * 4.2, sideSign * 1.15, Math.max(0.7, HIP_Z - Math.cos(sw) * 4.4 - Math.cos(sw2) * 4.2));
+      foot = P(Math.sin(sw) * 4.4 + Math.sin(sw2) * 4.2, sideSign * 1.12, Math.max(0.55, HIP_Z - Math.cos(sw) * 4.4 - Math.cos(sw2) * 4.2));
     } else if (pose === 'aim') {
-      if (sideSign > 0) { knee = P(4.4, 1.15, HIP_Z - 4.2); foot = P(9.2, 1.3, 0.7); }
-      else { knee = P(-3.0, -1.15, HIP_Z - 4.3); foot = P(-7.4, -1.35, 0.7); }
+      // Compact brace: front foot +6.4, back foot −5.6 (spread 12, was
+      // 16.6 — the split that read as splayed stilts), lateral inside the
+      // shoulder line, both soles flat on the ground.
+      if (sideSign > 0) { knee = P(3.4, 1.1, HIP_Z - 4.2); foot = P(6.4, 1.22, 0.55); }
+      else { knee = P(-2.6, -1.1, HIP_Z - 4.3); foot = P(-5.6, -1.22, 0.55); }
     } else {
-      knee = P(0.3, sideSign * 1.1, HIP_Z - 4.4);
-      foot = P(0.9, sideSign * 1.2, 0.7);
+      knee = P(0.3, sideSign * 1.08, HIP_Z - 4.4);
+      foot = P(0.6, sideSign * 1.14, 0.55);
     }
-    limb(B.flat, hip, knee, 1.02, 0.82, pants, 7);
-    ball(B.flat, knee[0], knee[1], knee[2], 0.86, pants);
-    limb(B.flat, knee, foot, 0.82, 0.58, pants, 7);
-    box(B.flat, foot[0] + f[0] * 0.9, foot[1] + f[1] * 0.9, 0.7, 1.9, 1.0, 0.7, a, lin([26, 22, 19])); // shoe
+    limb(B.flat, hip, knee, 1.22, 1.0, pants, 7);
+    ball(B.flat, knee[0], knee[1], knee[2], 1.02, pants);
+    limb(B.flat, knee, foot, 0.98, 0.72, pants, 7);
+    box(B.flat, foot[0] + f[0] * 0.9, foot[1] + f[1] * 0.9, 0.55, 1.95, 1.05, 0.55, a, lin([26, 22, 19])); // shoe
   }
   // Torso: box-modelled — slim pelvis box, wider chest box (shoulders),
   // a waist step between them; the pair leans with the pose.
@@ -1229,30 +1303,37 @@ function buildFigure(gl, game, B, o) {
     const ep = P(lean + 0.25 + 1.44, sx * 0.62, 14.62);
     box(B.flat, ep[0], ep[1], ep[2], 0.1, 0.3, 0.4, a, lin([30, 26, 30]));
   }
-  // Hair: SEPARATE spiky cap — a cap slab plus tapered spikes swept
-  // up/back/side, and side locks framing the face.
-  const capP = P(lean + 0.18, 0, 15.02);
-  box(B.flat, capP[0], capP[1], capP[2], 1.52, 1.44, 0.34, a, hair);
+  // Hair: SEPARATE shaped cap — two stacked slabs stepping in toward the
+  // crown (a silhouette, not one brick), a back panel, side locks, SEVEN
+  // chunky 4-sided spikes swept up/forward/back, and a two-point fringe
+  // over the forehead. Spike stock is thick (r 0.52 → 0.06) so the points
+  // survive the contact-sheet thumbnail instead of vanishing.
+  const capP = P(lean + 0.18, 0, 14.98);
+  box(B.flat, capP[0], capP[1], capP[2], 1.54, 1.46, 0.32, a, hair);
+  const cap2P = P(lean + 0.14, 0, 15.34);
+  box(B.flat, cap2P[0], cap2P[1], cap2P[2], 1.30, 1.24, 0.22, a, hair);
   const backP = P(lean + 0.25 - 1.44, 0, 14.7);
   box(B.flat, backP[0], backP[1], backP[2], 0.3, 1.42, 0.85, a, hair);
   for (const sx of [1, -1]) {
     const lk = P(lean + 0.3, sx * 1.42, 14.35);
     box(B.flat, lk[0], lk[1], lk[2], 1.05, 0.24, 0.8, a, hair);
   }
-  const spikeBase = [[0.7, 0, 15.22], [0.1, 0.75, 15.22], [0.1, -0.75, 15.22], [-0.6, 0.4, 15.22], [-0.6, -0.4, 15.22]];
-  const spikeTip = [[1.7, 0.1, 15.85], [0.7, 1.35, 15.7], [0.7, -1.35, 15.7], [-1.3, 0.7, 15.8], [-1.3, -0.7, 15.8]];
+  const spikeBase = [[0.75, 0, 15.3], [0.15, 0.8, 15.3], [0.15, -0.8, 15.3], [-0.55, 0.45, 15.3], [-0.55, -0.45, 15.3], [1.15, 0.55, 15.05], [1.15, -0.55, 15.05]];
+  const spikeTip = [[1.85, 0.1, 16.15], [0.75, 1.5, 15.95], [0.75, -1.5, 15.95], [-1.45, 0.75, 16.05], [-1.45, -0.75, 16.05], [2.05, 0.7, 15.35], [2.05, -0.7, 15.35]];
   for (let i = 0; i < spikeBase.length; i++) {
     const b0 = P(lean + 0.25 + spikeBase[i][0], spikeBase[i][1], spikeBase[i][2]);
     const b1 = P(lean + 0.25 + spikeTip[i][0], spikeTip[i][1], spikeTip[i][2]);
-    limb(B.flat, b0, b1, 0.34, 0.05, hair, 5);
+    limb(B.flat, b0, b1, 0.52, 0.06, hair, 4);
   }
   // Arms: upper 3.5 + forearm 3.3, slim, elbow joint volume at the bend.
   for (const sideSign of [1, -1]) {
     const sho = P(lean, sideSign * 2.62, SHO_Z - 0.2);
     let elbow, hand;
     if (pose === 'aim') {
+      // Both hands ON the gun: trigger hand at the stock (+4.4), support
+      // hand under the fore-end (+7.6) — the two-handed shouldered grip.
       if (sideSign > 0) { elbow = P(lean + 1.0, 2.1, SHO_Z - 1.9); hand = P(lean + 4.4, 0.55, SHO_Z - 0.2); }
-      else { elbow = P(lean + 5.4, -1.8, SHO_Z - 1.5); hand = P(lean + 10.8, 0.25, SHO_Z + 0.1); }
+      else { elbow = P(lean + 4.6, -1.8, SHO_Z - 1.5); hand = P(lean + 7.6, 0.25, SHO_Z + 0.1); }
     } else if (pose === 'walk' || pose === 'run') {
       const amp = pose === 'run' ? 0.78 : 0.44;
       const sw = Math.sin(ph + (sideSign > 0 ? Math.PI : 0)) * amp;
@@ -1268,17 +1349,19 @@ function buildFigure(gl, game, B, o) {
     limb(B.flat, elbow, hand, 0.62, 0.5, skin, 7);
     box(B.flat, hand[0], hand[1], hand[2], 0.8, 0.8, 0.8, a, skin);
     if (pose === 'aim' && sideSign > 0) {
-      // TWO-HANDED LONG GUN at shoulder height: stock at the shoulder,
-      // receiver forward along the facing at z ≈ SHO_Z + 0.35 (sight line
-      // near the cheek), barrel to ≈ +20 forward, magazine angled down.
+      // TWO-HANDED LONG GUN SHOULDERED (aim-reference spec): stock tucked
+      // at the right shoulder, receiver forward along the facing at
+      // z ≈ SHO_Z + 0.35 so the sight sits near cheek/eye level, barrel
+      // to ≈ +15 forward — rifle scale (≈1.7 m of gun reads as a cannon
+      // at OTS distance; the Phase 1 gun ran +20.6 and crossed the frame).
       const GUN = lin([37, 39, 45]), GUN_TIP = lin([52, 55, 63]);
       const stock = P(lean + 0.9, 0.5, SHO_Z + 0.2);
       box(B.flat, stock[0], stock[1], stock[2], 1.6, 0.52, 0.92, a, GUN);
-      limb(B.flat, P(lean + 2.4, 0.42, SHO_Z + 0.35), P(lean + 11.2, 0.3, SHO_Z + 0.35), 0.72, 0.6, GUN, 6);
-      limb(B.flat, P(lean + 11.2, 0.3, SHO_Z + 0.35), P(lean + 18.6, 0.28, SHO_Z + 0.4), 0.36, 0.3, GUN, 6);
-      limb(B.flat, P(lean + 18.6, 0.28, SHO_Z + 0.4), P(lean + 20.6, 0.28, SHO_Z + 0.42), 0.46, 0.4, GUN_TIP, 6);
-      limb(B.flat, P(lean + 6.6, 0.35, SHO_Z + 0.1), P(lean + 7.6, 0.35, SHO_Z - 2.1), 0.52, 0.42, GUN, 5);
-      const s1 = P(lean + 5.6, 0.32, SHO_Z + 1.25);
+      limb(B.flat, P(lean + 2.4, 0.42, SHO_Z + 0.35), P(lean + 8.6, 0.3, SHO_Z + 0.35), 0.72, 0.6, GUN, 6);
+      limb(B.flat, P(lean + 8.6, 0.3, SHO_Z + 0.35), P(lean + 13.8, 0.28, SHO_Z + 0.4), 0.36, 0.3, GUN, 6);
+      limb(B.flat, P(lean + 13.8, 0.28, SHO_Z + 0.4), P(lean + 15.2, 0.28, SHO_Z + 0.42), 0.46, 0.4, GUN_TIP, 6);
+      limb(B.flat, P(lean + 5.4, 0.35, SHO_Z + 0.1), P(lean + 6.3, 0.35, SHO_Z - 2.0), 0.52, 0.42, GUN, 5);
+      const s1 = P(lean + 4.6, 0.32, SHO_Z + 1.25);
       box(B.flat, s1[0], s1[1], s1[2], 0.85, 0.38, 0.42, a, GUN_TIP);
     }
   }
@@ -1300,7 +1383,7 @@ function buildFigures(gl, game, B) {
       x: cm.x, y: cm.y, angle: cm.angle, phase: cm.walkPhase || 0,
       pose: cm.pose || 'walk', dead: false,
       shirt: rgb(cm.color || '#e8c832'), skin: rgb('#d9b48f'), pants: [40, 38, 44],
-      hair: [30, 22, 16], isPlayer: false, gear: true,
+      hair: [56, 38, 22], isPlayer: false, gear: true,
     });
   }
   if (!game.player.inCar && !game.debugHidePlayer) {
@@ -1311,7 +1394,7 @@ function buildFigures(gl, game, B) {
       x: p.x, y: p.y, angle: p.angle, phase: p.walkPhase || 0,
       pose: aiming ? 'aim' : moving ? 'walk' : 'stand', dead: false,
       shirt: rgb(PALETTE.playerShirt), skin: rgb(PALETTE.playerSkin), pants: [46, 52, 64],
-      hair: [36, 26, 18], isPlayer: true, gear: true,
+      hair: [92, 60, 32], isPlayer: true, gear: true,
     });
   }
 }
@@ -1362,24 +1445,30 @@ function buildVegetation(gl, game, B) {
     const crown = p0;
     ball(B.flat, crown[0], crown[1], crown[2] + 0.8, 2.4, lin([84, 64, 36]));
     const seed = Math.floor(Math.abs(pm.x) * 3 + Math.abs(pm.y) * 7);
-    for (let i = 0; i < 8; i++) {
-      const la = (i / 8) * Math.PI * 2 + hash01(seed + i) * 0.45;
+    // Phase 2 fronds: BENT multi-plane ribbons — each frond is THREE
+    // tapering quads along a drooping spine (rise out of the crown, crest,
+    // then fall past horizontal to the tip), replacing the Phase 1 flat
+    // two-quad tents that read as green stars.
+    for (let i = 0; i < 9; i++) {
+      const la = (i / 9) * Math.PI * 2 + hash01(seed + i) * 0.45;
       const len = (26 + hash01(seed + i * 3) * 6) * s;
       const drop = (13 + hash01(seed + i * 7) * 5) * s;
       const dir = [Math.cos(la), Math.sin(la)], perp = [-dir[1], dir[0]];
-      const tip = [crown[0] + dir[0] * len, crown[1] + dir[1] * len, crown[2] + 1 - drop];
-      const mid = [crown[0] + dir[0] * len * 0.52, crown[1] + dir[1] * len * 0.52, crown[2] + 4.4 * s];
       const col = lin(i % 2 ? rgb(PALETTE.palmDark) : rgb(PALETTE.palmLight));
-      B.flat.quad(
-        [crown[0] + perp[0] * 2.6, crown[1] + perp[1] * 2.6, crown[2] + 0.6],
-        [mid[0] + perp[0] * 3.4, mid[1] + perp[1] * 3.4, mid[2]],
-        tip,
-        [crown[0], crown[1], crown[2] + 0.6], col);
-      B.flat.quad(
-        [crown[0], crown[1], crown[2] + 0.6],
-        tip,
-        [mid[0] - perp[0] * 3.4, mid[1] - perp[1] * 3.4, mid[2]],
-        [crown[0] - perp[0] * 2.6, crown[1] - perp[1] * 2.6, crown[2] + 0.6], col);
+      const spine = [
+        [crown[0], crown[1], crown[2] + 0.6, 2.7],
+        [crown[0] + dir[0] * len * 0.36, crown[1] + dir[1] * len * 0.36, crown[2] + 4.6 * s, 2.5],
+        [crown[0] + dir[0] * len * 0.70, crown[1] + dir[1] * len * 0.70, crown[2] + 2.6 * s, 1.6],
+        [crown[0] + dir[0] * len, crown[1] + dir[1] * len, crown[2] + 1 - drop, 0.25],
+      ];
+      for (let k = 0; k < 3; k++) {
+        const A = spine[k], Bp = spine[k + 1];
+        B.flat.quad(
+          [A[0] + perp[0] * A[3], A[1] + perp[1] * A[3], A[2]],
+          [Bp[0] + perp[0] * Bp[3], Bp[1] + perp[1] * Bp[3], Bp[2]],
+          [Bp[0] - perp[0] * Bp[3], Bp[1] - perp[1] * Bp[3], Bp[2]],
+          [A[0] - perp[0] * A[3], A[1] - perp[1] * A[3], A[2]], col);
+      }
     }
   }
   for (const l of game.city.lamps) {

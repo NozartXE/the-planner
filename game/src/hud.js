@@ -175,19 +175,25 @@ export function drawHud(ctx, game) {
   // pulse, no target highlight (free aim).
   if (game.screen === 'play' && !game.player.inCar
     && ((game.bullets && game.bullets.length > 0) || (game.lastShotAt && game.nowMs - game.lastShotAt < 700))) {
+    // Phase 2 sizing: ticks lengthened (15 → 21 px) and the white core
+    // thickened (2 → 3 px, halo 5 → 7) so the reticle stays findable at
+    // contact-sheet size (a 320 px thumb scales it to ~5 px ticks) —
+    // geometry otherwise EXACTLY the reference: two horizontal ticks,
+    // EMPTY centre gap, one tick below, no top tick, no dot, no circle,
+    // centre slightly right of screen centre on the OTS aim line.
     const cx = VIEW_W * 0.536, cy = VIEW_H * 0.5;
     const reticlePath = () => {
       ctx.beginPath();
-      ctx.moveTo(cx - 25, cy); ctx.lineTo(cx - 10, cy);
-      ctx.moveTo(cx + 10, cy); ctx.lineTo(cx + 25, cy);
-      ctx.moveTo(cx, cy + 10); ctx.lineTo(cx, cy + 23);
+      ctx.moveTo(cx - 30, cy); ctx.lineTo(cx - 9, cy);
+      ctx.moveTo(cx + 9, cy); ctx.lineTo(cx + 30, cy);
+      ctx.moveTo(cx, cy + 9); ctx.lineTo(cx, cy + 27);
     };
     // Dark halo pass first (same geometry, wider): a thin dark outline
     // around the white ticks keeps the aim point findable on any
     // background — the standard GTA reticle treatment.
-    ctx.strokeStyle = 'rgba(10,10,12,0.85)'; ctx.lineWidth = 5;
+    ctx.strokeStyle = 'rgba(10,10,12,0.85)'; ctx.lineWidth = 7;
     reticlePath(); ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,0.92)'; ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 3;
     reticlePath(); ctx.stroke();
   }
   if (game.screen === 'play') { drawDispatch(ctx, game); drawDialogue(ctx, game); }
@@ -481,6 +487,14 @@ export function drawPlanning(ctx, game) {
   const def = CHAIN[idx];
   const data = jobPlanData(idx);
   const st = planStats(idx, plan, game.missions.loop);
+  // Phase 2 panel management (panel defect 7): when a shot stages the
+  // board (game.boardStage, set by shots.js), ONE panel stays open — the
+  // briefing column on the left — and every other panel collapses to a
+  // queued bar carrying its header + a one-line summary of its live
+  // values. No content is removed: the full panels below still render
+  // in live play (boardStage unset), and the staged bars still print
+  // the real numbers/names. Total staged overlay ≈ 32% of the frame.
+  const staged = !!game.boardStage;
   ctx.save();
   ctx.textBaseline = 'top';
   // Top strip: what is being planned + the chain's five tabs.
@@ -532,6 +546,25 @@ export function drawPlanning(ctx, game) {
   });
   // Right column: the live plan stats.
   const rx = VIEW_W - 284, rw = 270;
+  let stars = '';
+  for (let i = 0; i < 5; i++) stars += i < st.heatStars ? '★' : '☆';
+  if (staged) {
+    // Collapsed queue: stats bar + map bar, each with its live summary.
+    panelSolid(ctx, rx, 66, rw, 58);
+    ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('PLAN STATS — LIVE ▸', rx + 14, 76);
+    ctx.fillStyle = PALETTE.hudText; ctx.font = '600 10.5px system-ui, sans-serif';
+    ctx.fillText('LOOT ' + formatMoney(st.loot) + ' · ALARM ' + st.alarm + 's · ESC ' + st.escape + 's', rx + 14, 94);
+    ctx.fillStyle = PALETTE.hudMuted;
+    ctx.fillText('CUT ' + st.totalCut + '% · FENCE ' + st.fencePct + '% · HEAT ', rx + 14, 109);
+    ctx.fillStyle = '#f2c14e'; ctx.font = '12px sans-serif';
+    ctx.fillText(stars, rx + 14 + ctx.measureText('CUT ' + st.totalCut + '% · FENCE ' + st.fencePct + '% · HEAT ').width + 2, 108);
+    panelSolid(ctx, rx, 136, rw, 40);
+    ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif';
+    ctx.fillText('DISTRICT MAP ▸', rx + 14, 146);
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10.5px system-ui, sans-serif';
+    ctx.fillText(def.pickup ? def.pickup.name.toUpperCase() + ' → ' + (def.deliver ? def.deliver.name.toUpperCase() : '') : 'TARGET ROUTE QUEUED', rx + 14, 160);
+  } else {
   panelSolid(ctx, rx, 66, rw, 296);
   y = 80;
   ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
@@ -554,26 +587,39 @@ export function drawPlanning(ctx, game) {
   ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left';
   ctx.fillText('HEAT FORECAST', rx + 14, y + 2);
   ctx.font = '16px sans-serif'; ctx.textAlign = 'right';
-  let stars = '';
-  for (let i = 0; i < 5; i++) stars += i < st.heatStars ? '★' : '☆';
   ctx.fillStyle = '#f2c14e'; ctx.fillText(stars, rx + rw - 14, y);
   // District map (VC-style cartography, our geography) under the stats.
   panelSolid(ctx, rx, 374, rw, 180);
   ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
   ctx.fillText('DISTRICT MAP — TARGET + ESCAPE ROUTE', rx + 14, 386);
   drawDistrictMap(ctx, game, rx + 12, 406, rw - 24, 136);
+  }
   // Arsenal strip: the mission weapon picked from the full 56-weapon table.
-  panelSolid(ctx, rx, 566, rw, 62);
+  panelSolid(ctx, rx, staged ? 188 : 566, rw, 62);
   const wdef = weaponById(plan.weaponId || 'venn-9mm');
+  const ay = staged ? 198 : 576;
   ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
-  ctx.fillText('ARSENAL — J / K · 56 WEAPONS', rx + 14, 576);
+  ctx.fillText('ARSENAL — J / K · 56 WEAPONS', rx + 14, ay);
   ctx.fillStyle = PALETTE.hudText; ctx.font = '700 13.5px system-ui, sans-serif';
-  ctx.fillText(wdef.name, rx + 14, 594);
+  ctx.fillText(wdef.name, rx + 14, ay + 18);
   ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10.5px system-ui, sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText('DMG ' + wdef.damage + ' · MAG ' + (plan.gear.includes('extmag') && wdef.cls !== 'EXP' && wdef.cls !== 'RL' ? Math.round(wdef.mag * 1.5) : wdef.mag), rx + rw - 14, 596);
+  ctx.fillText('DMG ' + wdef.damage + ' · MAG ' + (plan.gear.includes('extmag') && wdef.cls !== 'EXP' && wdef.cls !== 'RL' ? Math.round(wdef.mag * 1.5) : wdef.mag), rx + rw - 14, ay + 20);
   ctx.textAlign = 'left';
   // Bottom centre: crew and gear over their slots.
   const bx = 356, bw = 568;
+  if (staged) {
+    // Collapsed crew+gear bar: the hired names and packed gear, one line
+    // each — the full slot grids stay one keypress away in live play.
+    panelSolid(ctx, bx, 724, bw, 62);
+    ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('CREW — 1-6 · ' + plan.crew.length + '/3 ▸', bx + 14, 734);
+    ctx.fillStyle = PALETTE.hudText; ctx.font = '600 10.5px system-ui, sans-serif';
+    ctx.fillText(CREW_POOL.filter((c) => plan.crew.includes(c.id)).map((c) => c.name).join(' · ') + '  (+' + (CREW_POOL.length - plan.crew.length) + ' ON CALL)', bx + 150, 734);
+    ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif';
+    ctx.fillText('GEAR — F + SPACE · ' + plan.gear.length + '/3 ▸', bx + 14, 758);
+    ctx.fillStyle = PALETTE.hudText; ctx.font = '600 10.5px system-ui, sans-serif';
+    ctx.fillText(GEAR_POOL.filter((g) => plan.gear.includes(g.id)).map((g) => g.name).join(' · ') + '  (+' + (GEAR_POOL.length - plan.gear.length) + ' IN LOCKER)', bx + 190, 758);
+  } else {
   panelSolid(ctx, bx, 640, bw, 146);
   y = 652;
   ctx.textAlign = 'left'; ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif';
@@ -600,6 +646,7 @@ export function drawPlanning(ctx, game) {
     ctx.fillStyle = sel ? PALETTE.hudText : PALETTE.hudMuted; ctx.font = '600 9.5px system-ui, sans-serif';
     ctx.fillText(g.name, cxp, cyp + 1);
   });
+  }
   // Execute corner.
   panelSolid(ctx, VIEW_W - 284, 640, 270, 62);
   ctx.fillStyle = '#f2c14e'; ctx.font = '700 15px system-ui, sans-serif'; ctx.textAlign = 'left';
@@ -611,8 +658,9 @@ export function drawPlanning(ctx, game) {
   // The wheel as the board's inset (staged captures open it here): the full
   // 7-segment arsenal proof — counts 10/10/5/7/8/6/10, the plan's launcher
   // highlighted, hub stats — over the street corridor, clear of every panel,
-  // so the mission frame never has to spend itself on a menu again.
-  if (game.wheelOpen) drawWeaponWheel(ctx, game, 676, 338, 158);
+  // so the mission frame never has to spend itself on a menu again. Staged
+  // mode docks it smaller (R 118) as part of the ≤40% overlay budget.
+  if (game.wheelOpen) drawWeaponWheel(ctx, game, 676, 338, staged ? 118 : 158);
 }
 export function drawSummary(ctx, game) {
   const s = game.lastSummary || {
@@ -625,13 +673,16 @@ export function drawSummary(ctx, game) {
   ctx.fillStyle = 'rgba(30,12,10,0.30)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   const jobRows = (s.jobRows && s.jobRows.length) ? s.jobRows : [];
   const PH = jobRows.length ? 668 : 520;
-  const px = VIEW_W / 2 - 310, py = VIEW_H / 2 - PH / 2;
+  // Phase 2: the ledger panel narrows 620 → 548 so the dressed backdrop
+  // (city, water, bridge) breathes on both sides of the results frame.
+  const PW = 548;
+  const px = VIEW_W / 2 - PW / 2, py = VIEW_H / 2 - PH / 2;
   // Backing raised to near-opaque (final-fix): at 0.52 the backdrop hero
   // car's silhouette — dark body + red tail strip — ghosted through the
   // ledger's centre rows. 0.95 under the panel's own 0.66 leaves ~1% of
   // the backdrop, under the pixel-check threshold (verified in-browser).
-  ctx.fillStyle = 'rgba(14,6,6,0.95)'; ctx.beginPath(); ctx.roundRect(px, py, 620, PH, 8); ctx.fill();
-  panel(ctx, px, py, 620, PH);
+  ctx.fillStyle = 'rgba(14,6,6,0.95)'; ctx.beginPath(); ctx.roundRect(px, py, PW, PH, 8); ctx.fill();
+  panel(ctx, px, py, PW, PH);
   ctx.textBaseline = 'top';
   ctx.textAlign = 'center';
   ctx.fillStyle = '#f28bb4'; ctx.font = '700 11px system-ui, sans-serif';
@@ -672,7 +723,7 @@ export function drawSummary(ctx, game) {
       ctx.fillStyle = isNet ? PALETTE.hudText : PALETTE.hudMuted; ctx.font = '600 12px system-ui, sans-serif'; ctx.textAlign = 'left';
       ctx.fillText(row[0], px + 36, y);
       ctx.fillStyle = isNet ? PALETTE.money : PALETTE.hudText; ctx.font = '700 13px system-ui, sans-serif'; ctx.textAlign = 'right';
-      ctx.fillText(row[1], px + 620 - 36, y);
+      ctx.fillText(row[1], px + PW - 36, y);
     });
     statsY += 19 + lrows.length * 19 + 10;
   }
@@ -686,7 +737,7 @@ export function drawSummary(ctx, game) {
       ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 11.5px system-ui, sans-serif'; ctx.textAlign = 'left';
       ctx.fillText((i + 1) + '. ' + jr.title, px + 36, y);
       ctx.fillStyle = PALETTE.money; ctx.font = '700 12px system-ui, sans-serif'; ctx.textAlign = 'right';
-      ctx.fillText('+' + formatMoney(jr.pay), px + 620 - 36, y);
+      ctx.fillText('+' + formatMoney(jr.pay), px + PW - 36, y);
     });
     statsY += 19 + jobRows.length * 18 + 10;
   }
@@ -706,7 +757,7 @@ export function drawSummary(ctx, game) {
     ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 12px system-ui, sans-serif'; ctx.textAlign = 'left';
     ctx.fillText(row[0], px + 36, y + 3);
     ctx.fillStyle = PALETTE.hudText; ctx.font = '700 14px system-ui, sans-serif'; ctx.textAlign = 'right';
-    ctx.fillText(row[1], px + 620 - 36, y);
+    ctx.fillText(row[1], px + PW - 36, y);
   });
   ctx.textAlign = 'center';
   ctx.fillStyle = '#f2c14e'; ctx.font = '15px system-ui, sans-serif';

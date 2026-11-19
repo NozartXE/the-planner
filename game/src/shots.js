@@ -84,6 +84,10 @@ export function applyShot(game, name, step) {
     // plan's ARSENAL strip picks — so the mission frame is free to prove
     // combat instead of a menu. drawPlanning renders the inset.
     game.wheelOpen = true; game.wheelClass = 5; game.wheelIndex = 0;
+    // Phase 2 panel management: the board stages with ONE panel open
+    // (briefing) and the rest queued as collapsed bars — see hud.js
+    // drawPlanning's staged branch. Live play never sets this flag.
+    game.boardStage = 'briefing';
     game.planStatsCache = planStats(2, game.plan, 0);
     game.planTarget = { x: 986, y: 986 };
     game.planOrbitAngle = 0;
@@ -155,9 +159,9 @@ export function applyShot(game, name, step) {
     return true;
   }
   if (name === 'chase') {
-    // 5-star pursuit east along the Hotel Aurelia avenue (Old Town), frozen at the PIT
-    // contact moment: an interceptor runs in the north lane with its front quarter
-    // pressed into the hero's front-left quarter, sparks and smoke at the contact,
+    // 5-star pursuit east along the Gazette avenue, frozen at the PIT
+    // contact moment: an interceptor crosses the hero's front-north quarter
+    // at a mid-PIT angle, sparks and smoke at the contact,
     // skid arcs behind both cars, pursuit units in echelon and a roadblock ahead.
     // Jobs 1–2 are done ($1,350) and the current job is 3, "Front Page".
     // Displayed speed: round(225 * 0.62) = 140 km/h.
@@ -167,53 +171,72 @@ export function applyShot(game, name, step) {
     game.screen = 'play';
     run(150);
     game.screen = 'play';
-    // Hero frozen IN the intersection east of Gazette Plaza: the camera sits
-    // in open crossing tarmac, so no building corner hugs the lens (the old
-    // staging's camera stood beside a south-side plot and its face filled
-    // the frame's right third).
-    putPlayerInCar(game, game.traffic[0], 1456, 1477, 0, 225, { kind: 'coupe', color: '#7a4a3a', hp: 31, maxHp: 90 });
+    // Phase 2 restage: the hero runs MID-BLOCK EAST along the Gazette
+    // avenue — was frozen IN the intersection, where the road grammar
+    // has its designed gap (no markings, no median) and the formation
+    // read as a parked queue. From the avenue's west segment the red
+    // radio tower (park block, 1691,1691) clears the H95 roofline at
+    // the frame's right edge and the (2067,1316) cylinder tower stands
+    // ahead-right, closing the Phase 1 orange void. Mid-block, the
+    // double yellows, dashed lanes and planted median run THROUGH the
+    // action and the zebra waits at the intersection ahead. All
+    // formation placements are hero-relative via at(), so the whole
+    // hunt rotates with the heading.
+    putPlayerInCar(game, game.traffic[0], 1200, 1477, 0, 225, { kind: 'coupe', color: '#7a4a3a', hp: 31, maxHp: 90 });
+    game.traffic[0].steer = 0.30; // front wheels visibly cut — a swerve, not a park
     const hero = game.traffic[0];
     const rot = (a, x, y) => ({ x: x * Math.cos(a) - y * Math.sin(a), y: x * Math.sin(a) + y * Math.cos(a) });
     const at = (car, x, y) => { const r = rot(car.angle, x, y); return { x: car.x + r.x, y: car.y + r.y }; };
-    // Traffic on the road surface only: ONE distant westbound car stopped
-    // behind the roadblock (a civilian halted by the block — it sits above
-    // the roadblock pair in frame, clear of their silhouettes), and the
-    // other traffic car staged behind the camera, out of the hunt's read.
-    setCar(game.traffic[1], hero.x + 700, hero.y - 20, Math.PI, 0);
-    setCar(game.traffic[2], hero.x - 380, hero.y + 15, 0, 40);
+    // Traffic on the road surface only: ONE distant eastbound car stopped
+    // short of the roadblock (a civilian halted by the block — it sits
+    // beyond the roadblock pair in frame, clear of their silhouettes),
+    // and the other traffic car staged behind the camera, out of the read.
+    const civ = at(hero, 700, -8);
+    setCar(game.traffic[1], civ.x, civ.y, Math.PI, 0);
+    const behind = at(hero, -380, 15);
+    setCar(game.traffic[2], behind.x, behind.y, 0, 40);
     game.police.cops = [];
-    // Formation-true hunt, staged PROJECTION-FIRST (every placement was
-    // solved against the chase cam's own projection before being written
-    // here): EXACTLY five interceptors for the plan's forecast five stars.
-    // The hero is the largest vehicle, centre-low and clear of the pack.
-    // ONE interceptor runs near-parallel in the north lane with its front
-    // quarter pressed into the hero's front-left quarter — the PIT contact,
-    // sparked and smoked at the touch point. Two pursuit units follow in
-    // echelon in the centre/south lanes at mid-ground. The roadblock pair
-    // sits PERPENDICULAR across both lanes far ahead, silhouettes fully
-    // separated. No cop exceeds a quarter of the frame width; none clips.
-    const contact = at(hero, 15, -10);
-    const pitAngle = 0.08;
-    const pitPos = at(hero, 22, -19.5);
+    // Formation-true hunt: EXACTLY five interceptors for the plan's
+    // forecast five stars. The hero is the largest vehicle, centre-low,
+    // alone in its lane — the ONE unmistakable player car (rust coupe,
+    // plate LW 278, wheels cut in a swerve). The PIT unit crosses its
+    // front-north quarter at a mid-PIT angle, sparked and smoked at the
+    // touch point; two pursuit units echelon behind at varied gaps; the
+    // roadblock pair sits PERPENDICULAR across both lanes far ahead,
+    // silhouettes fully separated. No cop exceeds a quarter of the frame
+    // width; none clips.
+    // Phase 2 pursuit geometry (was a parallel queue): the PIT unit runs
+    // at a MID-PIT ANGLE (0.52 rad across the hero's front-north quarter,
+    // wheels cut back, contact damage smoking), and the two pursuit units
+    // echelon at VARIED gaps (124 / 96 — kept inside the sim's own
+    // tactical bands: ahead ≤130 and d ≥95, so assignTactics honestly
+    // labels them PURSUIT) and lateral offsets (−27 / +24), so the
+    // formation reads as a hunt at speed, not bumper-to-bumper.
+    const contact = at(hero, 16, -14);
+    const pitAngle = 0.52;
+    const pitPos = at(hero, 30, -30);
     const pit = addCop(game, pitPos.x, pitPos.y, pitAngle);
-    pit.speed = 150;
-    const pursuit1 = addCop(game, hero.x + 118, hero.y - 9, 0); pursuit1.speed = 150;
-    const pursuit2 = addCop(game, hero.x + 128, hero.y + 13, 0); pursuit2.speed = 150;
-    // Roadblock pair: across both lanes of the road ahead (the road spans
-    // hero-relative −67…+25), noses pointing opposite ways, a car's width
-    // of daylight between their inner ends.
-    const block1 = addCop(game, hero.x + 268, hero.y - 40, -Math.PI / 2); block1.speed = 0;
-    const block2 = addCop(game, hero.x + 276, hero.y + 2, Math.PI / 2); block2.speed = 0;
+    pit.speed = 150; pit.steer = -0.42; pit.hp = 44; // contact damage: smokes at the touch point
+    const pu1 = at(hero, 124, 14);
+    const pursuit1 = addCop(game, pu1.x, pu1.y, 0.06); pursuit1.speed = 150; pursuit1.steer = 0.14;
+    const pu2 = at(hero, 96, -37);
+    const pursuit2 = addCop(game, pu2.x, pu2.y, -0.05); pursuit2.speed = 150; pursuit2.steer = -0.10;
+    // Roadblock pair: across both lanes of the road ahead, noses pointing
+    // opposite ways, a car's width of daylight between their inner ends.
+    const bl1 = at(hero, 268, -42);
+    const block1 = addCop(game, bl1.x, bl1.y, Math.PI / 2); block1.speed = 0;
+    const bl2 = at(hero, 276, 8);
+    const block2 = addCop(game, bl2.x, bl2.y, -Math.PI / 2); block2.speed = 0;
     game.police.assignTactics(game.player);
     game.police.lastSeenX = hero.x; game.police.lastSeenY = hero.y;
-    // Peds clear of the roadway: two on the north sidewalk (y 1396, the
-    // strip north of the road's 1410 edge), three in the park block south
-    // of the road (y 1548+, on grass well clear of the 1502 road edge).
-    stagePed(game, 0, 1720, 1396, 0, 0.7, 0);
-    stagePed(game, 1, 1900, 1396, Math.PI, 2.4, 1);
-    stagePed(game, 2, 1620, 1560, Math.PI, 4.0, 2);
-    stagePed(game, 3, 1780, 1600, 0, 1.5, 3);
-    stagePed(game, 4, 1860, 1548, Math.PI, 5.3, 0);
+    // Peds clear of the roadway: three on the park-side south sidewalk
+    // (y 1512, between the road's 1502 edge and the park plots), two on
+    // the north sidewalk (y 1396).
+    stagePed(game, 0, 1500, 1396, 0, 0.7, 0);
+    stagePed(game, 1, 1750, 1396, Math.PI, 2.4, 1);
+    stagePed(game, 2, 1600, 1512, Math.PI, 4.0, 2);
+    stagePed(game, 3, 1850, 1512, 0, 1.5, 3);
+    stagePed(game, 4, 1400, 1396, Math.PI, 5.3, 0);
     game.money = 1350;
     game.radio.stationIdx = 1; game.radio.trackIdx = 0;
     // The plan from the board, executed: its forecast IS the wanted level
@@ -286,84 +309,97 @@ export function applyShot(game, name, step) {
     return true;
   }
   if (name === 'mission') {
-    // FINAL-FIX — composition choice (disclosed in the record): the three
-    // directives panels converged — the centred wheel (~30% of frame width)
-    // erased the pack's only proven combat and the tank read as an olive
-    // slab. The wheel's full proof MOVES TO THE BOARD FRAME (open inset
-    // there, RL/HAVOC selected, matching that frame's plan and ARSENAL
-    // strip); this frame keeps only the compact weapon readout (VENN 9MM
-    // 15/48, the plan's real weapon and count) and returns to the
-    // pre-directive combat staging, restaged at FORT SABLE and solved
-    // projection-first against the foot cam (52 back / 30 up):
-    // the player stands ON THE BASE APRON (690,2952 — site concrete, NOT
-    // the roadway) firing east over-shoulder at a struck, smoking sedan
-    // 88 units ahead; Dex, the plan's lead pick, aims beside him in his
-    // own colour; the roster's 2× ROADBLOCK is a perpendicular pair across
-    // the east road at mid-distance, exactly what assignTactics labels
-    // them; and the BASTION tank sits left mid-ground in three-quarter
-    // flank profile — tracks, turret and barrel silhouette unobstructed,
-    // its muzzle still smoking from its last round.
+    // PHASE 2 — the aim frame rebuilt to Rect's reference (single
+    // over-the-shoulder-RIGHT shooter) and RELOCATED from the Fort Sable
+    // apron to the Gazette Plaza streets — the job's own drop point —
+    // because the apron could never show the city's road grammar, towers
+    // or signage in the action frame. The wheel's full proof stays on
+    // the BOARD FRAME (open inset there, RL/HAVOC selected); this frame
+    // keeps only the compact weapon readout (VENN 9MM 15/48).
+    // Composition: the player stands on the east sidewalk of the
+    // north–south avenue south of the Gazette intersection, firing NNW
+    // over-shoulder at a struck, smoking sedan on the avenue ~120 units
+    // ahead. The OTS aim cam (26 back / 20 up, +24 gun-side lateral)
+    // puts him ALONE in the lower-left foreground — Dex is backgrounded
+    // to the west sidewalk in a stand pose, mid-ground and small. The
+    // avenue's double yellows, dashed lanes, planted median and the
+    // zebra at the intersection run through the frame; the cylinder
+    // glass tower at (846,846) closes the view beyond the target; FIVE
+    // interceptors (== the 5 wanted stars == the board's 5-star
+    // forecast, claim-aligned) cordon the intersection: a perpendicular
+    // roadblock pair across the avenue north of the crossing, one unit
+    // angled behind them, and two pursuit units angled in at the
+    // southern corners. The BASTION tank holds the avenue beyond the
+    // roadblock, barrel pointing back down the street toward the fight,
+    // muzzle still smoking.
     game.screen = 'play';
     run(150);
     game.screen = 'play';
     game.player.inCar = false; game.player.car = null;
-    game.player.x = 690; game.player.y = 2952;
+    game.player.x = 1040; game.player.y = 1158;
     // Aim line onto the target sedan: the tracers below fly this exact angle.
-    const a = Math.atan2(2956 - 2952, 778 - 690);
+    const a = Math.atan2(1048 - 1158, 992 - 1040);
     game.player.angle = a;
     game.player.walkPhase = 1.1; game.player.vx = 30; game.player.vy = 2; game.player.hp = 92;
-    // The tank, left mid-ground: hull angled SSE so the camera reads its
-    // flank + front quarter (tracks low, turret high), turret traversed
-    // east toward the fight, barrel clear of every other silhouette.
+    // The tank on the avenue beyond the roadblock, on the aim axis:
+    // hull angled so the camera reads front quarter + flank, turret
+    // traversed back toward the fight, barrel clear of every silhouette.
     const tank = game.specials[0];
-    tank.x = 858; tank.y = 2902; tank.angle = 1.22; tank.turret = 0.5; tank.speed = 0; tank.dead = false; tank.hp = 590;
+    tank.x = 986; tank.y = 800; tank.angle = 1.35; tank.turret = 1.57; tank.speed = 0; tank.dead = false; tank.hp = 590;
     // The second tank parks far behind the camera, out of this frame.
     game.specials[1].x = 430; game.specials[1].y = 3240; game.specials[1].angle = 0.8;
-    // Target sedan ahead on the apron's gate line, rear three-quarter to
-    // the camera, already struck (hp 18: the renderer climbs damage smoke
-    // off it) with a molotov fire patch burning at its nose.
-    setCar(game.traffic[1], 778, 2956, 0.5, 0, { kind: 'sedan', color: '#54604f', hp: 18, maxHp: 100 });
-    // Every other traffic car parks far south-east, out of the frame: the
-    // sim's deterministic wander otherwise leaves strays inside the base's
-    // sightlines (a coupe behind the tank, a sedan at the left edge).
+    // Target sedan ahead on the avenue, rear three-quarter to the camera,
+    // already struck (hp 18: the renderer climbs damage smoke off it)
+    // with a molotov fire patch burning at its nose.
+    setCar(game.traffic[1], 992, 1048, -1.45, 0, { kind: 'sedan', color: '#54604f', hp: 18, maxHp: 100 });
+    // Every other traffic car parks far south-east, out of the frame.
     for (let i = 0; i < game.traffic.length; i++) {
       if (i === 1) continue;
       setCar(game.traffic[i], 3300 + i * 10, 3300, 0, 0);
     }
     game.police.cops = [];
-    // The roster's 2× ROADBLOCK, staged as what it claims: a pair swung
-    // PERPENDICULAR (long axes north–south, side profiles to the camera)
-    // across the base's east road (x 940–1032), flanking the target's
-    // escape line at mid-distance. Exactly two units are fielded, so the
-    // dispatch header, its rows and the street all agree.
-    const cop1 = addCop(game, 986, 2935, -Math.PI / 2); cop1.speed = 0;
-    const cop2 = addCop(game, 986, 3010, Math.PI / 2); cop2.speed = 0;
+    // FIVE units for five stars: roadblock pair PERPENDICULAR across the
+    // avenue (long axes east–west) north of the intersection, a third
+    // unit angled behind them, two pursuit units angled in at the
+    // intersection's southern corners. Dispatch header, star count and
+    // street all agree — and all five are countable in-frame.
+    const cop1 = addCop(game, 962, 940, 0); cop1.speed = 0;
+    const cop2 = addCop(game, 1014, 940, Math.PI); cop2.speed = 0;
+    const cop3 = addCop(game, 982, 886, 0.35); cop3.speed = 0;
+    const cop4 = addCop(game, 1108, 1064, 2.75); cop4.speed = 120;
+    const cop5 = addCop(game, 872, 1078, -0.5); cop5.speed = 120;
     game.police.assignTactics(game.player);
     game.police.lastSeenX = game.player.x; game.police.lastSeenY = game.player.y;
-    // Peds on the apron only — none stands on a road surface; the two
-    // nearest the gunfire are caught mid-flee.
-    stagePed(game, 0, 812, 2988, 0.4, 2.2, 0);
-    stagePed(game, 1, 830, 2932, -2.2, 4.0, 1);
-    stagePed(game, 2, 648, 3024, Math.PI, 1.1, 2);
-    for (const idx of [0, 1]) { const ped = game.peds[idx]; ped.fleeUntil = game.nowMs + 60000; ped.fleeX = 778; ped.fleeY = 2956; }
+    // Peds on the sidewalks around the intersection — none on a road
+    // surface; the two nearest the gunfire are caught mid-flee. At this
+    // range they are the distance-legibility proof for the re-proportioned
+    // figures (head/torso/leg separation against the street).
+    stagePed(game, 0, 1052, 1080, 0.4, 2.2, 0);
+    stagePed(game, 1, 928, 1100, -2.2, 4.0, 1);
+    stagePed(game, 2, 1120, 1004, Math.PI, 1.1, 2);
+    stagePed(game, 3, 900, 986, 0.8, 3.1, 3);
+    for (const idx of [0, 1]) { const ped = game.peds[idx]; ped.fleeUntil = game.nowMs + 60000; ped.fleeX = 992; ped.fleeY = 1048; }
     game.money = 2250;
-    game.police.setStars(3, game.nowMs);
+    // Claim alignment (Phase 2 defect 8c): the board's forecast for this
+    // chain is 5 stars and the chase fields 5 — the mission fields the
+    // SAME 5 stars with 5 live units, not the Phase 1 three.
+    game.police.setStars(5, game.nowMs);
     setMission(game, 3, 'dropA', 96);
     game.lastShotAt = game.nowMs;
     // Job 4's plan, executed: the extended-mag gear built an 18-round
     // VENN 9MM and three rounds are already fired — the readout (15/48)
     // is the sim's own count, and with the wheel closed on this frame the
-    // readout and the fight agree. The grab is done; Dex works beside
-    // the player.
+    // readout and the fight agree. The grab is done; Dex covers from the
+    // west sidewalk, backgrounded — this frame has ONE shooter.
     game.plan = { ...STAGED_PLAN_J4, crew: [...STAGED_PLAN_J4.crew], gear: [...STAGED_PLAN_J4.gear] };
     game.planStatsCache = planStats(3, game.plan, 0);
     game.timeGrade = 'golden';
     game.weapon = weaponForPlan(game.plan);
     game.weapon.mag = 15;
     game.missions.lootGrabbed = game.planStatsCache.loot;
-    game.crewMate = { id: 'dex', name: 'DEX RUIZ', color: '#e8c832', x: 702, y: 2970, angle: a, walkPhase: 2.0, pose: 'aim' };
+    game.crewMate = { id: 'dex', name: 'DEX RUIZ', color: '#e8c832', x: 934, y: 1112, angle: -0.4, walkPhase: 0.6, pose: 'stand' };
     game.projectiles = [];
-    game.zones = [{ kind: 'fire', x: 804, y: 2974, r: 26, until: game.nowMs + 60000, dps: 26 }];
+    game.zones = [{ kind: 'fire', x: 996, y: 1030, r: 24, until: game.nowMs + 60000, dps: 26 }];
     // Tracers in flight along the aim line and the muzzle flash, frozen at
     // the capture tick (the pre-directive frame's proven combat read).
     game.bullets = [26, 50, 70].map((d) => ({
@@ -371,17 +407,17 @@ export function applyShot(game, name, step) {
     }));
     // Hit feedback: muzzle flash at the gun, impact sparks + flash on the
     // struck sedan's flank, damage smoke climbing off it, and the tank's
-    // muzzle smoke at its barrel tip (turret traversed to 0.5).
+    // muzzle smoke at its barrel tip (turret traversed to 3.6).
     const mx = game.player.x + Math.cos(a) * 16, my = game.player.y + Math.sin(a) * 16;
     game.fx.particles = [
       { x: mx, y: my, vx: 0, vy: 0, life: 0.07, maxLife: 0.07, color: '#ffd76a', size: 5.5, drag: 0 },
-      { x: 762, y: 2950, vx: 0, vy: 0, life: 0.4, maxLife: 0.4, color: '#f2c14e', size: 3.4, drag: 0 },
-      { x: 768, y: 2946, vx: 0, vy: 0, life: 0.32, maxLife: 0.32, color: '#ffd76a', size: 2.8, drag: 0 },
-      { x: 760, y: 2954, vx: 0, vy: 0, life: 0.45, maxLife: 0.45, color: '#fff3c4', size: 4.2, drag: 0 },
-      { x: 772, y: 2946, vx: 0, vy: 0, life: 1.0, maxLife: 1.0, color: 'rgba(120,120,125,0.6)', size: 7, drag: 0 },
-      { x: 784, y: 2938, vx: 0, vy: 0, life: 0.9, maxLife: 0.9, color: 'rgba(120,120,125,0.5)', size: 5.5, drag: 0 },
-      { x: 887, y: 2916, vx: 0, vy: 0, life: 0.8, maxLife: 1.0, color: 'rgba(120,120,125,0.55)', size: 6.5, drag: 0 },
-      { x: 893, y: 2919, vx: 0, vy: 0, life: 0.62, maxLife: 1.0, color: 'rgba(120,120,125,0.5)', size: 8, drag: 0 },
+      { x: 975, y: 1042, vx: 0, vy: 0, life: 0.4, maxLife: 0.4, color: '#f2c14e', size: 3.4, drag: 0 },
+      { x: 981, y: 1038, vx: 0, vy: 0, life: 0.32, maxLife: 0.32, color: '#ffd76a', size: 2.8, drag: 0 },
+      { x: 973, y: 1046, vx: 0, vy: 0, life: 0.45, maxLife: 0.45, color: '#fff3c4', size: 4.2, drag: 0 },
+      { x: 985, y: 1038, vx: 0, vy: 0, life: 1.0, maxLife: 1.0, color: 'rgba(120,120,125,0.6)', size: 7, drag: 0 },
+      { x: 997, y: 1030, vx: 0, vy: 0, life: 0.9, maxLife: 0.9, color: 'rgba(120,120,125,0.5)', size: 5.5, drag: 0 },
+      { x: 986, y: 834, vx: 0, vy: 0, life: 0.8, maxLife: 1.0, color: 'rgba(120,120,125,0.55)', size: 6.5, drag: 0 },
+      { x: 992, y: 837, vx: 0, vy: 0, life: 0.62, maxLife: 1.0, color: 'rgba(120,120,125,0.5)', size: 8, drag: 0 },
     ];
     // The wheel is CLOSED on this frame — its proof lives on the board.
     game.wheelOpen = false; game.wheelClass = 5; game.wheelIndex = 0;
@@ -406,10 +442,19 @@ export function applyShot(game, name, step) {
     game.police.setStars(0, game.nowMs);
     game.police.cops = [];
     const parked = addCop(game, 3693, 2396, -Math.PI / 2); parked.speed = 0;
+    // Phase 2 backdrop dressing: a civilian car parked north on the drive
+    // beside the interceptor, and promenade life on BOTH side strips the
+    // narrowed ledger panel now exposes — peds east on the sand-side
+    // promenade, west on the sidewalk, so the victory frame's edges read
+    // as a lived-in waterfront (city left, water + bridge right).
+    setCar(game.traffic[6], 3714, 2460, -Math.PI / 2, 0, { kind: 'sedan', color: '#7a8a99' });
+    setCar(game.traffic[7], 3693, 2210, Math.PI / 2, 0, { kind: 'hatch', color: '#a8835a' });
     stagePed(game, 0, 3655, 2580, -Math.PI / 2, 1.2, 1);
     stagePed(game, 1, 3782, 2560, Math.PI, 3.8, 2);
     stagePed(game, 2, 3500, 2620, 0, 5.6, 0);
     stagePed(game, 3, 3662, 2480, Math.PI / 2, 2.0, 3);
+    stagePed(game, 4, 3796, 2860, Math.PI, 4.4, 1);
+    stagePed(game, 5, 3650, 2920, -Math.PI / 2, 0.8, 2);
     game.money = 5450;
     game.totalEarned = 5200;
     game.missionsCompleted = 5;
