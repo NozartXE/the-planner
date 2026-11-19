@@ -9,7 +9,34 @@ export class Police {
     this.cops = [];
     this.lastCrimeAt = -99999;
     this.lastSeenAt = -99999;
+    this.lastSeenX = 0;
+    this.lastSeenY = 0;
     this.decaying = false;
+  }
+  // Tactical state per unit, derived from the cop's REAL position and role
+  // relative to the player: close alongside contact range reads PIT, a unit
+  // positioned ahead of the player's heading reads ROADBLOCK, everything else
+  // in the hunt reads PURSUIT. There is no air unit in this sim, so no AIR
+  // state is ever assigned.
+  assignTactics(player) {
+    const fh = player.inCar && player.car ? player.car.angle : player.angle;
+    for (const cop of this.cops) {
+      if (cop.dead) { cop.tactical = 'PURSUIT'; continue; }
+      const d = dist(cop.x, cop.y, player.x, player.y);
+      const ahead = (cop.x - player.x) * Math.cos(fh) + (cop.y - player.y) * Math.sin(fh);
+      if (d < 95) cop.tactical = 'PIT';
+      else if (ahead > 130 && d < 560) cop.tactical = 'ROADBLOCK';
+      else cop.tactical = 'PURSUIT';
+    }
+  }
+  // IN SIGHT while any live unit is close enough to see the player (the same
+  // 400-unit sighting radius the decay logic uses); SEARCHING while wanted
+  // but unseen. Returns '' when not wanted.
+  wantedState(player) {
+    if (this.stars <= 0) return '';
+    let nearest = Infinity;
+    for (const c of this.cops) if (!c.dead) nearest = Math.min(nearest, dist(c.x, c.y, player.x, player.y));
+    return nearest < 400 ? 'IN SIGHT' : 'SEARCHING';
   }
   crime(level, now, game) {
     const before = this.stars;
@@ -34,7 +61,8 @@ export class Police {
     // Decay: no crime recently and no cop close means the heat cools, one star at a time.
     let nearest = Infinity;
     for (const c of this.cops) nearest = Math.min(nearest, dist(c.x, c.y, player.x, player.y));
-    if (nearest < 400) this.lastSeenAt = now;
+    if (nearest < 400) { this.lastSeenAt = now; this.lastSeenX = player.x; this.lastSeenY = player.y; }
+    this.assignTactics(player);
     this.decaying = this.stars > 0 && now - this.lastCrimeAt > WANTED_DECAY_MS && now - this.lastSeenAt > 2600;
     if (this.decaying && now - (this._lastDecayAt || 0) > 2800) {
       this._lastDecayAt = now;

@@ -1,17 +1,17 @@
 // cars.js — the car factory (civilian types and the police interceptor) and the top-down car renderer.
 import { CAR_LENGTH, CAR_WIDTH } from './config.js';
 export const CIV_TYPES = [
-  { kind: 'sedan', colors: ['#7a8a96', '#a8765e', '#71806a', '#86749a', '#a8895a'], maxSpeed: 205, accel: 210, hp: 100 },
-  { kind: 'hatch', colors: ['#8a929c', '#a8896a', '#74927f', '#96819f'], maxSpeed: 180, accel: 195, hp: 85 },
-  { kind: 'coupe', colors: ['#a06a52', '#5f7d94', '#8a8f62', '#7d6a94'], maxSpeed: 245, accel: 250, hp: 90 },
-  { kind: 'van', colors: ['#7d7a72', '#8a7a64', '#6d7d88'], maxSpeed: 160, accel: 170, hp: 130 },
-  { kind: 'armored', colors: ['#3f444c', '#494540'], maxSpeed: 215, accel: 200, hp: 220 },
+  { kind: 'sedan', name: 'VANTARO SEDAN', colors: ['#7a8a96', '#a8765e', '#71806a', '#86749a', '#a8895a'], maxSpeed: 205, accel: 210, hp: 100 },
+  { kind: 'hatch', name: 'SOLIS HATCH', colors: ['#8a929c', '#a8896a', '#74927f', '#96819f'], maxSpeed: 180, accel: 195, hp: 85 },
+  { kind: 'coupe', name: 'VELOZ COMET', colors: ['#a06a52', '#5f7d94', '#8a8f62', '#7d6a94'], maxSpeed: 245, accel: 250, hp: 90 },
+  { kind: 'van', name: 'PALMA HAULER', colors: ['#7d7a72', '#8a7a64', '#6d7d88'], maxSpeed: 160, accel: 170, hp: 130 },
+  { kind: 'armored', name: 'AEGIS ARMORED', colors: ['#3f444c', '#494540'], maxSpeed: 215, accel: 200, hp: 220 },
 ];
 let nextCarId = 1;
 export function makeCar(rng, typeIdx, x, y, angle) {
   const t = CIV_TYPES[typeIdx % CIV_TYPES.length];
   return {
-    id: nextCarId++, kind: t.kind, isCop: false, isArmored: typeIdx === 4,
+    id: nextCarId++, kind: t.kind, name: t.name, isCop: false, isArmored: typeIdx === 4,
     x, y, angle: angle || 0, speed: 0, steer: 0,
     color: rng ? rng.pick(t.colors) : t.colors[0],
     maxSpeed: t.maxSpeed, accel: t.accel, hp: t.hp, maxHp: t.hp,
@@ -20,8 +20,9 @@ export function makeCar(rng, typeIdx, x, y, angle) {
   };
 }
 export function makeCopCar(x, y, angle) {
+  const id = nextCarId++;
   return {
-    id: nextCarId++, kind: 'interceptor', isCop: true, isArmored: false,
+    id, kind: 'interceptor', name: 'ACPD INTERCEPTOR', callsign: 'UNIT-' + id, tactical: 'PURSUIT', isCop: true, isArmored: false,
     x, y, angle: angle || 0, speed: 0, steer: 0, color: '#d8d8dc',
     maxSpeed: 268, accel: 265, hp: 150, maxHp: 150, len: CAR_LENGTH + 2, wid: CAR_WIDTH,
     occupied: true, dead: false, sirenPhase: (x % 6),

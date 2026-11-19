@@ -75,16 +75,24 @@ export function applyShot(game, name, step) {
     game.screen = 'title';
     run(150);
     game.screen = 'title';
-    putPlayerInCar(game, game.traffic[0], 3796, 1380, -Math.PI / 2, 55, { kind: 'coupe', color: '#b8523f' });
-    setCar(game.traffic[1], 3770, 1050, -Math.PI / 2, 0);
-    setCar(game.traffic[2], 3693, 2050, Math.PI / 2, 65);
-    setCar(game.traffic[3], 3388, 965, 0, 60);
+    // Re-staged ON Ocean Drive itself at the park block (bx 7, by 5 — the same
+    // verified stretch the results shot uses): the hero drives the road, deco
+    // facades and park trees to the west, sand, water and boats to the east,
+    // traffic in both lanes and peds on both sidewalks in one lived-in frame.
+    // Hero at the park's south edge: the camera (84 behind, in the open
+    // block south of the park) looks down the whole clear park stretch —
+    // trees sit 250+ units ahead at mid-ground size instead of filling the
+    // foreground, and deco facades close the vanishing point.
+    putPlayerInCar(game, game.traffic[0], 3714, 2791, -Math.PI / 2, 55, { kind: 'coupe', color: '#b8523f' });
+    setCar(game.traffic[1], 3693, 2400, Math.PI / 2, 40);
+    setCar(game.traffic[2], 3714, 2330, -Math.PI / 2, 50);
+    setCar(game.traffic[3], 3693, 2050, Math.PI / 2, 0);
     setCar(game.traffic[4], 3222, 1007, 0, 80);
-    stagePed(game, 0, 3778, 1330, -Math.PI / 2, 1.1, 0);
-    stagePed(game, 1, 3812, 1200, Math.PI, 3.4, 1);
-    stagePed(game, 2, 3776, 1240, -Math.PI / 2, 5.2, 2);
-    stagePed(game, 3, 3652, 1290, Math.PI / 2, 2.2, 3);
-    stagePed(game, 4, 3806, 1080, -Math.PI / 2, 4.1, 1);
+    stagePed(game, 0, 3660, 2650, -Math.PI / 2, 1.1, 0);
+    stagePed(game, 1, 3786, 2600, Math.PI, 3.4, 1);
+    stagePed(game, 2, 3662, 2500, -Math.PI / 2, 5.2, 2);
+    stagePed(game, 3, 3792, 2450, Math.PI / 2, 2.2, 3);
+    stagePed(game, 4, 3658, 2720, -Math.PI / 2, 4.1, 1);
     game.police.cops = [];
     game.police.setStars(0, game.nowMs);
     game.bullets = []; game.fx.particles = []; game.toasts = [];
@@ -103,42 +111,47 @@ export function applyShot(game, name, step) {
     game.screen = 'play';
     run(150);
     game.screen = 'play';
-    putPlayerInCar(game, game.traffic[0], 1100, 1477, 0.10, 225, { kind: 'coupe', color: '#7a4a3a', hp: 31, maxHp: 90 });
+    // Hero frozen IN the intersection east of Gazette Plaza: the camera sits
+    // in open crossing tarmac, so no building corner hugs the lens (the old
+    // staging's camera stood beside a south-side plot and its face filled
+    // the frame's right third).
+    putPlayerInCar(game, game.traffic[0], 1456, 1477, 0.10, 225, { kind: 'coupe', color: '#7a4a3a', hp: 31, maxHp: 90 });
     const hero = game.traffic[0];
     const rot = (a, x, y) => ({ x: x * Math.cos(a) - y * Math.sin(a), y: x * Math.sin(a) + y * Math.cos(a) });
     const at = (car, x, y) => { const r = rot(car.angle, x, y); return { x: car.x + r.x, y: car.y + r.y }; };
-    // Traffic: one car swerving ahead-right (kept clear of the converging cop),
-    // one braking further ahead at an angle.
-    setCar(game.traffic[1], hero.x + 330, hero.y + 82, 0.5, 0);
-    setCar(game.traffic[2], hero.x + 430, hero.y, 0.30, 40);
+    // Traffic on the road surface only: one braking in the south lane ahead,
+    // one further ahead in the north lane.
+    setCar(game.traffic[1], hero.x + 240, hero.y + 24, 0.5, 0);
+    setCar(game.traffic[2], hero.x + 430, hero.y - 30, 0.30, 40);
     game.police.cops = [];
-    // PIT cop ALONGSIDE the hero on the north side, nose swung into the hero's
-    // rear-left quarter: at nearly the hero's own depth from the chase cam it reads
-    // at the hero's scale, left of it, instead of looming between camera and hero
-    // (the first 3D capture's failure: a rear-quarter cop sits ~30 units closer to
-    // the lens and its light bar fills the foreground).
-    const contact = at(hero, -13, -13);
-    const pitAngle = 0.38;
-    const pitPos = at(hero, -4, -28);
+    // Re-staged hunt: EXACTLY five interceptors for five stars, ALL fully in
+    // frame at mid-ground ahead of / beside the hero — none behind the camera
+    // (the old trailing pair sat at the lens and one clipped into a red
+    // polygon over the HUD), none nearer than the hero, so the hero stays
+    // the largest vehicle in its own chase.
+    const contact = at(hero, 32, -22);
+    const pitAngle = 0.30;
+    const pitPos = at(hero, 55, -34);
     const pit = addCop(game, pitPos.x, pitPos.y, pitAngle);
     pit.speed = 150;
-    // Second cop cutting in ahead-left (north side).
-    const cutter = addCop(game, hero.x + 300, hero.y - 38, -0.38); cutter.speed = 150;
-    // Third cop converging ahead-right (south side), siren lit — the pursuit is
-    // visible ahead of the hero as well as beside it.
-    const wing = addCop(game, hero.x + 170, hero.y + 58, -0.30); wing.speed = 150;
-    // Fourth cop converging far ahead-left; two more trail behind (minimap evidence).
-    const far = addCop(game, hero.x + 520, hero.y - 55, -0.18); far.speed = 150;
-    for (const [dx, dy, a] of [[-200, -6, 0.04], [-330, 10, -0.05]]) {
-      const c = addCop(game, hero.x + dx, hero.y + dy, a); c.speed = 150;
-    }
-    stagePed(game, 0, 1150, 1406, 0, 0.7, 0);
-    stagePed(game, 1, 1330, 1406, Math.PI, 2.4, 1);
-    stagePed(game, 2, 1560, 1406, 0, 4.0, 2);
-    stagePed(game, 3, 1210, 1506, Math.PI, 1.5, 3);
-    stagePed(game, 4, 1480, 1506, 0, 5.3, 0);
-    stagePed(game, 5, 1700, 1506, Math.PI, 3.1, 1);
+    // Pursuit north ahead (inside the 130-unit ROADBLOCK threshold, so the
+    // roster's PURSUIT row is the sim's real assignment), cutter south lane.
+    const wing = addCop(game, hero.x + 120, hero.y - 42, -0.30); wing.speed = 150;
+    const cutter = addCop(game, hero.x + 215, hero.y + 20, -0.38); cutter.speed = 150;
+    // Roadblock pair far ahead, angled across the avenue.
+    const block1 = addCop(game, hero.x + 335, hero.y - 12, -0.18); block1.speed = 150;
+    const block2 = addCop(game, hero.x + 435, hero.y + 18, -0.10); block2.speed = 150;
+    game.police.assignTactics(game.player);
+    game.police.lastSeenX = hero.x; game.police.lastSeenY = hero.y;
+    // Peds on the sidewalks only (clear of the road surface both sides).
+    stagePed(game, 0, 1600, 1396, 0, 0.7, 0);
+    stagePed(game, 1, 1750, 1396, Math.PI, 2.4, 1);
+    stagePed(game, 2, 1500, 1396, 0, 4.0, 2);
+    stagePed(game, 3, 1650, 1516, Math.PI, 1.5, 3);
+    stagePed(game, 4, 1850, 1516, 0, 5.3, 0);
+    stagePed(game, 5, 1700, 1516, Math.PI, 3.1, 1);
     game.money = 1350;
+    game.radio.stationIdx = 1; game.radio.trackIdx = 0;
     game.police.setStars(5, game.nowMs);
     setMission(game, 2, 'pickup', 78);
     game.player.hp = 100;
@@ -195,23 +208,29 @@ export function applyShot(game, name, step) {
     game.screen = 'play';
     game.player.inCar = false; game.player.car = null;
     game.player.x = 2396; game.player.y = 1006;
-    game.player.angle = Math.atan2(992 - 1006, 2510 - 2396);
+    // Closer mid-shot re-stage: the target sedan is 74 units ahead (was 114),
+    // so the gun, muzzle, tracers and the struck car all read in one frame
+    // and the empty road foreground shrinks to the player's own street slice.
+    game.player.angle = Math.atan2(1000 - 1006, 2470 - 2396);
     game.player.walkPhase = 1.1; game.player.vx = 30; game.player.vy = -4; game.player.hp = 88;
     const a = game.player.angle;
-    setCar(game.traffic[1], 2510, 992, -0.35, 0, { kind: 'sedan', color: '#54604f', hp: 22, maxHp: 100 });
-    setCar(game.traffic[2], 2680, 965, Math.PI, 0);
-    setCar(game.traffic[3], 2790, 1007, 0, 55);
+    setCar(game.traffic[1], 2470, 1000, -0.35, 0, { kind: 'sedan', color: '#54604f', hp: 22, maxHp: 100 });
+    setCar(game.traffic[2], 2585, 965, Math.PI, 0);
+    setCar(game.traffic[3], 2670, 1007, 0, 55);
     game.police.cops = [];
-    const cop1 = addCop(game, 2700, 1075, -2.7); cop1.speed = 40;
-    const cop2 = addCop(game, 2900, 960, Math.PI); cop2.speed = 0;
-    stagePed(game, 0, 2560, 1015, 0.3, 2.2, 0);
-    stagePed(game, 1, 2540, 1085, 1.2, 4.4, 0);
-    stagePed(game, 2, 2620, 1045, -2.4, 0.4, 0);
-    stagePed(game, 3, 2480, 920, -1.2, 1.9, 1);
-    stagePed(game, 4, 2470, 1095, 2.8, 3.6, 2);
-    stagePed(game, 5, 2660, 930, -Math.PI / 2, 5.1, 3);
+    const cop1 = addCop(game, 2610, 1075, -2.7); cop1.speed = 40;
+    const cop2 = addCop(game, 2760, 960, Math.PI); cop2.speed = 0;
+    game.police.assignTactics(game.player);
+    game.police.lastSeenX = game.player.x; game.police.lastSeenY = game.player.y;
+    // Peds on sidewalks only; ONE figure crossing at the crosswalk.
+    stagePed(game, 0, 2480, 922, 0.3, 2.2, 0);
+    stagePed(game, 1, 2560, 925, 1.2, 4.4, 0);
+    stagePed(game, 2, 2500, 1048, -2.4, 0.4, 0);
+    stagePed(game, 3, 2338, 960, -1.2, 1.9, 1);
+    stagePed(game, 4, 2462, 1050, 2.8, 3.6, 2);
+    stagePed(game, 5, 2660, 928, -Math.PI / 2, 5.1, 3);
     stagePed(game, 6, 2720, 1090, Math.PI, 0.8, 1);
-    stagePed(game, 7, 2580, 1120, 2.2, 2.9, 0);
+    stagePed(game, 7, 2448, 1018, 0, 2.9, 0);
     // The three peds nearest the gunfire are caught mid-flee (run pose in the renderer).
     for (const idx of [0, 1, 2]) {
       const ped = game.peds[idx];
@@ -221,17 +240,23 @@ export function applyShot(game, name, step) {
     game.police.setStars(3, game.nowMs);
     setMission(game, 3, 'dropA', 96);
     game.lastShotAt = game.nowMs;
+    // Three rounds already fired from the 12-round magazine — the weapon
+    // readout (9 / 48) is the sim's own count, not a caption.
+    game.weapon.mag = 9; game.weapon.reserve = 48;
     // Tracers in flight along the aim line and the muzzle flash, frozen at the capture tick.
     const mx = game.player.x + Math.cos(a) * 16, my = game.player.y + Math.sin(a) * 16;
-    game.bullets = [34, 76, 118].map((d) => ({
+    game.bullets = [26, 50, 70].map((d) => ({
       x: game.player.x + Math.cos(a) * d, y: game.player.y + Math.sin(a) * d, angle: a, life: 0.5,
     }));
+    // Hit feedback on the struck sedan: impact sparks + a bright flash at its
+    // flank, damage smoke (soft sprites) climbing off it.
     game.fx.particles = [
       { x: mx, y: my, vx: 0, vy: 0, life: 0.07, maxLife: 0.07, color: '#ffd76a', size: 5.5, drag: 0 },
-      { x: 2490, y: 995, vx: 0, vy: 0, life: 0.4, maxLife: 0.4, color: '#f2c14e', size: 3.2, drag: 0 },
-      { x: 2500, y: 990, vx: 0, vy: 0, life: 0.32, maxLife: 0.32, color: '#ffd76a', size: 2.6, drag: 0 },
-      { x: 2505, y: 985, vx: 0, vy: 0, life: 1.0, maxLife: 1.0, color: 'rgba(120,120,125,0.6)', size: 7, drag: 0 },
-      { x: 2515, y: 978, vx: 0, vy: 0, life: 0.9, maxLife: 0.9, color: 'rgba(120,120,125,0.5)', size: 5.5, drag: 0 },
+      { x: 2452, y: 998, vx: 0, vy: 0, life: 0.4, maxLife: 0.4, color: '#f2c14e', size: 3.4, drag: 0 },
+      { x: 2458, y: 994, vx: 0, vy: 0, life: 0.32, maxLife: 0.32, color: '#ffd76a', size: 2.8, drag: 0 },
+      { x: 2450, y: 1002, vx: 0, vy: 0, life: 0.45, maxLife: 0.45, color: '#fff3c4', size: 4.2, drag: 0 },
+      { x: 2462, y: 990, vx: 0, vy: 0, life: 1.0, maxLife: 1.0, color: 'rgba(120,120,125,0.6)', size: 7, drag: 0 },
+      { x: 2472, y: 982, vx: 0, vy: 0, life: 0.9, maxLife: 0.9, color: 'rgba(120,120,125,0.5)', size: 5.5, drag: 0 },
     ];
     game.toasts = [];
     finish(game);
@@ -267,6 +292,13 @@ export function applyShot(game, name, step) {
     game.bestEscapeMs = 41000;
     game.carsStolen = 7;
     game.timesWasted = 1;
+    // The chain's real per-job payouts (400+700+900+1,200+2,000 = $5,200),
+    // shown as the results breakdown.
+    game.jobEarnings = [
+      { title: 'First Run', pay: 400 }, { title: 'Borrowed Wheels', pay: 700 },
+      { title: 'Front Page', pay: 900 }, { title: 'Two Drops', pay: 1200 },
+      { title: 'Heavy Metal', pay: 2000 },
+    ];
     game.missions.index = 0; game.missions.loop = 1;
     game.missions.active = false; game.missions.stage = 'idle';
     game.missions.briefUntil = 0; game.missions.lastBrief = '';

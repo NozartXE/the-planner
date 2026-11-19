@@ -375,14 +375,31 @@ function drawBuilding(game, b) {
       addQuad(mk(face.from + 4, H - 21), mk(face.to - 4, H - 21), mk(face.to - 4, H - 17.5), mk(face.from + 4, H - 17.5), [159, 201, 184], { light: 1.0 });
     }
     if (b.neon) {
-      addQuad(mk(face.from + 5, H - 12), mk(face.to - 5, H - 12), mk(face.to - 5, H - 5), mk(face.from + 5, H - 5), rgb(b.neonColor), { light: 1.35 });
+      // Dimmed under 1.0 light: at 1.35 the pastel neon colours clamped to
+      // pure-white rectangles — the "blank sign" defect in a second costume.
+      addQuad(mk(face.from + 5, H - 12), mk(face.to - 5, H - 12), mk(face.to - 5, H - 5), mk(face.from + 5, H - 5), rgb(b.neonColor).map((v) => v * 0.85), { light: 1.02 });
     }
-    // Shopfront: framed glass bays at ground level, warm-lit.
+    // Shopfront: dressed bays at ground level — warm timber frame (never a
+    // black slab), mullioned glass, and a named sign plate above each bay:
+    // a coloured plate with dark letter-ticks, flavour inside the world.
     if (distC < 760) {
+      const SIGN_COLS = [[196, 84, 74], [62, 118, 128], [206, 150, 62], [104, 138, 96], [150, 92, 128], [72, 96, 150]];
       for (let a0 = face.from + 8; a0 < face.to - 16; a0 += 30) {
-        const litBay = hash01(bid * 83 + Math.floor(a0 / 30) * 19 + (face.axis === 'x' ? 400 : 0)) < 0.8;
-        addQuad(mk(a0, 1.6, -0.2), mk(a0 + 21, 1.6, -0.2), mk(a0 + 21, 11), mk(a0, 11, -0.2), [26, 27, 33], { light: 0.9 });
-        addQuad(mk(a0 + 1.6, 3), mk(a0 + 19.4, 3), mk(a0 + 19.4, 9.8), mk(a0 + 1.6, 9.8), litBay ? [216, 158, 100] : [54, 66, 82], { light: litBay ? 1.0 : 0.95 });
+        const bayIdx = Math.floor(a0 / 30);
+        const litBay = hash01(bid * 83 + bayIdx * 19 + (face.axis === 'x' ? 400 : 0)) < 0.8;
+        addQuad(mk(a0, 1.6, -0.2), mk(a0 + 21, 1.6, -0.2), mk(a0 + 21, 11), mk(a0, 11, -0.2), [88, 66, 50], { light: 0.95 });
+        addQuad(mk(a0 + 1.6, 3), mk(a0 + 19.4, 3), mk(a0 + 19.4, 9.8), mk(a0 + 1.6, 9.8), litBay ? [216, 158, 100] : [96, 116, 134], { light: litBay ? 0.98 : 0.95 });
+        // Mullions: two vertical bars break the glass into dressed panes.
+        for (const mx of [a0 + 7.4, a0 + 13.2]) addQuad(mk(mx, 3, -0.35), mk(mx + 1.1, 3, -0.35), mk(mx + 1.1, 9.8, -0.35), mk(mx, 9.8, -0.35), [70, 54, 42], { light: 0.95 });
+        // Sign plate + letter ticks (deterministic per bay).
+        const signC = SIGN_COLS[Math.abs(bid + bayIdx * 3 + (face.axis === 'x' ? 2 : 0)) % SIGN_COLS.length];
+        addQuad(mk(a0 + 0.8, 11.6, -0.3), mk(a0 + 20.2, 11.6, -0.3), mk(a0 + 20.2, 15.6, -0.3), mk(a0 + 0.8, 15.6, -0.3), signC, { light: 1.02 });
+        const ticks = 4 + Math.floor(hash01(bid * 31 + bayIdx * 57) * 4);
+        for (let ti = 0; ti < ticks; ti++) {
+          const tx = a0 + 2.6 + ti * 2.3;
+          if (tx > a0 + 18.4) break;
+          addQuad(mk(tx, 12.7, -0.45), mk(tx + 1.3, 12.7, -0.45), mk(tx + 1.3, 14.6, -0.45), mk(tx, 14.6, -0.45), [38, 30, 26], { light: 1.0 });
+        }
       }
     }
     // Windows: framed, inset quads in a strict rhythm; rows every ~24 units.
@@ -395,9 +412,12 @@ function drawBuilding(game, b) {
         for (let z0 = 17; z0 < H - 18; z0 += rowH) {
           const wh = hash01(bid * 131 + Math.floor(z0 / rowH) * 17 + colSeed * 7 + (face.axis === 'x' ? 900 : 0));
           const litWin = wh > wth;
-          const wc = litWin ? winCol : [92, 108, 128];
+          // Lit windows are capped warm — never a pure-white quad: the colour
+          // is pre-dimmed and the light multiplier stays under 1, so even the
+          // brightest pane keeps its amber tint at grazing angles.
+          const wc = litWin ? winCol.map((v) => v * 0.82) : [92, 108, 128];
           addQuad(mk(a0, z0, -0.2), mk(a0 + colW * 0.6, z0, -0.2), mk(a0 + colW * 0.6, z0 + rowH * 0.56, -0.2), mk(a0, z0 + rowH * 0.56, -0.2), frameC, { light: 0.95 });
-          addQuad(mk(a0 + colW * 0.07, z0 + rowH * 0.07), mk(a0 + colW * 0.53, z0 + rowH * 0.07), mk(a0 + colW * 0.53, z0 + rowH * 0.49), mk(a0 + colW * 0.07, z0 + rowH * 0.49), wc, { light: litWin ? 1.18 : 1.0 });
+          addQuad(mk(a0 + colW * 0.07, z0 + rowH * 0.07), mk(a0 + colW * 0.53, z0 + rowH * 0.07), mk(a0 + colW * 0.53, z0 + rowH * 0.49), mk(a0 + colW * 0.07, z0 + rowH * 0.49), wc, { light: litWin ? 0.96 : 1.0 });
         }
       }
     }
@@ -408,6 +428,10 @@ function drawBuilding(game, b) {
 function drawCar3D(car, game) {
   const dx = car.x - F.cam[0], dy = car.y - F.cam[1];
   if (dx * dx + dy * dy > 1080 * 1080) return;
+  // Near-plane guard: a car at or behind the lens near-plane clips into huge
+  // frame-filling polygons (the red artifact that intruded over the HUD in
+  // the first 3D chase capture). Cars there are behind the viewer anyway.
+  if (toCam([car.x, car.y, 6])[2] < 16) return;
   const isHero = car === F.heroCar;
   const cat = isHero ? 'car' : undefined;
   const opts = cat ? { cat } : {};
@@ -489,12 +513,14 @@ function drawCar3D(car, game) {
     }
     quadAt(-L / 2 - 0.5, 0, 7.6, W / 2 - 1.6, 1.5, [255, 40, 56], 1.6);
   }
-  // Damage smoke: soft grey puffs (lathed spheres — an octahedron's diamond
-  // silhouette reads as debris, a sphere reads as smoke) climbing off the hood.
+  // Damage smoke: collected as SOFT SPRITES (radial-gradient discs drawn
+  // after the painter pass) — polygon puffs read as grey blobs/render errors.
   if (!car.dead && car.hp < car.maxHp * 0.35) {
     const hx = car.x + c * L * 0.26, hy = car.y + s * L * 0.26;
-    addSphere(hx, hy, 13.5 + Math.sin(F.time * 3 + car.x) * 1.2, 3.2, [105, 105, 112], { alpha: 0.28, light: 1 });
-    addSphere(hx + 3, hy - 2, 17, 4.4, [112, 112, 120], { alpha: 0.19, light: 1 });
+    const grey = [148, 146, 150];
+    F.softSprites.push({ x: hx, y: hy, z: 14.5, r: 7.5, a: 0.34, col: grey });
+    F.softSprites.push({ x: hx + 3, y: hy - 2, z: 19, r: 10.5, a: 0.24, col: grey });
+    F.softSprites.push({ x: hx + 5, y: hy - 3, z: 24, r: 13.5, a: 0.15, col: grey });
   }
 }
 
@@ -519,16 +545,9 @@ function drawFigure3D(o) {
     addBox(hc[0], hc[1], hc[2], 1.6, 1.6, 1.6, a, o.skin, opts);
     return;
   }
-  if (o.isPlayer) {
-    // Identity ring in the shirt colour (ground marker — deliberately NOT tagged
-    // 'fig': it is not part of the figure's body mass).
-    const seg = 14, ringC = rgb(PALETTE.playerShirt);
-    for (let i = 0; i < seg; i++) {
-      const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1) / seg) * Math.PI * 2;
-      addQuad([o.x + Math.cos(a0) * 11, o.y + Math.sin(a0) * 11, 0.65], [o.x + Math.cos(a1) * 11, o.y + Math.sin(a1) * 11, 0.65],
-        [o.x + Math.cos(a1) * 13, o.y + Math.sin(a1) * 13, 0.65], [o.x + Math.cos(a0) * 13, o.y + Math.sin(a0) * 13, 0.65], ringC, { alpha: 0.45, light: 1.1 });
-    }
-  }
+  // (No ground identity ring in 3D: at chase-cam distance an 11–13-unit ring
+  // projects as a huge arc across the foreground. The player is the centred
+  // figure in the shirt colour — identity needs no marker here.)
   const pose = o.pose, ph = o.phase || 0;
   const hipZ = 7.2, shoZ = 11.8;
   const lean = pose === 'run' ? 2.6 : pose === 'aim' ? 1.6 : pose === 'walk' ? 0.8 : 0;
@@ -587,8 +606,14 @@ function drawFigure3D(o) {
     addTaperedLimb(elbow, hand, 1.75, 1.35, 1.75, 1.35, o.skin, sideHint, opts);
     addBox(hand[0], hand[1], hand[2], 0.85, 0.85, 0.85, a, o.skin, opts);
     if (pose === 'aim' && sideSign > 0) {
-      const g1 = P(lean + 16.4, 0.4, shoZ - 1.3);
-      addTaperedLimb(hand, g1, 1.9, 1.5, 2.6, 2.2, [24, 26, 32], sideHint, opts); // pistol
+      // The pistol: a long dark barrel + grip block, long enough to read at
+      // mid-shot range, with a lighter muzzle tip catching the sunset.
+      const g1 = P(lean + 18.6, 0.4, shoZ - 1.3);
+      addTaperedLimb(hand, g1, 2.1, 1.6, 2.8, 2.3, [22, 24, 30], sideHint, opts);
+      const g2 = P(lean + 20.6, 0.4, shoZ - 1.15);
+      addTaperedLimb(g1, g2, 1.5, 1.3, 2.1, 1.9, [88, 92, 102], sideHint, opts);
+      const grip = P(lean + 12.2, 0.7, shoZ - 3.4);
+      addTaperedLimb(hand, grip, 1.8, 1.5, 2.2, 1.9, [22, 24, 30], sideHint, opts);
     }
   }
 }
@@ -598,9 +623,19 @@ function drawPalm(pm) {
   const dx = pm.x - F.cam[0], dy = pm.y - F.cam[1];
   if (dx * dx + dy * dy > 760 * 760) return;
   if (dx * dx + dy * dy < 95 * 95) return; // a trunk at the lens fills the frame
-  const s = pm.s || 1;
+  const s = (pm.s || 1) * 0.72; // rescaled: canopy now spans ≈ one storey, not two
   const leanX = (pm.lean || 0) * 1.35;
   const H = 30 * s;
+  // Fronds stay out of the words and panels: on the title screen a crown that
+  // projects into the wordmark band is culled, and on the summary screen any
+  // crown over the results panel is culled.
+  if (F.screen === 'title' || F.screen === 'summary') {
+    const crownP = projectPoint(pm.x + leanX * 2.2, pm.y, H + 2);
+    if (crownP) {
+      if (F.screen === 'title' && crownP.y > 150 && crownP.y < 360 && crownP.x > 240 && crownP.x < 1040) return;
+      if (F.screen === 'summary' && crownP.y > 40 && crownP.y < 760 && crownP.x > -280 && crownP.x < 1150) return;
+    }
+  }
   addShadow(pm.x, pm.y, 3.5, 3.5, 0, 16, 0.22);
   // Curved trunk: four stacked tapered segments leaning with the palm.
   let p0 = [pm.x, pm.y, 0];
@@ -619,7 +654,7 @@ function drawPalm(pm) {
   const crownCamZ = toCam([crown[0], crown[1], crown[2]])[2];
   for (let i = 0; i < 8; i++) {
     const la = (i / 8) * Math.PI * 2 + hash01(seed + i) * 0.45;
-    const len = (30 + hash01(seed + i * 3) * 7) * s;
+    const len = (26 + hash01(seed + i * 3) * 6) * s;
     const drop = (13 + hash01(seed + i * 7) * 5) * s;
     const dir = [Math.cos(la), Math.sin(la)], perp = [-dir[1], dir[0]];
     const tip = [crown[0] + dir[0] * len, crown[1] + dir[1] * len, crown[2] + 1 - drop];
@@ -627,11 +662,11 @@ function drawPalm(pm) {
     const mid = [crown[0] + dir[0] * len * 0.52, crown[1] + dir[1] * len * 0.52, crown[2] + 4.4 * s];
     const col = i % 2 ? rgb(PALETTE.palmDark) : rgb(PALETTE.palmLight);
     addPoly([
-      [crown[0] + perp[0] * 3.6, crown[1] + perp[1] * 3.6, crown[2] + 0.6],
-      [mid[0] + perp[0] * 4.8, mid[1] + perp[1] * 4.8, mid[2]],
+      [crown[0] + perp[0] * 2.6, crown[1] + perp[1] * 2.6, crown[2] + 0.6],
+      [mid[0] + perp[0] * 3.4, mid[1] + perp[1] * 3.4, mid[2]],
       tip,
-      [mid[0] - perp[0] * 4.8, mid[1] - perp[1] * 4.8, mid[2]],
-      [crown[0] - perp[0] * 3.6, crown[1] - perp[1] * 3.6, crown[2] + 0.6],
+      [mid[0] - perp[0] * 3.4, mid[1] - perp[1] * 3.4, mid[2]],
+      [crown[0] - perp[0] * 2.6, crown[1] - perp[1] * 2.6, crown[2] + 0.6],
     ], col, { double: true });
     // Centre rib: a narrow darker plane along the frond's spine, so the leaf
     // reads as a folded frond with dimension instead of a flat paper triangle.
@@ -659,7 +694,9 @@ function drawLamp(l) {
   if (dx * dx + dy * dy > 700 * 700) return;
   if (dx * dx + dy * dy < 80 * 80) return;
   addLimb([l.x, l.y, 0], [l.x, l.y, 25], 1.6, 1.6, [34, 36, 42], [0, 0, 1]);
-  addBox(l.x, l.y, 26, 2.8, 2.8, 1.9, 0, [255, 226, 160], { light: 1.5 });
+  // Warm but capped: at light 1.5 the head clamped to a floating white
+  // rectangle — the same pure-white defect as the old window quads.
+  addBox(l.x, l.y, 26, 2.4, 2.4, 1.7, 0, [238, 198, 138], { light: 1.12 });
   addDisc(l.x, l.y, 0.37, 12, [255, 180, 96], { alpha: 0.05, light: 1 });
 }
 function drawBoat(bt) {
@@ -673,9 +710,10 @@ function drawBoat(bt) {
 
 // ---------------------------------------------------------------- particles
 function drawParticles(game) {
-  // Particles are small SPHERICAL puffs (blobs), never flat ground-plane discs:
-  // a horizontal disc near the camera projects as a huge floating ellipse — the
-  // first 3D capture's muzzle flash read as a yellow shelf over the player's back.
+  // ALL particles render as soft radial sprites after the painter pass —
+  // polygon blobs (octahedron diamonds) read as rendering errors, worst at
+  // close range where a 2-unit blob projects tens of pixels wide. Smoke
+  // rises and expands; sparks/muzzle stay small, bright and short.
   for (const p of game.fx.particles || []) {
     const dx = p.x - F.cam[0], dy = p.y - F.cam[1];
     if (dx * dx + dy * dy > 700 * 700) continue;
@@ -683,9 +721,11 @@ function drawParticles(game) {
     const col = parseColor(p.color, [255, 215, 106]);
     const isSmoke = p.color && p.color.indexOf('120,120,125') !== -1;
     if (isSmoke) {
-      addSphere(p.x, p.y, 9 + (1 - ratio) * 9, Math.min(4.2, p.size * 0.55) * (0.7 + ratio * 0.4), col, { alpha: 0.27, light: 1.05 });
+      const baseR = Math.min(11, p.size * 1.5) * (1.25 - ratio * 0.45);
+      F.softSprites.push({ x: p.x, y: p.y, z: 8 + (1 - ratio) * 7, r: baseR, a: 0.30, col: [148, 146, 150] });
+      F.softSprites.push({ x: p.x + 2.5, y: p.y - 1.5, z: 12 + (1 - ratio) * 8, r: baseR * 1.35, a: 0.19, col: [148, 146, 150] });
     } else {
-      addBlob(p.x, p.y, 10.5, Math.min(2.4, p.size * 0.42), col, { alpha: 0.92, light: 1.3 });
+      F.softSprites.push({ x: p.x, y: p.y, z: 10.5, r: Math.min(1.7, p.size * 0.34), a: 0.88, col });
     }
   }
 }
@@ -699,8 +739,8 @@ export function renderView3D(ctx, game) {
   const yaw = anchor.angle || 0;
   // Camera: low chase cam behind the hero, smoothed in live play, snapped exactly
   // when the state is frozen (screenshot staging) so captures are deterministic.
-  const back = isDrive ? 84 : 72;
-  const camH = isDrive ? 30 : 26;
+  const back = isDrive ? 84 : 64;
+  const camH = isDrive ? 30 : 24;
   const fh = [Math.cos(yaw), Math.sin(yaw)];
   const wantX = anchor.x - fh[0] * back, wantY = anchor.y - fh[1] * back;
   let camX = wantX, camY = wantY;
@@ -728,6 +768,8 @@ export function renderView3D(ctx, game) {
   F.idMode = !!game.idRender;
   F.heroCar = isDrive ? p.car : (game.shotHeroCar || null);
   F.time = game.time || 0;
+  F.screen = game.screen || 'play';
+  F.softSprites = []; // smoke rendered as soft radial sprites after the painter pass
 
   // Sky: sunset gradient (plum top → rose → orange-pink horizon) + low western sun.
   if (F.idMode) {
@@ -812,6 +854,22 @@ export function renderView3D(ctx, game) {
   F.faces = [];
 
   if (!F.idMode) {
+    // Soft smoke sprites: radial gradients projected over the painted world,
+    // far puffs first. No hard polygon edge anywhere, so smoke reads as smoke.
+    const sprites = (F.softSprites || []).slice();
+    for (const sp of sprites) sp.proj = projectPoint(sp.x, sp.y, sp.z);
+    sprites.filter((sp) => sp.proj).sort((a, b) => b.proj.dist - a.proj.dist);
+    for (const sp of sprites) {
+      if (!sp.proj) continue;
+      const R = Math.max(4, (sp.r / sp.proj.dist) * FOCAL);
+      const c = sp.col || [148, 146, 150];
+      const g = ctx.createRadialGradient(sp.proj.x, sp.proj.y, R * 0.1, sp.proj.x, sp.proj.y, R);
+      g.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},${sp.a})`);
+      g.addColorStop(0.55, `rgba(${c[0]},${c[1]},${c[2]},${sp.a * 0.55})`);
+      g.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(sp.proj.x - R, sp.proj.y - R, R * 2, R * 2);
+    }
     // Bullet tracers + muzzle glow, projected over the painted world.
     if (game.bullets && game.bullets.length) {
       ctx.save();

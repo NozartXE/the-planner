@@ -1,5 +1,5 @@
 // input.js — keyboard state: a held set plus a pressed-this-frame edge set, with game keys kept from scrolling the page.
-const GAME_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyP', 'KeyH', 'ShiftLeft', 'ShiftRight', 'Enter']);
+const GAME_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyP', 'KeyH', 'KeyR', 'ShiftLeft', 'ShiftRight', 'Enter']);
 export class Input {
   constructor(target) {
     this.down = new Set();

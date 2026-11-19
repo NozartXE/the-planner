@@ -45,6 +45,30 @@ export class Missions {
     if (this.stage === 'deliver' && def.drops) return { x: def.drops[0].x, y: def.drops[0].y, color: 'deliver', label: def.drops[0].name };
     return null;
   }
+  // Ordered phase list for the current job definition, so the HUD's stage
+  // pips count real stages of the chain the sim actually walks.
+  phases() {
+    const def = this.current();
+    if (def.stealMarked) return ['stealMarked', 'deliver'];
+    if (def.requiresCar) return ['steal', 'deliver'];
+    if (def.drops) return ['pickup', 'dropA', 'dropB'];
+    if (def.pickup) return ['pickup', 'deliver'];
+    return ['deliver'];
+  }
+  phaseInfo() {
+    const ph = this.phases();
+    const idx = Math.max(0, ph.indexOf(this.stage));
+    return { index: this.active ? idx + 1 : 0, total: ph.length };
+  }
+  nextText() {
+    if (!this.active) return '';
+    const m = this.marker();
+    if (this.stage === 'pickup') return 'Reach ' + this.current().pickup.name;
+    if (this.stage === 'steal') return 'Steal a car, then reach ' + this.current().deliver.name;
+    if (this.stage === 'stealMarked') return 'Steal the marked armored sedan';
+    if (m) return 'Reach ' + m.label;
+    return this.current().title;
+  }
   headline() {
     if (!this.active) return '';
     const def = this.current();

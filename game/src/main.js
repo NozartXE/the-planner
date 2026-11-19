@@ -12,8 +12,16 @@ import { Police } from './police.js';
 import { Fx } from './fx.js';
 import { makeCar } from './cars.js';
 import { makeCamera, updateCamera, renderGame } from './render.js';
+import { projectPoint } from './view3d.js';
 import { drawHud, drawTitle, drawWasted, drawPause, drawSummary } from './hud.js';
 import { applyShot } from './shots.js';
+import { Radio } from './radio.js';
+
+// The one weapon the player carries: a real magazine/reserve the shooting
+// code decrements and reloads from, so the HUD readout is the sim's truth.
+export function makeWeapon() {
+  return { name: 'VENN 9MM', magSize: 12, mag: 12, reserve: 48 };
+}
 
 const statusEl = typeof document !== 'undefined' ? document.getElementById('status') : null;
 function showError(msg) {
@@ -40,6 +48,7 @@ export function createGame() {
     carsStolen: saveData.carsStolen || 0,
     chainEarned: 0, jobsThisChain: 0, lastSummary: null, _heatStart: 0, _chainJustDone: false,
     traffic: [], peds: [], bullets: [], toasts: [],
+    weapon: makeWeapon(), radio: new Radio(), jobEarnings: [],
     police: new Police(), missions: new Missions(), fx: new Fx(rng),
     camera: makeCamera(), input: new Input(),
     screen: 'title', help: false,
@@ -60,6 +69,7 @@ export function createGame() {
       chains: game.chainsFinished, bestEscapeMs: game.bestEscapeMs,
       carsStolen: game.carsStolen, timesWasted: game.timesWasted,
       nextPayBonus: Math.round(game.missions.loop * 25),
+      jobRows: game.jobEarnings.slice(-5),
     };
     game.screen = 'summary';
   };
@@ -124,13 +134,14 @@ function missionCtx(game) {
       game.missionsCompleted += 1;
       game.jobsThisChain += 1;
       game.chainEarned += pay || 0;
+      game.jobEarnings.push({ title: def.title, pay: pay || 0 });
       game.persist();
       // missions.js calls onChainDone BEFORE onMissionComplete for the final job,
       // so the summary is shown here, once the last job's pay is counted.
       if (game._chainJustDone) {
         game._chainJustDone = false;
         game.showSummary();
-        game.chainEarned = 0; game.jobsThisChain = 0;
+        game.chainEarned = 0; game.jobsThisChain = 0; game.jobEarnings = [];
         game.persist();
       }
     },
@@ -177,10 +188,17 @@ function updatePlayerOnFoot(game, dt) {
   p.vx = vx; p.vy = vy;
   const fixed = collideCircleBuildings(game.city, p.x + vx * dt, p.y + vy * dt, 8);
   p.x = fixed.x; p.y = fixed.y;
-  // Shooting.
+  // Shooting: spends the weapon's magazine; an empty mag reloads from the
+  // reserve (and with no reserve left, the trigger simply clicks dry).
   p.shootCd -= dt;
-  if (game.input.isDown('Space') && p.shootCd <= 0) {
+  const w = game.weapon;
+  if (w && w.mag <= 0 && w.reserve > 0) {
+    const take = Math.min(w.magSize, w.reserve);
+    w.mag = take; w.reserve -= take;
+  }
+  if (game.input.isDown('Space') && p.shootCd <= 0 && w && w.mag > 0) {
     p.shootCd = 0.18;
+    w.mag -= 1;
     game.bullets.push({ x: p.x + Math.cos(p.angle) * 12, y: p.y + Math.sin(p.angle) * 12, angle: p.angle, life: 0.55 });
     game.fx.muzzle(p.x, p.y, p.angle);
     sfx.shoot();
@@ -327,6 +345,7 @@ export function updateGame(game, dt) {
   if (input.wasPressed('KeyP')) { game.screen = 'paused'; game.help = false; input.endFrame(); return; }
   if (input.wasPressed('KeyH')) { game.screen = 'paused'; game.help = true; input.endFrame(); return; }
   if (input.wasPressed('KeyE')) tryEnterExit(game);
+  if (input.wasPressed('KeyR')) { game.radio.cycle(); game.toast('Radio: ' + game.radio.label()); }
   if (game.player.inCar) updatePlayerDriving(game, dt); else updatePlayerOnFoot(game, dt);
   if (game.player.hp <= 0) { killPlayer(game); input.endFrame(); return; }
   updateBullets(game, dt);
@@ -365,7 +384,7 @@ function boot() {
     const shot = params.get('shot');
     if (shot) { game.shotName = shot; applyShot(game, shot, step); }
   } catch (e) { showError(e.message || String(e)); }
-  if (typeof window !== 'undefined') window.__MN = { game, step };
+  if (typeof window !== 'undefined') window.__MN = { game, step, project: projectPoint, render: renderGame };
   if (!canvas || !canvas.getContext) return game;
   const ctx = canvas.getContext('2d');
   let last = 0, acc = 0;
