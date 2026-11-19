@@ -2,11 +2,11 @@
 import { PLACES } from './config.js';
 import { dist } from './rng.js';
 export const CHAIN = [
-  { title: 'First Run', brief: 'Dario Venn: Take the package at Port Meridian to Neon Tower.', pickup: PLACES.port, deliver: PLACES.neonTower, time: 110, pay: 400, forcedOnPickup: 0 },
+  { title: 'First Run', brief: 'Dario Venn: Take the package at Marina del Sol to Solana Tower.', pickup: PLACES.port, deliver: PLACES.neonTower, time: 110, pay: 400, forcedOnPickup: 0 },
   { title: 'Borrowed Wheels', brief: "Dario Venn: Steal any car and bring it to Venn's Garage.", pickup: null, deliver: PLACES.garage, time: 85, pay: 700, requiresCar: true, forcedOnPickup: 0 },
   { title: 'Front Page', brief: 'Dario Venn: Pick up the reporter at Gazette Plaza. Heat will follow — reach Hotel Aurelia.', pickup: PLACES.gazette, deliver: PLACES.hotel, time: 95, pay: 900, forcedOnPickup: 2 },
-  { title: 'Two Drops', brief: 'Dario Venn: Collect at Low Market, drop at Gazette Plaza, then finish at Port Meridian.', pickup: PLACES.market, drops: [PLACES.gazette, PLACES.port], time: 130, pay: 1200, forcedOnPickup: 0 },
-  { title: 'Heavy Metal', brief: 'Dario Venn: Steal the marked armored sedan and deliver it to Port Meridian.', pickup: null, deliver: PLACES.port, time: 120, pay: 2000, stealMarked: true, forcedOnPickup: 3 },
+  { title: 'Two Drops', brief: 'Dario Venn: Collect at Palm Market, drop at Gazette Plaza, then finish at Marina del Sol.', pickup: PLACES.market, drops: [PLACES.gazette, PLACES.port], time: 130, pay: 1200, forcedOnPickup: 0 },
+  { title: 'Heavy Metal', brief: 'Dario Venn: Steal the marked armored sedan and deliver it to Marina del Sol.', pickup: null, deliver: PLACES.port, time: 120, pay: 2000, stealMarked: true, forcedOnPickup: 3 },
 ];
 export class Missions {
   constructor() {
@@ -90,7 +90,7 @@ export class Missions {
       if (this.markedCar && p.inCar && p.car === this.markedCar) {
         this.stage = 'deliver';
         ctx.setWanted(def.forcedOnPickup || 3);
-        if (ctx.toast) ctx.toast('Sedan secured — get it to Port Meridian.');
+        if (ctx.toast) ctx.toast('Sedan secured — get it to Marina del Sol.');
       }
       return;
     }

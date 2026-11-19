@@ -2,8 +2,8 @@
 // game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
 // modules, no library and no network request), and the program hands it in. It copies game/ and
 // screenshots/ from beside this file to /output and writes /output/dossier.json, the summary the
-// judge reads, with the vendored make.fun library. The game handed in is MERIDIAN NIGHTS, a
-// top-down night-city open-world crime game: a seeded 8x8-block city explored on foot and by
+// judge reads, with the vendored make.fun library. The game handed in is AMBER COAST, a
+// top-down coastal open-world crime game at golden hour: a seeded 8x8-block city explored on foot and by
 // car, live traffic and pedestrians, stealable cars, a 0-5 star wanted system with police
 // pursuit, a five-mission story chain for fixer Dario Venn, on-foot combat, a HUD with a
 // circular minimap, a title screen, localStorage saving and a WebAudio synth — all plain ES
@@ -19,8 +19,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
-/** The entry this program hands in: MERIDIAN NIGHTS, a top-down night-city open-world crime game. */
-const ENTRY_TITLE = 'MERIDIAN NIGHTS — a Meridian open-world crime game (night city, traffic, police, 5-mission chain)';
+/** The entry this program hands in: AMBER COAST, a top-down coastal open-world crime game. */
+const ENTRY_TITLE = 'AMBER COAST — a coastal open-world crime game (golden hour, palms, beachfront, traffic, police, 5-mission chain)';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';

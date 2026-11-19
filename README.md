@@ -2,11 +2,11 @@
 [![rank](https://make.fun/badge/gta6-01/NozartXE/the-planner/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/NozartXE/the-planner/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-# MERIDIAN NIGHTS
+# AMBER COAST
 
-**MERIDIAN NIGHTS** is a top-down night-city open-world crime game set in Meridian, a port city that only wakes up after dark. You work for fixer **Dario Venn**: pick up packages, steal cars, move a reporter under heat, run a two-drop courier route, and lift an armored sedan — while traffic flows, pedestrians walk the sidewalks, and the police answer every star you earn.
+**AMBER COAST** is a top-down coastal open-world crime game set on a palm-lined shoreline city caught in permanent golden hour. You work for fixer **Dario Venn**: pick up packages at the marina, steal cars, move a reporter under heat, run a two-drop courier route, and lift an armored sedan — while traffic flows, pedestrians walk the sidewalks, and the police answer every star you earn.
 
-**The city.** A seeded 8×8-block grid (3,760×3,760 world units) of roads, sidewalks, parks with trees, and buildings drawn with pseudo-depth — walls and roofs offset by height. Night is the presentation: a darkness pass cut by street lamps, headlights and your own light, with additive glows for taillights, flashing red/blue sirens, sparse rooftop neon and the pulsing mission marker, finished with a vignette.
+**The city.** A seeded 8×8-block grid (3,760×3,760 world units) of roads, sidewalks, parks with trees and palms, and buildings drawn with pseudo-depth — walls and roofs offset by height. The east edge is a beachfront: art-deco pastel facades along the Solana avenue, Ocean Drive, a sand strip and open water with anchored boats. Golden hour is the presentation: warm directional light with long shadows off every block, a sunset gradient wash, and warm gloss streaking on the asphalt, finished with a vignette.
 
 **Systems, all live at once:**
 
@@ -39,4 +39,4 @@ node serve.ts
 
 Then open http://localhost:8080 in a desktop browser. The game is plain ES modules with zero dependencies and zero network requests; it plays fully offline from the static files in `game/`.
 
-Deterministic screenshot staging is built in: `?shot=title`, `?shot=chase`, `?shot=mission` and `?shot=roam` each build the seeded world, place a scene and step the real simulation to a fixed frame.
+Deterministic screenshot staging is built in: `?shot=title`, `?shot=chase`, `?shot=mission` and `?shot=results` each build the seeded world, place a scene and step the real simulation to a fixed frame.

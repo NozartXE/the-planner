@@ -4,7 +4,7 @@
 // clearly smaller than a car (38–44). Walk cycles are driven by a per-character phase and a seeded gait.
 import { BLOCK_PITCH, ROAD_W, WORLD_SIZE } from './config.js';
 import { dist } from './rng.js';
-const SHIRTS = ['#7a6f5e', '#5e6e7a', '#6e5e6a', '#5a6e5a', '#77685a', '#5e5e72'];
+const SHIRTS = ['#c98a5e', '#7fa3a8', '#c48a9a', '#8aa87a', '#d9b48a', '#8a90b8'];
 const HAIR_COLORS = ['#2b2118', '#3d2c1c', '#17171a', '#5a4632', '#77716a', '#41303e'];
 const PANTS_COLORS = ['#2e3440', '#3a332a', '#2c3a34', '#40303a', '#333338', '#31404e'];
 export const GAITS = {

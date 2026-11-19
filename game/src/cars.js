@@ -1,10 +1,10 @@
 // cars.js — the car factory (civilian types and the police interceptor) and the top-down car renderer.
 import { CAR_LENGTH, CAR_WIDTH } from './config.js';
 export const CIV_TYPES = [
-  { kind: 'sedan', colors: ['#5b6b7a', '#6e5a52', '#54604f', '#62586e', '#715f43'], maxSpeed: 205, accel: 210, hp: 100 },
-  { kind: 'hatch', colors: ['#68707c', '#7a6a58', '#5d7268', '#746a80'], maxSpeed: 180, accel: 195, hp: 85 },
-  { kind: 'coupe', colors: ['#7a5a4e', '#4f6272', '#6b6f4e', '#5e5470'], maxSpeed: 245, accel: 250, hp: 90 },
-  { kind: 'van', colors: ['#5c6068', '#6a6258', '#55606a'], maxSpeed: 160, accel: 170, hp: 130 },
+  { kind: 'sedan', colors: ['#7a8a96', '#a8765e', '#71806a', '#86749a', '#a8895a'], maxSpeed: 205, accel: 210, hp: 100 },
+  { kind: 'hatch', colors: ['#8a929c', '#a8896a', '#74927f', '#96819f'], maxSpeed: 180, accel: 195, hp: 85 },
+  { kind: 'coupe', colors: ['#a06a52', '#5f7d94', '#8a8f62', '#7d6a94'], maxSpeed: 245, accel: 250, hp: 90 },
+  { kind: 'van', colors: ['#7d7a72', '#8a7a64', '#6d7d88'], maxSpeed: 160, accel: 170, hp: 130 },
   { kind: 'armored', colors: ['#3f444c', '#494540'], maxSpeed: 215, accel: 200, hp: 220 },
 ];
 let nextCarId = 1;

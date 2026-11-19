@@ -2,9 +2,9 @@
 import { VIEW_W, VIEW_H, WORLD_SIZE, PALETTE } from './config.js';
 import { clamp } from './rng.js';
 function panel(ctx, x, y, w, h) {
-  ctx.fillStyle = 'rgba(10,12,18,0.66)';
+  ctx.fillStyle = 'rgba(26,14,12,0.66)';
   ctx.beginPath(); ctx.roundRect(x, y, w, h, 8); ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,214,170,0.18)'; ctx.lineWidth = 1; ctx.stroke();
 }
 function drawStars(ctx, game) {
   const stars = game.police.stars;
@@ -59,8 +59,8 @@ export function drawHud(ctx, game) {
   panel(ctx, 14, VIEW_H - 62, 208, 48);
   ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left';
   ctx.fillText('HEALTH', 26, VIEW_H - 54);
-  ctx.fillStyle = '#3a3e46'; ctx.fillRect(26, VIEW_H - 38, 184, 10);
-  ctx.fillStyle = game.player.hp > 30 ? '#7fc97f' : PALETTE.danger;
+  ctx.fillStyle = '#4a3628'; ctx.fillRect(26, VIEW_H - 38, 184, 10);
+  ctx.fillStyle = game.player.hp > 30 ? '#8fc97f' : PALETTE.danger;
   ctx.fillRect(26, VIEW_H - 38, 184 * clamp(game.player.hp / 100, 0, 1), 10);
   if (game.player.inCar && game.player.car) {
     // Speed lives on the VEHICLE label line (right-aligned); the bar owns its own line
@@ -70,8 +70,8 @@ export function drawHud(ctx, game) {
     ctx.fillText('VEHICLE', 26, VIEW_H - 108);
     ctx.fillStyle = PALETTE.hudText; ctx.font = '700 13px system-ui, sans-serif'; ctx.textAlign = 'right';
     ctx.fillText(Math.round(Math.abs(game.player.car.speed) * 0.62) + ' km/h', 210, VIEW_H - 109);
-    ctx.fillStyle = '#3a3e46'; ctx.fillRect(26, VIEW_H - 92, 184, 10);
-    ctx.fillStyle = '#8ecae6'; ctx.fillRect(26, VIEW_H - 92, 184 * clamp(game.player.car.hp / game.player.car.maxHp, 0, 1), 10);
+    ctx.fillStyle = '#4a3628'; ctx.fillRect(26, VIEW_H - 92, 184, 10);
+    ctx.fillStyle = '#e8a06a'; ctx.fillRect(26, VIEW_H - 92, 184 * clamp(game.player.car.hp / game.player.car.maxHp, 0, 1), 10);
   }
   // Control hints for the first seconds of play.
   if (game.playTime < 9 && game.screen === 'play') {
@@ -85,7 +85,7 @@ export function drawMinimap(ctx, game) {
   const cx = VIEW_W - 92, cy = VIEW_H - 92, r = 74;
   ctx.save();
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
-  ctx.fillStyle = '#14161c'; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  ctx.fillStyle = '#2e2118'; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
   const scale = (r * 2) / 1500;
   const drawDot = (wx, wy, color, size) => {
     let dx = (wx - game.player.x) * scale, dy = (wy - game.player.y) * scale;
@@ -101,7 +101,7 @@ export function drawMinimap(ctx, game) {
       ctx.drawImage(game.city.minimap, sx, sy, srcSize, srcSize, cx - r, cy - r, r * 2, r * 2);
     } catch (e) {}
   }
-  ctx.fillStyle = 'rgba(10,12,18,0.25)'; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  ctx.fillStyle = 'rgba(26,14,12,0.25)'; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
   for (const cop of game.police.cops) if (!cop.dead) drawDot(cop.x, cop.y, Math.sin(game.time * 8) > 0 ? '#ff5040' : '#4f8ef7', 3.4);
   const marker = game.missions.marker();
   if (marker) drawDot(marker.x, marker.y, marker.color === 'pickup' ? '#e8c832' : '#4fc96a', 4.4);
@@ -112,28 +112,28 @@ export function drawMinimap(ctx, game) {
   ctx.restore();
   ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-  ctx.fillStyle = 'rgba(232,230,223,0.75)'; ctx.font = '600 10px system-ui, sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText('MERIDIAN', cx, cy + r + 4);
+  ctx.fillStyle = 'rgba(245,234,216,0.8)'; ctx.font = '600 10px system-ui, sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('AMBER COAST', cx, cy + r + 4);
 }
 export function drawTitle(ctx, game) {
-  ctx.fillStyle = 'rgba(5,6,12,0.62)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.fillStyle = 'rgba(30,12,10,0.40)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#57c7d4'; ctx.font = '700 58px system-ui, sans-serif';
-  ctx.shadowColor = '#57c7d4'; ctx.shadowBlur = 18;
-  ctx.fillText('M E R I D I A N', VIEW_W / 2, 238);
-  ctx.fillStyle = '#e0a458'; ctx.shadowColor = '#e0a458';
-  ctx.fillText('N I G H T S', VIEW_W / 2, 302);
+  ctx.fillStyle = '#ffb37a'; ctx.font = '700 58px system-ui, sans-serif';
+  ctx.shadowColor = '#ff8a5c'; ctx.shadowBlur = 18;
+  ctx.fillText('A M B E R', VIEW_W / 2, 238);
+  ctx.fillStyle = '#f28bb4'; ctx.shadowColor = '#f28bb4';
+  ctx.fillText('C O A S T', VIEW_W / 2, 302);
   ctx.shadowBlur = 0;
   ctx.fillStyle = PALETTE.hudText; ctx.font = '16px system-ui, sans-serif';
-  ctx.fillText('A night-city open world: steal cars, run jobs for fixer Dario Venn, outrun the law.', VIEW_W / 2, 344);
-  ctx.font = '15px system-ui, sans-serif'; ctx.fillStyle = '#c9cdd4';
+  ctx.fillText('A palm-lined coastal city at golden hour: steal cars, run jobs for fixer Dario Venn, outrun the law.', VIEW_W / 2, 344);
+  ctx.font = '15px system-ui, sans-serif'; ctx.fillStyle = '#e8d9c4';
   ctx.fillText('WASD / arrows — move & drive      E — enter / exit car      Space — shoot / handbrake', VIEW_W / 2, 402);
   ctx.fillText('Shift — sprint      P — pause      H — help', VIEW_W / 2, 428);
   ctx.fillStyle = '#f2c14e'; ctx.font = '700 19px system-ui, sans-serif';
   ctx.fillText('Press ENTER to start', VIEW_W / 2, 486);
   ctx.fillStyle = PALETTE.hudMuted; ctx.font = '14px system-ui, sans-serif';
   const s = game.saveData;
-  ctx.fillText(s.missionsCompleted > 0 ? `Saved progress: $${Math.floor(s.money)} · ${s.missionsCompleted} jobs done · $${Math.floor(s.totalEarned)} earned` : 'No saved progress yet — your first night in Meridian.', VIEW_W / 2, 524);
+  ctx.fillText(s.missionsCompleted > 0 ? `Saved progress: $${Math.floor(s.money)} · ${s.missionsCompleted} jobs done · $${Math.floor(s.totalEarned)} earned` : 'No saved progress yet — your first sunset on the Amber Coast.', VIEW_W / 2, 524);
 }
 export function drawSummary(ctx, game) {
   const s = game.lastSummary || {
@@ -143,13 +143,15 @@ export function drawSummary(ctx, game) {
     carsStolen: game.carsStolen || 0, timesWasted: game.timesWasted || 0,
   };
   ctx.save();
-  ctx.fillStyle = 'rgba(5,6,12,0.55)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.fillStyle = 'rgba(30,12,10,0.5)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   const px = VIEW_W / 2 - 300, py = VIEW_H / 2 - 220;
   panel(ctx, px, py, 600, 440);
   ctx.textBaseline = 'top';
   ctx.textAlign = 'center';
+  ctx.fillStyle = '#f28bb4'; ctx.font = '700 12px system-ui, sans-serif';
+  ctx.fillText('A M B E R   C O A S T', VIEW_W / 2, py + 14);
   ctx.fillStyle = '#f2c14e'; ctx.font = '700 30px system-ui, sans-serif';
-  ctx.fillText('CHAIN COMPLETE', VIEW_W / 2, py + 30);
+  ctx.fillText('CHAIN COMPLETE', VIEW_W / 2, py + 36);
   ctx.fillStyle = PALETTE.hudText; ctx.font = '15px system-ui, sans-serif';
   ctx.fillText('Dario Venn — all five jobs delivered.', VIEW_W / 2, py + 72);
   const esc = s.bestEscapeMs > 0
@@ -185,10 +187,10 @@ export function drawWasted(ctx, game) {
   ctx.fillText('You wake at St. Sable Hospital. The bill is 10% of your cash.', VIEW_W / 2, 422);
 }
 export function drawPause(ctx, game, help) {
-  ctx.fillStyle = 'rgba(5,6,12,0.66)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.fillStyle = 'rgba(30,12,10,0.6)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.textAlign = 'center'; ctx.fillStyle = PALETTE.hudText;
   ctx.font = '700 34px system-ui, sans-serif'; ctx.fillText(help ? 'HELP' : 'PAUSED', VIEW_W / 2, 268);
-  ctx.font = '16px system-ui, sans-serif'; ctx.fillStyle = '#c9cdd4';
+  ctx.font = '16px system-ui, sans-serif'; ctx.fillStyle = '#e8d9c4';
   const lines = [
     'WASD / arrows — move on foot, drive in a car',
     'E — enter or exit the nearest car (stealing brings heat)',

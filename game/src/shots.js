@@ -54,24 +54,26 @@ function finish(game, camX, camY) {
 export function applyShot(game, name, step) {
   const run = (n) => { for (let i = 0; i < n; i++) step(1 / 60); };
   if (name === 'title') {
-    // A lively Gazette Plaza intersection behind the title: traffic flowing through,
-    // upright pedestrians mid-crosswalk, the player in profile on the corner.
+    // A lively beachfront intersection behind the title: the Solana avenue meets the
+    // coast road, traffic flowing through, upright pedestrians mid-crosswalk, the
+    // player in profile on the corner — and east of the avenue the art-deco
+    // beachfront, Ocean Drive, the sand and the water fill the right of the frame.
     game.screen = 'title';
-    game.player.x = 1038; game.player.y = 1100; game.player.angle = 0;
+    game.player.x = 3388; game.player.y = 1100; game.player.angle = 0;
     run(150);
     game.screen = 'title';
     game.player.inCar = false; game.player.car = null;
-    game.player.x = 1038; game.player.y = 1100; game.player.angle = 0;
+    game.player.x = 3388; game.player.y = 1100; game.player.angle = 0;
     game.player.walkPhase = 0.9; game.player.vx = 40; game.player.vy = 0; game.player.hp = 100;
-    setCar(game.traffic[10], 872, 1007, 0, 92);
-    setCar(game.traffic[11], 965, 852, Math.PI / 2, 80);
-    setCar(game.traffic[12], 1185, 965, Math.PI, 84);
-    setCar(game.traffic[13], 1007, 1190, -Math.PI / 2, 72);
-    stagePed(game, 0, 962, 1006, 0, 1.1, 0);
-    stagePed(game, 1, 1006, 1054, Math.PI, 3.4, 1);
-    stagePed(game, 2, 1004, 958, Math.PI / 2, 5.2, 2);
-    stagePed(game, 3, 958, 1058, 0, 2.2, 3);
-    stagePed(game, 4, 1096, 1040, Math.PI / 2, 4.1, 1);
+    setCar(game.traffic[10], 3222, 1007, 0, 92);
+    setCar(game.traffic[11], 3315, 852, Math.PI / 2, 80);
+    setCar(game.traffic[12], 3535, 965, Math.PI, 84);
+    setCar(game.traffic[13], 3357, 1190, -Math.PI / 2, 72);
+    stagePed(game, 0, 3312, 1006, 0, 1.1, 0);
+    stagePed(game, 1, 3356, 1054, Math.PI, 3.4, 1);
+    stagePed(game, 2, 3354, 958, Math.PI / 2, 5.2, 2);
+    stagePed(game, 3, 3308, 1058, 0, 2.2, 3);
+    stagePed(game, 4, 3446, 1040, Math.PI / 2, 4.1, 1);
     game.bullets = []; game.fx.particles = []; game.toasts = [];
     game.camera.zoom = 1.05;
     finish(game);
@@ -156,7 +158,7 @@ export function applyShot(game, name, step) {
     return true;
   }
   if (name === 'mission') {
-    // On-foot firefight at Low Market (Neon Uptown): the player fires at a smoking sedan
+    // On-foot firefight at Palm Market (Solana uptown): the player fires at a smoking sedan
     // mid-stride, tracers in flight, pedestrians fleeing, a crowd on the south sidewalk.
     // Jobs 1–3 are done ($2,250); the current job is 4, "Two Drops", first drop next.
     game.screen = 'play';
@@ -205,7 +207,7 @@ export function applyShot(game, name, step) {
     return true;
   }
   if (name === 'results') {
-    // End-of-chain outcome screen at Port Meridian: job 5 ("Heavy Metal") has just been
+    // End-of-chain outcome screen at Marina del Sol: job 5 ("Heavy Metal") has just been
     // delivered in the armored sedan, the whole chain is done and the summary panel is
     // up over the live port. Money story: $250 start + 400 + 700 + 900 + 1,200 + 2,000
     // = $5,450 cash, $5,200 earned on this chain.
@@ -237,8 +239,8 @@ export function applyShot(game, name, step) {
     game.showSummary();
     game.toasts = []; game.bullets = [];
     game.camera.zoom = 1.3;
-    // Camera framed south-east of the delivery point: the South Depot plate stays out
-    // of the top edge and the Port Meridian anchor falls outside the visible rect, so
+    // Camera framed south-east of the delivery point: the Palma Depot plate stays out
+    // of the top edge and the Marina del Sol anchor falls outside the visible rect, so
     // its plate is skipped rather than half-hidden behind the summary panel.
     finish(game, 1020, 3440);
     return true;

@@ -1,4 +1,4 @@
-// main.js — boot, screen state, the fixed-step loop and orchestration of every system in MERIDIAN NIGHTS.
+// main.js — boot, screen state, the fixed-step loop and orchestration of every system in AMBER COAST.
 import { VIEW_W, VIEW_H, WORLD_SEED, PLACES, PLAYER_SPEED_WALK, PLAYER_SPEED_SPRINT, WORLD_SIZE } from './config.js';
 import { makeRng, clamp, dist } from './rng.js';
 import { generateCity, buildMinimapBase, collideCircleBuildings } from './city.js';
@@ -291,7 +291,7 @@ export function updateGame(game, dt) {
   game.time += dt; game.nowMs = game.time * 1000;
   const input = game.input;
   if (game.screen === 'title') {
-    if (input.wasPressed('Enter')) { game.screen = 'play'; sfx.unlock(); game.toast('Welcome to Meridian. Venn has work for you.'); }
+    if (input.wasPressed('Enter')) { game.screen = 'play'; sfx.unlock(); game.toast('Welcome to the Amber Coast. Venn has work for you.'); }
     updateTraffic(game.rng, game.traffic, dt, game.player, allCars(game));
     updatePedestrians(game.peds, dt, game.nowMs, null);
     game.fx.update(dt);

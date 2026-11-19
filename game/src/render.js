@@ -1,4 +1,5 @@
-// render.js — camera, culled world drawing, the night-lighting pass (darkness, light holes, additive glows) and vignette.
+// render.js — camera, culled world drawing, the golden-hour pass (warm directional light, long
+// shadows, sunset gloss on asphalt) and vignette.
 import { VIEW_W, VIEW_H, WORLD_SIZE, BLOCK_PITCH, ROAD_W, CAMERA_ZOOM, PALETTE } from './config.js';
 import { isRoadCoord, isOnRoad } from './city.js';
 import { drawCar } from './cars.js';
@@ -87,11 +88,11 @@ function drawWorld(ctx, game, cam) {
   }
   // Skid marks left by hard cornering and PIT contact, under everything that follows.
   game.fx.drawSkids(ctx);
-  // Wet-road reflections (static): lamp and neon streaks smeared down the asphalt,
+  // Sunset gloss (static): lamp and signage streaks smeared down the warm asphalt,
   // only where the streak actually falls on a road. Subtle by design.
   for (const l of game.city.lamps) {
     if (l.x < x0 || l.x > x1 || l.y < y0 || l.y > y1) continue;
-    if (isOnRoad(l.x, l.y + 30)) worldStreak(ctx, l.x, l.y, 54, 13, '255,190,100', 0.15);
+    if (isOnRoad(l.x, l.y + 30)) worldStreak(ctx, l.x, l.y, 54, 13, '255,176,102', 0.16);
   }
   for (const b of game.city.buildings) {
     if (!b.neon) continue;
@@ -110,6 +111,51 @@ function drawWorld(ctx, game, cam) {
     if (t.x < x0 || t.x > x1 || t.y < y0 || t.y > y1) continue;
     ctx.fillStyle = PALETTE.treeDark; ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = PALETTE.treeLight; ctx.beginPath(); ctx.arc(t.x - 3, t.y - 3, t.r * 0.55, 0, Math.PI * 2); ctx.fill();
+  }
+  // The coast: east of Ocean Drive (the far-edge road) a sand strip runs the whole
+  // shoreline, then open water with anchored boats and sunset sparkle.
+  if (x1 > WORLD_SIZE) {
+    ctx.fillStyle = PALETTE.sand; ctx.fillRect(WORLD_SIZE, y0, 72, y1 - y0);
+    ctx.fillStyle = PALETTE.sandShade; ctx.fillRect(WORLD_SIZE + 58, y0, 14, y1 - y0);
+    const wg = ctx.createLinearGradient(WORLD_SIZE + 72, 0, WORLD_SIZE + 340, 0);
+    wg.addColorStop(0, PALETTE.water); wg.addColorStop(1, PALETTE.waterDeep);
+    ctx.fillStyle = wg; ctx.fillRect(WORLD_SIZE + 72, y0, x1 - WORLD_SIZE - 72 + 200, y1 - y0);
+    ctx.strokeStyle = PALETTE.waterSparkle; ctx.lineWidth = 2;
+    for (let wy = Math.floor(y0 / 46) * 46; wy < y1; wy += 46) {
+      for (let wx = WORLD_SIZE + 92; wx < x1 + 160; wx += 74) {
+        const h = Math.sin(wx * 12.9898 + wy * 78.233) * 43758.5453;
+        if ((h - Math.floor(h)) > 0.45) { ctx.beginPath(); ctx.moveTo(wx, wy); ctx.lineTo(wx + 22, wy); ctx.stroke(); }
+      }
+    }
+    for (const bt of game.city.boats || []) {
+      if (bt.x < x0 - 60 || bt.x > x1 + 60 || bt.y < y0 - 60 || bt.y > y1 + 60) continue;
+      ctx.save(); ctx.translate(bt.x, bt.y); ctx.scale(bt.s, bt.s);
+      ctx.fillStyle = 'rgba(30,40,50,0.35)'; ctx.beginPath(); ctx.ellipse(3, 5, 17, 5.5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#e8e2d4'; ctx.beginPath();
+      ctx.moveTo(-15, 0); ctx.lineTo(15, 0); ctx.lineTo(10, 5); ctx.lineTo(-10, 5); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#6e5844'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -17); ctx.stroke();
+      ctx.fillStyle = bt.sail; ctx.beginPath();
+      ctx.moveTo(1.5, -16); ctx.lineTo(1.5, -2); ctx.lineTo(11, -2); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  }
+  // Palms: a long warm shadow, a leaning trunk and a frond crown.
+  for (const pm of game.city.palms || []) {
+    if (pm.x < x0 - 30 || pm.x > x1 + 30 || pm.y < y0 - 30 || pm.y > y1 + 30) continue;
+    const s = pm.s || 1, topX = pm.x + (pm.lean || 0) * 2.2, topY = pm.y - 21 * s;
+    ctx.fillStyle = 'rgba(43,18,30,0.28)';
+    ctx.beginPath(); ctx.ellipse(pm.x + 11, pm.y + 5, 13 * s, 4.5 * s, 0.25, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = PALETTE.palmTrunk; ctx.lineWidth = 3 * s; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(pm.x, pm.y); ctx.quadraticCurveTo(pm.x + (pm.lean || 0), pm.y - 12 * s, topX, topY); ctx.stroke();
+    ctx.lineWidth = 2.2 * s;
+    for (let f = 0; f < 6; f++) {
+      const a = (f / 6) * Math.PI * 2 + (pm.lean || 0) * 0.2;
+      const ex = topX + Math.cos(a) * 11 * s, ey = topY + Math.sin(a) * 5.5 * s + 3.5 * s;
+      ctx.strokeStyle = f % 2 ? PALETTE.palmDark : PALETTE.palmLight;
+      ctx.beginPath(); ctx.moveTo(topX, topY);
+      ctx.quadraticCurveTo(topX + Math.cos(a) * 7 * s, topY + Math.sin(a) * 3 * s - 2.5 * s, ex, ey); ctx.stroke();
+    }
   }
   // Mission marker (under entities, with a pulsing ring drawn in screen-stable time).
   const marker = game.missions.marker();
@@ -137,8 +183,8 @@ function drawWorld(ctx, game, cam) {
       if (pl.x < vx0 || pl.x > vx1 || pl.y < vy0 || pl.y > vy1) continue;
       const px = clamp(pl.x - 62, vx0 + 4, Math.max(vx0 + 4, vx1 - 124 - 4));
       const py = clamp(pl.y - 58, vy0 + 4, Math.max(vy0 + 4, vy1 - 19 - 4));
-      ctx.fillStyle = 'rgba(10,12,16,0.55)'; ctx.fillRect(px, py, 124, 19);
-      ctx.fillStyle = '#cfd3da'; ctx.fillText(pl.name, px + 62, py + 14);
+      ctx.fillStyle = 'rgba(26,14,10,0.55)'; ctx.fillRect(px, py, 124, 19);
+      ctx.fillStyle = '#f0e2cc'; ctx.fillText(pl.name, px + 62, py + 14);
     }
   }
   // Buildings: pseudo-depth — walls extruded away from the camera focus, then the roof.
@@ -148,6 +194,9 @@ function drawWorld(ctx, game, cam) {
     if (b.x + b.w < x0 - 80 || b.x > x1 + 80 || b.y + b.h < y0 - 80 || b.y > y1 + 80) continue;
     const ox = clamp((b.x + b.w / 2 - focusX) * 0.0016 * b.height, -26, 26);
     const oy = clamp((b.y + b.h / 2 - focusY) * 0.0016 * b.height, -26, 26) - b.height * 0.16;
+    // Long golden-hour shadow thrown east off every block (sun low in the west).
+    ctx.fillStyle = 'rgba(43,18,30,0.30)';
+    ctx.fillRect(b.x + 15, b.y + 11, b.w, b.h);
     ctx.fillStyle = b.wallDark || PALETTE.wallDark;
     ctx.beginPath();
     ctx.moveTo(b.x, b.y + b.h); ctx.lineTo(b.x + b.w, b.y + b.h);
@@ -161,6 +210,13 @@ function drawWorld(ctx, game, cam) {
     ctx.fillStyle = b.color;
     ctx.fillRect(b.x + ox, b.y + oy, b.w, b.h);
     ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1; ctx.strokeRect(b.x + ox, b.y + oy, b.w, b.h);
+    // Art-deco beachfront stripe under the parapet.
+    if (b.deco) {
+      ctx.fillStyle = 'rgba(217,138,122,0.55)';
+      ctx.fillRect(b.x + ox + 3, b.y + oy + 8, b.w - 6, 3);
+      ctx.fillStyle = 'rgba(159,201,184,0.5)';
+      ctx.fillRect(b.x + ox + 3, b.y + oy + 13, b.w - 6, 2);
+    }
     // Parapet: a lighter lip inside the roof edge so the slab reads as a built roof, not a tile.
     ctx.strokeStyle = 'rgba(255,255,255,0.13)'; ctx.lineWidth = 2;
     ctx.strokeRect(b.x + ox + 3, b.y + oy + 3, b.w - 6, b.h - 6);
@@ -210,7 +266,7 @@ function drawWorld(ctx, game, cam) {
     }
   }
   // Parked feel: lamps as small posts (glow comes in the lighting pass).
-  ctx.fillStyle = '#565b64';
+  ctx.fillStyle = '#6e5a48';
   for (const l of game.city.lamps) {
     if (l.x < x0 || l.x > x1 || l.y < y0 || l.y > y1) continue;
     ctx.fillRect(l.x - 1.5, l.y - 1.5, 3, 3);
@@ -248,7 +304,9 @@ function drawLighting(ctx, game, cam) {
   const toWorld = (sx, sy) => ({ x: (sx - VIEW_W / 2) / cam.zoom + cam.x, y: (sy - VIEW_H / 2) / cam.zoom + cam.y });
   g.globalCompositeOperation = 'source-over';
   g.clearRect(0, 0, VIEW_W, VIEW_H);
-  g.fillStyle = 'rgba(6,8,18,0.60)';
+  // Golden-hour shade: a warm plum dusk layer, far lighter than the old night pass —
+  // the sun is still up, so the holes below read as pools of direct light.
+  g.fillStyle = 'rgba(46,20,38,0.33)';
   g.fillRect(0, 0, VIEW_W, VIEW_H);
   g.globalCompositeOperation = 'destination-out';
   const hole = (wx, wy, r, strength) => {
@@ -260,15 +318,15 @@ function drawLighting(ctx, game, cam) {
     g.fillStyle = grad;
     g.beginPath(); g.arc(s.x, s.y, r * cam.zoom, 0, Math.PI * 2); g.fill();
   };
-  for (const l of game.city.lamps) hole(l.x, l.y, 92, 0.62);
+  for (const l of game.city.lamps) hole(l.x, l.y, 92, 0.5);
   const allCars = game.traffic.concat(game.police.cops);
   if (game.player.car && game.player.inCar) allCars.push(game.player.car);
   for (const car of allCars) {
-    hole(car.x, car.y, 54, 0.5);
+    hole(car.x, car.y, 54, 0.42);
     const hx = car.x + Math.cos(car.angle) * 62, hy = car.y + Math.sin(car.angle) * 62;
-    hole(hx, hy, 74, 0.55);
+    hole(hx, hy, 74, 0.45);
   }
-  hole(game.player.x, game.player.y, 96, 0.66);
+  hole(game.player.x, game.player.y, 96, 0.55);
   const marker = game.missions.marker();
   if (marker) hole(marker.x, marker.y, 80, 0.5);
   ctx.drawImage(lc, 0, 0);
@@ -292,7 +350,7 @@ function drawLighting(ctx, game, cam) {
     }
   }
   if (marker) glow(marker.x, marker.y, 52, marker.color === 'pickup' ? 'rgba(232,200,50,0.5)' : 'rgba(79,201,106,0.5)', 0.4 + Math.sin(game.time * 3.2) * 0.12);
-  // Wet-road reflections (dynamic): elongated glows stretched down-screen from lamps,
+  // Sunset gloss (dynamic): elongated glows stretched down-screen from lamps,
   // headlights, taillights and sirens. Car streaks are gated to roads: the world point
   // 26 screen units below the streak anchor must itself be on a road.
   const streakGlow = (wx, wy, r, color, offY, scaleY) => {
@@ -327,16 +385,27 @@ function drawLighting(ctx, game, cam) {
   }
   ctx.restore();
   ctx.globalAlpha = 1;
-  // Vignette.
+  // Sunset wash: orange-pink gradient glow across the whole frame, strongest
+  // toward the low western sun (left), cooling to plum at the eastern edge.
+  const sg = ctx.createLinearGradient(0, 0, VIEW_W, VIEW_H * 0.4);
+  sg.addColorStop(0, 'rgba(255,116,58,0.17)');
+  sg.addColorStop(0.45, 'rgba(255,92,120,0.07)');
+  sg.addColorStop(1, 'rgba(38,14,54,0.10)');
+  ctx.fillStyle = sg; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  const sun = ctx.createRadialGradient(VIEW_W * 0.06, VIEW_H * 0.1, 0, VIEW_W * 0.06, VIEW_H * 0.1, VIEW_H * 0.75);
+  sun.addColorStop(0, 'rgba(255,176,84,0.20)');
+  sun.addColorStop(1, 'rgba(255,176,84,0)');
+  ctx.fillStyle = sun; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  // Vignette (warm).
   const vg = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.42, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.86);
   vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(1, 'rgba(0,0,0,0.42)');
+  vg.addColorStop(1, 'rgba(30,8,16,0.38)');
   ctx.fillStyle = vg; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 }
 export function renderGame(ctx, game) {
   const cam = game.camera;
   ctx.save();
-  ctx.fillStyle = '#0b0d12'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.fillStyle = '#2a140f'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.translate(VIEW_W / 2, VIEW_H / 2);
   ctx.scale(cam.zoom, cam.zoom);
   ctx.translate(-cam.x, -cam.y);

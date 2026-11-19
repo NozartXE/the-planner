@@ -1,5 +1,5 @@
-// city.js — seeded generation of the Meridian street grid: blocks, buildings with heights, parks, lamps and collision.
-import { BLOCK_PITCH, BLOCKS_PER_SIDE, ROAD_W, WORLD_SIZE, PALETTE, DISTRICTS, districtIndexFor } from './config.js';
+// city.js — seeded generation of the Amber Coast street grid: blocks, buildings with heights, parks, palms, lamps and collision.
+import { BLOCK_PITCH, BLOCKS_PER_SIDE, ROAD_W, WORLD_SIZE, PALETTE, DISTRICTS, DECO, districtIndexFor } from './config.js';
 import { makeRng, clamp } from './rng.js';
 
 export function roadCenters() {
@@ -29,6 +29,7 @@ export function generateCity(seed) {
   const buildings = [];
   const parks = [];
   const trees = [];
+  const palms = [];
   const lamps = [];
   for (let by = 0; by < BLOCKS_PER_SIDE; by++) {
     for (let bx = 0; bx < BLOCKS_PER_SIDE; bx++) {
@@ -42,8 +43,12 @@ export function generateCity(seed) {
         parks.push({ x: ox, y: oy, w: inner, h: inner, bx, by });
         const n = rng.int(7, 11);
         for (let i = 0; i < n; i++) trees.push({ x: ox + rng.range(28, inner - 28), y: oy + rng.range(28, inner - 28), r: rng.range(11, 17) });
+        const np = rng.int(2, 4);
+        for (let i = 0; i < np; i++) palms.push({ x: ox + rng.range(30, inner - 30), y: oy + rng.range(30, inner - 30), lean: rng.range(-3, 3), s: rng.range(0.9, 1.15) });
         continue;
       }
+      // The eastern column is the beachfront: art-deco pastel facades on every block.
+      const deco = bx === BLOCKS_PER_SIDE - 1;
       const plot = inner / 2;
       for (let py = 0; py < 2; py++) {
         for (let px = 0; px < 2; px++) {
@@ -68,10 +73,11 @@ export function generateCity(seed) {
           buildings.push({
             x: bw2, y: bh2, w: bw, h: bh,
             height: rng.range(18, 64),
-            color: rng.pick(district.roofs),
-            wallLight: district.wallLight, wallDark: district.wallDark,
-            windowColor: district.windowColor, windowThreshold: district.windowThreshold,
+            color: deco ? rng.pick(DECO.roofs) : rng.pick(district.roofs),
+            wallLight: deco ? DECO.wallLight : district.wallLight, wallDark: deco ? DECO.wallDark : district.wallDark,
+            windowColor: deco ? DECO.windowColor : district.windowColor, windowThreshold: deco ? DECO.windowThreshold : district.windowThreshold,
             district: districtIndexFor(bx, by),
+            deco,
             props,
             neon: hasNeon, neonColor: rng.pick(PALETTE.neonColors),
           });
@@ -94,7 +100,33 @@ export function generateCity(seed) {
       lamps.push({ x: c + ROAD_W / 2 + 6, y: mid });
     }
   }
-  return { buildings, parks, trees, lamps, minimap: null };
+  // Palms line the streets: a seeded row on the sidewalk edge of every road,
+  // kept clear of intersection corners, plus a promenade row on the sand east
+  // of Ocean Drive (the far-edge road).
+  for (let k = 0; k <= BLOCKS_PER_SIDE; k++) {
+    const edge = k === BLOCKS_PER_SIDE ? WORLD_SIZE - ROAD_W : k * BLOCK_PITCH;
+    for (let y = 170; y < WORLD_SIZE - 60; y += 148) {
+      if (((y % BLOCK_PITCH) + BLOCK_PITCH) % BLOCK_PITCH < 130) continue;
+      if (rng.chance(0.82)) palms.push({ x: edge - 9, y: y + rng.range(-14, 14), lean: rng.range(-3, 3), s: rng.range(0.9, 1.2) });
+    }
+    for (let x = 170; x < WORLD_SIZE - 60; x += 148) {
+      if (((x % BLOCK_PITCH) + BLOCK_PITCH) % BLOCK_PITCH < 130) continue;
+      if (rng.chance(0.82)) palms.push({ x: x + rng.range(-14, 14), y: edge - 9, lean: rng.range(-3, 3), s: rng.range(0.9, 1.2) });
+    }
+  }
+  for (let y = 200; y < WORLD_SIZE - 40; y += 168) {
+    palms.push({ x: WORLD_SIZE + 14, y: y + rng.range(-12, 12), lean: rng.range(-3, 3), s: rng.range(0.95, 1.25) });
+  }
+  // Marina boats anchored on the water east of the world edge.
+  const boats = [
+    { x: WORLD_SIZE + 150, y: 880, s: 1.1, sail: '#f2e8d8' },
+    { x: WORLD_SIZE + 235, y: 1240, s: 0.9, sail: '#e8c9c4' },
+    { x: WORLD_SIZE + 120, y: 1620, s: 1.0, sail: '#cfe0d4' },
+    { x: WORLD_SIZE + 300, y: 640, s: 0.8, sail: '#f2e8d8' },
+    { x: WORLD_SIZE + 190, y: 2240, s: 1.05, sail: '#e8c9c4' },
+    { x: WORLD_SIZE + 260, y: 2980, s: 0.95, sail: '#f2e8d8' },
+  ];
+  return { buildings, parks, trees, palms, boats, lamps, minimap: null };
 }
 
 export function collideCircleBuildings(city, x, y, r) {
@@ -133,15 +165,15 @@ export function buildMinimapBase(city) {
     const g = c.getContext('2d');
     if (!g) return null;
     const s = size / WORLD_SIZE;
-    g.fillStyle = '#14161c'; g.fillRect(0, 0, size, size);
-    g.fillStyle = '#23262e';
+    g.fillStyle = '#2e2118'; g.fillRect(0, 0, size, size);
+    g.fillStyle = '#3e3436';
     for (let k = 0; k < BLOCKS_PER_SIDE; k++) {
       g.fillRect(k * BLOCK_PITCH * s, 0, ROAD_W * s, size);
       g.fillRect(0, k * BLOCK_PITCH * s, size, ROAD_W * s);
     }
     g.fillRect(size - ROAD_W * s, 0, ROAD_W * s, size);
     g.fillRect(0, size - ROAD_W * s, size, ROAD_W * s);
-    g.fillStyle = '#1d2b22';
+    g.fillStyle = '#51603a';
     for (const p of city.parks) g.fillRect(p.x * s, p.y * s, p.w * s, p.h * s);
     for (const b of city.buildings) { g.fillStyle = b.color || '#3a3f4a'; g.fillRect(b.x * s, b.y * s, Math.max(2, b.w * s), Math.max(2, b.h * s)); }
     return c;
