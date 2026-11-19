@@ -4,9 +4,9 @@
 
 # AMBER COAST
 
-**AMBER COAST** is a top-down coastal open-world crime game set on a palm-lined shoreline city caught in permanent golden hour. You work for fixer **Dario Venn**: pick up packages at the marina, steal cars, move a reporter under heat, run a two-drop courier route, and lift an armored sedan — while traffic flows, pedestrians walk the sidewalks, and the police answer every star you earn.
+**AMBER COAST** is a 3D chase-cam coastal open-world crime game set on a palm-lined shoreline city caught in permanent golden hour. You work for fixer **Dario Venn**: pick up packages at the marina, steal cars, move a reporter under heat, run a two-drop courier route, and lift an armored sedan — while traffic flows, pedestrians walk the sidewalks, and the police answer every star you earn.
 
-**The city.** A seeded 8×8-block grid (3,760×3,760 world units) of roads, sidewalks, parks with trees and palms, and buildings drawn with pseudo-depth — walls and roofs offset by height. The east edge is a beachfront: art-deco pastel facades along the Solana avenue, Ocean Drive, a sand strip and open water with anchored boats. Golden hour is the presentation: warm directional light with long shadows off every block, a sunset gradient wash, and warm gloss streaking on the asphalt, finished with a vignette.
+**The city.** A seeded 8×8-block grid (3,760×3,760 world units) of roads, sidewalks, parks with trees and palms, and volumetric buildings with lit facades, seen from a low third-person chase camera behind the car or on foot. The east edge is a beachfront: art-deco pastel facades along the Solana avenue, Ocean Drive, a sand strip and open water with anchored boats. Golden hour is the presentation: warm directional light with long shadows off every block, a sunset gradient wash, and warm gloss streaking on the asphalt, finished with a vignette.
 
 **Systems, all live at once:**
 
