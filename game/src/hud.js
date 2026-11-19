@@ -1,5 +1,7 @@
-// hud.js — money, wanted stars, health, mission line and timer, circular minimap, toasts and the menu screens.
+// hud.js — money, wanted stars, health, mission line and timer, rectangular
+// GTA-style minimap stack, toasts and the menu screens.
 import { VIEW_W, VIEW_H, WORLD_SIZE, PALETTE, BLOCK_PITCH, ROAD_W } from './config.js';
+import { roadCenters, nearestRoadCenter } from './city.js';
 import { clamp } from './rng.js';
 import { CHAIN } from './missions.js';
 import { CREW_POOL, GEAR_POOL, GETAWAYS, TIMES, jobPlanData, planStats, formatMoney } from './planning.js';
@@ -149,41 +151,9 @@ export function drawHud(ctx, game) {
     panel(ctx, VIEW_W / 2 - w / 2, VIEW_H - 148 - i * 40, w, 34);
     ctx.fillStyle = PALETTE.hudText; ctx.fillText(t.text, VIEW_W / 2, VIEW_H - 139 - i * 40);
   });
-  // Health, bottom-left; car health and speed while driving.
-  panel(ctx, 14, VIEW_H - 62, 208, 48);
-  ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left';
-  ctx.fillText('HEALTH', 26, VIEW_H - 54);
-  ctx.fillStyle = '#4a3628'; ctx.fillRect(26, VIEW_H - 38, 184, 10);
-  ctx.fillStyle = game.player.hp > 30 ? '#8fc97f' : PALETTE.danger;
-  ctx.fillRect(26, VIEW_H - 38, 184 * clamp(game.player.hp / 100, 0, 1), 10);
-  if (game.player.inCar && game.player.car) {
-    // Vehicle cluster: name + condition % + speed as ONE compact readout,
-    // with the condition bar on its own line so text and bar never overlap.
-    const car = game.player.car;
-    const cond = Math.max(0, Math.round((car.hp / car.maxHp) * 100));
-    panel(ctx, 14, VIEW_H - 116, 232, 48);
-    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10px system-ui, sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText(car.name || 'VEHICLE', 26, VIEW_H - 108);
-    ctx.fillStyle = PALETTE.hudText; ctx.font = '700 12px system-ui, sans-serif'; ctx.textAlign = 'right';
-    ctx.fillText(cond + '% · ' + Math.round(Math.abs(car.speed) * 0.62) + ' km/h', 234, VIEW_H - 109);
-    ctx.fillStyle = '#4a3628'; ctx.fillRect(26, VIEW_H - 92, 208, 10);
-    ctx.fillStyle = '#e8a06a'; ctx.fillRect(26, VIEW_H - 92, 208 * clamp(car.hp / car.maxHp, 0, 1), 10);
-    // Radio strip under the vehicle cluster: the real station + track.
-    if (game.radio) {
-      panel(ctx, 14, VIEW_H - 148, 232, 26);
-      ctx.fillStyle = '#9fc9b8'; ctx.font = '600 10px system-ui, sans-serif'; ctx.textAlign = 'left';
-      ctx.fillText('♪ ' + game.radio.label(), 26, VIEW_H - 140);
-    }
-  }
-  // Weapon readout on foot: the gun the figure visibly holds, with its real
-  // magazine and reserve.
-  if (!game.player.inCar && game.weapon && game.screen === 'play') {
-    panel(ctx, 14, VIEW_H - 116, 208, 30);
-    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10px system-ui, sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText(game.weapon.name, 26, VIEW_H - 107);
-    ctx.fillStyle = PALETTE.hudText; ctx.font = '700 13px system-ui, sans-serif'; ctx.textAlign = 'right';
-    ctx.fillText(game.weapon.mag + ' / ' + game.weapon.reserve, 210, VIEW_H - 108);
-  }
+  // (The old bottom-left HEALTH / vehicle / weapon panels are gone: their
+  // real values now live in the minimap stack — thin bars under the map and
+  // one compact text line — drawn by drawMinimap below.)
   // GTA free-aim reticle: drawn while on foot in play and the aim predicate
   // holds (bullets in flight or a shot inside the last 700 ms — the same
   // predicate that switches view3d to the over-the-shoulder camera).
@@ -218,47 +188,139 @@ export function drawHud(ctx, game) {
   ctx.restore();
 }
 export function drawMinimap(ctx, game) {
-  const cx = VIEW_W - 92, cy = VIEW_H - 92, r = 74;
-  ctx.save();
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
-  ctx.fillStyle = '#2e2118'; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-  const scale = (r * 2) / 1500;
-  const drawDot = (wx, wy, color, size) => {
-    let dx = (wx - game.player.x) * scale, dy = (wy - game.player.y) * scale;
-    const d = Math.sqrt(dx * dx + dy * dy);
-    if (d > r - 7) { dx = dx / d * (r - 7); dy = dy / d * (r - 7); }
-    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx + dx, cy + dy, size, 0, Math.PI * 2); ctx.fill();
-  };
-  if (game.city.minimap) {
-    try {
-      const srcSize = 1500 / WORLD_SIZE * game.city.minimap.width;
-      const sx = clamp((game.player.x / WORLD_SIZE) * game.city.minimap.width - srcSize / 2, 0, game.city.minimap.width - srcSize);
-      const sy = clamp((game.player.y / WORLD_SIZE) * game.city.minimap.height - srcSize / 2, 0, game.city.minimap.height - srcSize);
-      ctx.drawImage(game.city.minimap, sx, sy, srcSize, srcSize, cx - r, cy - r, r * 2, r * 2);
-    } catch (e) {}
+  // GTA-style bottom-left stack (play frames only — drawHud never runs on
+  // the Planning Board or the results screen, whose maps stay their own):
+  // a RECTANGULAR grey road minimap, a yellow GPS route to the live
+  // objective with its REAL distance printed under the map, thin state
+  // bars directly beneath the map, and one compact text line under the
+  // bars. The radio line rides on top of the stack while driving. The
+  // whole stack keeps roughly the old bottom-left panels' footprint.
+  const mapX = 14, mapW = 176, mapH = 104;
+  const textY = VIEW_H - 27;   // compact text line row
+  const barY = textY - 19;     // first bar top (two 6 px bars, 3 px gap)
+  const distY = barY - 15;     // distance row top
+  const mapY = distY - mapH - 3;
+  const px = game.player.x, py = game.player.y;
+  const inCar = !!(game.player.inCar && game.player.car);
+  // Radio strip on top of the stack: the real station + track.
+  if (inCar && game.radio) {
+    panel(ctx, mapX, mapY - 26, 232, 22);
+    ctx.fillStyle = '#9fc9b8'; ctx.font = '600 10px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('♪ ' + game.radio.label(), mapX + 12, mapY - 20);
   }
-  ctx.fillStyle = 'rgba(26,14,12,0.25)'; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-  // Search zone: while SEARCHING, a circle around the last sighting position
+  const scale = mapW / 1500; // the old circular map's 1,500-unit window, kept
+  const cx = mapX + mapW / 2, cy = mapY + mapH / 2;
+  const clampPt = (wx, wy, inset) => [
+    clamp(cx + (wx - px) * scale, mapX + inset, mapX + mapW - inset),
+    clamp(cy + (wy - py) * scale, mapY + inset, mapY + mapH - inset),
+  ];
+  ctx.save();
+  ctx.beginPath(); ctx.rect(mapX, mapY, mapW, mapH); ctx.clip();
+  ctx.fillStyle = '#7e8287'; ctx.fillRect(mapX, mapY, mapW, mapH); // grey land
+  ctx.fillStyle = 'rgba(96,128,78,0.55)'; // parks, muted green
+  for (const pk of game.city.parks) {
+    const [x0, y0] = [cx + (pk.x - px) * scale, cy + (pk.y - py) * scale];
+    ctx.fillRect(x0, y0, pk.w * scale, pk.h * scale);
+  }
+  // The sea at the world's east edge, when the window reaches it.
+  const seaX = cx + (WORLD_SIZE - px) * scale;
+  if (seaX < mapX + mapW) { ctx.fillStyle = 'rgba(61,143,163,0.75)'; ctx.fillRect(Math.max(mapX, seaX), mapY, mapW, mapH); }
+  // White road lines from the same street-grid data the old map drew:
+  // every road centre in the window, at true road width.
+  ctx.fillStyle = '#e9e9e4';
+  const rw = Math.max(3, ROAD_W * scale);
+  for (const rc of roadCenters()) {
+    const vx = cx + (rc - px) * scale;
+    if (vx + rw / 2 > mapX && vx - rw / 2 < mapX + mapW) ctx.fillRect(vx - rw / 2, mapY, rw, mapH);
+    const hy = cy + (rc - py) * scale;
+    if (hy + rw / 2 > mapY && hy - rw / 2 < mapY + mapH) ctx.fillRect(mapX, hy - rw / 2, mapW, rw);
+  }
+  const marker = game.missions.marker ? game.missions.marker() : null;
+  // GPS route: a yellow polyline along the road grid from the player to
+  // the objective — out to the nearest road, across to the objective's
+  // road, then straight to the marker.
+  if (marker) {
+    const gx = nearestRoadCenter(marker.x), gy = nearestRoadCenter(py);
+    const pts = [[px, py], [px, gy], [gx, gy], [gx, marker.y], [marker.x, marker.y]]
+      .map(([wx, wy]) => [cx + (wx - px) * scale, cy + (wy - py) * scale]);
+    ctx.strokeStyle = '#f2c14e'; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.stroke();
+  }
+  // Search zone: while SEARCHING, a ring around the last sighting position
   // (the spot the sim's decay logic is actually counting from).
   if (game.police.stars > 0 && game.police.wantedState && game.police.wantedState(game.player) === 'SEARCHING') {
-    let dx = (game.police.lastSeenX - game.player.x) * scale, dy = (game.police.lastSeenY - game.player.y) * scale;
-    const d = Math.sqrt(dx * dx + dy * dy);
-    if (d > r - 7) { dx = dx / d * (r - 7); dy = dy / d * (r - 7); }
-    ctx.strokeStyle = 'rgba(242,193,78,0.85)'; ctx.lineWidth = 1.6;
-    ctx.beginPath(); ctx.arc(cx + dx, cy + dy, 15, 0, Math.PI * 2); ctx.stroke();
+    const [sx, sy] = clampPt(game.police.lastSeenX, game.police.lastSeenY, 10);
+    ctx.strokeStyle = 'rgba(242,193,78,0.9)'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(sx, sy, 9, 0, Math.PI * 2); ctx.stroke();
   }
-  for (const cop of game.police.cops) if (!cop.dead) drawDot(cop.x, cop.y, Math.sin(game.time * 8) > 0 ? '#ff5040' : '#4f8ef7', 3.4);
-  const marker = game.missions.marker();
-  if (marker) drawDot(marker.x, marker.y, marker.color === 'pickup' ? '#e8c832' : '#4fc96a', 4.4);
-  // Player arrow at the centre.
-  ctx.translate(cx, cy); ctx.rotate(game.player.inCar && game.player.car ? game.player.car.angle : game.player.angle);
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-5, -4.4); ctx.lineTo(-5, 4.4); ctx.closePath(); ctx.fill();
+  for (const cop of game.police.cops) {
+    if (cop.dead) continue;
+    const [dx, dy] = clampPt(cop.x, cop.y, 5);
+    ctx.fillStyle = Math.sin(game.time * 8) > 0 ? '#ff5040' : '#4f8ef7';
+    ctx.beginPath(); ctx.arc(dx, dy, 3, 0, Math.PI * 2); ctx.fill();
+  }
+  // Objective icon: a small diamond in the marker's own colour.
+  if (marker) {
+    const [ox, oy] = clampPt(marker.x, marker.y, 8);
+    ctx.beginPath(); ctx.moveTo(ox, oy - 5.5); ctx.lineTo(ox + 5.5, oy); ctx.lineTo(ox, oy + 5.5); ctx.lineTo(ox - 5.5, oy); ctx.closePath();
+    ctx.fillStyle = marker.color === 'pickup' ? '#e8c832' : '#4fc96a'; ctx.fill();
+    ctx.strokeStyle = 'rgba(20,18,14,0.8)'; ctx.lineWidth = 1; ctx.stroke();
+  }
+  // Player arrow at the centre, white with a dark edge so it reads on the
+  // pale roads.
+  ctx.translate(cx, cy); ctx.rotate(inCar ? game.player.car.angle : game.player.angle);
+  ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-5, -4.4); ctx.lineTo(-5, 4.4); ctx.closePath();
+  ctx.fillStyle = '#ffffff'; ctx.fill();
+  ctx.strokeStyle = 'rgba(20,20,22,0.7)'; ctx.lineWidth = 1; ctx.stroke();
   ctx.restore();
-  ctx.strokeStyle = 'rgba(61,143,163,0.95)'; ctx.lineWidth = 2.4;
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-  ctx.fillStyle = 'rgba(245,234,216,0.8)'; ctx.font = '600 10px system-ui, sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText('AMBER COAST', cx, cy + r + 4);
+  ctx.strokeStyle = 'rgba(18,16,14,0.9)'; ctx.lineWidth = 2;
+  ctx.strokeRect(mapX, mapY, mapW, mapH);
+  ctx.font = '700 10px system-ui, sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(18,16,14,0.55)'; ctx.fillText('N', mapX + mapW - 4, mapY + 4);
+  ctx.fillStyle = '#ffffff'; ctx.fillText('N', mapX + mapW - 5, mapY + 3);
+  // Distance under the map: the REAL sim distance to the objective. The
+  // world runs ≈8.6 units per metre (view3d's scale contract), so short
+  // hops print in metres and long ones in miles — never a fixed number.
+  ctx.textAlign = 'left';
+  if (marker) {
+    const metres = Math.hypot(marker.x - px, marker.y - py) / 8.6;
+    const distText = metres >= 1000 ? (metres / 1609.34).toFixed(2) + 'mi' : Math.round(metres) + 'm';
+    ctx.fillStyle = PALETTE.hudText; ctx.font = '700 12px system-ui, sans-serif';
+    ctx.fillText(distText, mapX + 2, distY);
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10px system-ui, sans-serif';
+    ctx.fillText('· ' + (marker.label || '').toUpperCase(), mapX + 4 + ctx.measureText(distText).width + 2, distY + 2);
+  }
+  // Thin bars directly beneath the map, from REAL state only: green is
+  // health; blue is vehicle integrity while driving, or the carried
+  // weapon's magazine on foot. (No yellow bar: the sim holds no fractional
+  // heat-progress value — police.stars is an integer level and the plan's
+  // fractional heat is a board forecast, not live progress — so no bar is
+  // drawn rather than inventing one.)
+  const bar = (y, frac, col) => {
+    ctx.fillStyle = 'rgba(16,13,11,0.55)'; ctx.fillRect(mapX, y, mapW, 6);
+    ctx.fillStyle = col; ctx.fillRect(mapX, y, mapW * clamp(frac, 0, 1), 6);
+  };
+  bar(barY, game.player.hp / 100, game.player.hp > 30 ? '#63b06a' : PALETTE.danger);
+  if (inCar) bar(barY + 9, game.player.car.hp / game.player.car.maxHp, '#5f88c4');
+  else if (game.weapon && game.weapon.magSize) bar(barY + 9, game.weapon.mag / game.weapon.magSize, '#5f88c4');
+  // Compact text line under the bars: vehicle name + integrity % + speed
+  // while driving; the carried weapon and its real count on foot.
+  ctx.textBaseline = 'top';
+  if (inCar) {
+    const car = game.player.car;
+    const cond = Math.max(0, Math.round((car.hp / car.maxHp) * 100));
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10px system-ui, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(car.name || 'VEHICLE', mapX + 2, textY + 2);
+    ctx.fillStyle = PALETTE.hudText; ctx.font = '700 10px system-ui, sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(cond + '% · ' + Math.round(Math.abs(car.speed) * 0.62) + ' km/h', mapX + mapW - 2, textY + 2);
+  } else if (game.weapon && game.screen === 'play') {
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10px system-ui, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(game.weapon.name, mapX + 2, textY + 2);
+    ctx.fillStyle = PALETTE.hudText; ctx.font = '700 10px system-ui, sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(game.weapon.mag + ' / ' + game.weapon.reserve, mapX + mapW - 2, textY + 2);
+  }
 }
 
 // The board's district map: Vice City cartography pattern (pastel land,

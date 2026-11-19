@@ -29,7 +29,7 @@ const BUILD_SCALE = 3.2;    // building render height = data height × this
 const SUNSET_TOP = [86, 62, 102];    // dusty plum
 const SUNSET_MID = [199, 108, 112];  // rose
 const SUNSET_HOR = [255, 178, 112];  // orange-pink horizon
-const FOG = [226, 152, 118];
+const FOG = [214, 184, 166]; // GTA-V round: pale warm GREY (was saturated peach) — distance haze, not a wash
 const SUN = [255, 196, 116];
 // Time-of-day grades — the plan's time choice made visible. GOLDEN is the
 // game's established sunset; DUSK is the same sun an hour later: deeper
@@ -60,7 +60,7 @@ function parseColor(str, fallback) {
   const m = /(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(str);
   return m ? [+m[1], +m[2], +m[3]] : fallback;
 }
-const ASPHALT = [60, 53, 55], SIDEWALK_C = [122, 102, 80], PLOT = [99, 81, 62];
+const ASPHALT = [60, 53, 55], SIDEWALK_C = [122, 102, 80], PLOT = [93, 79, 60]; // muted (GTA-V round): sunlit plot strips read as orange wedges against grass
 
 // ------------------------------------------------- procedural texture atlas
 // One 1024x1024 offscreen atlas, generated ONCE at first use from a seeded
@@ -111,17 +111,31 @@ function paintAsphalt(c, t, marked, seed) {
 }
 function paintConcrete(c, t, seed) {
   const R = lcg(seed);
-  c.fillStyle = 'rgb(128,114,96)'; c.fillRect(t.x, t.y, t.w, t.h);
+  // Cooler grey base (GTA-V round): at the old warm brown the apron read
+  // as timber; asphalt-concrete grey + dense speckle + a square joint
+  // grid (the ground mapping now repeats the tile 1x2 per cell, so the
+  // 64 px joints land square) gives the surface its concrete identity.
+  c.fillStyle = 'rgb(122,114,104)'; c.fillRect(t.x, t.y, t.w, t.h);
   for (let i = 0; i < 12; i++) {
     const px = t.x + R() * t.w, py = t.y + R() * t.h, r = 30 + R() * 80;
     c.fillStyle = R() < 0.5 ? 'rgba(255,246,226,0.06)' : 'rgba(20,16,12,0.07)';
     c.beginPath(); c.ellipse(px, py, r, r * 0.6, R() * 3, 0, Math.PI * 2); c.fill();
   }
-  c.strokeStyle = 'rgba(38,32,26,0.55)'; c.lineWidth = 3; // slab joint grid every 64 px
+  for (let i = 0; i < 260; i++) { // aggregate speckle: breaks any long seam read
+    c.fillStyle = R() < 0.5 ? 'rgba(30,28,26,0.13)' : 'rgba(236,232,222,0.10)';
+    c.fillRect(t.x + R() * t.w, t.y + R() * t.h, 1 + R() * 2.4, 1 + R() * 2);
+  }
+  c.strokeStyle = 'rgba(38,34,30,0.55)'; c.lineWidth = 3; // slab joint grid every 64 px
   for (let gx = 0; gx <= t.w; gx += 64) { c.beginPath(); c.moveTo(t.x + gx, t.y); c.lineTo(t.x + gx, t.y + t.h); c.stroke(); }
   for (let gy = 0; gy <= t.h; gy += 64) { c.beginPath(); c.moveTo(t.x, t.y + gy); c.lineTo(t.x + t.w, t.y + gy); c.stroke(); }
   c.strokeStyle = 'rgba(255,255,255,0.07)'; c.lineWidth = 1;
   for (let gx = 3; gx <= t.w; gx += 64) { c.beginPath(); c.moveTo(t.x + gx, t.y); c.lineTo(t.x + gx, t.y + t.h); c.stroke(); }
+  c.strokeStyle = 'rgba(30,27,24,0.4)'; c.lineWidth = 1.6; // short cross cracks, never full runs
+  for (let i = 0; i < 5; i++) {
+    let px = t.x + R() * t.w, py = t.y + R() * t.h; c.beginPath(); c.moveTo(px, py);
+    for (let k = 0; k < 3; k++) { px += (R() - 0.5) * 44; py += (R() - 0.5) * 30; c.lineTo(px, py); }
+    c.stroke();
+  }
   for (let i = 0; i < 7; i++) { c.fillStyle = 'rgba(24,20,16,0.28)'; c.beginPath(); c.ellipse(t.x + R() * t.w, t.y + R() * t.h, 3 + R() * 4, 2 + R() * 3, 0, 0, Math.PI * 2); c.fill(); }
 }
 function paintFacade(c, t, warm, seed) {
@@ -233,6 +247,55 @@ function atlas() {
   return ATLAS;
 }
 function tileImg(name) { atlas(); return TILE_IMGS[name] || null; }
+// ------------------------------------------------------- plates and signs
+// Readable text in a polygon renderer needs textures, so plates and shop
+// signs get their own small canvases, generated once and cached. All text
+// is original: plates read LEONIDA over a registration derived from the
+// car's own id; signs are invented Amber Coast businesses in muted tones.
+const PLATE_DIMS = { w: 160, h: 50 };
+const PLATE_IMGS = new Map();
+function plateImg(id) {
+  if (PLATE_IMGS.has(id)) return PLATE_IMGS.get(id);
+  let cv = null;
+  try {
+    cv = document.createElement('canvas'); cv.width = PLATE_DIMS.w; cv.height = PLATE_DIMS.h;
+    const c = cv.getContext('2d');
+    c.fillStyle = '#edeade'; c.fillRect(0, 0, PLATE_DIMS.w, PLATE_DIMS.h);
+    c.strokeStyle = '#3a3f4a'; c.lineWidth = 4; c.strokeRect(2, 2, PLATE_DIMS.w - 4, PLATE_DIMS.h - 4);
+    c.fillStyle = '#31405c'; c.font = '700 12px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'top';
+    c.fillText('L E O N I D A', PLATE_DIMS.w / 2, 5);
+    const letters = 'ABCDEFGHJKLMNPRSTUVWXYZ';
+    const reg = letters[(id * 7 + 3) % 23] + letters[(id * 11 + 8) % 23] + ' ' + (100 + ((id * 137 + 41) % 900));
+    c.fillStyle = '#1c1e24'; c.font = '700 25px system-ui, sans-serif';
+    c.fillText(reg, PLATE_DIMS.w / 2, 20);
+  } catch (e) { cv = null; }
+  PLATE_IMGS.set(id, cv);
+  return cv;
+}
+const SIGNS = [
+  { name: 'GATOR PAWN', bg: [146, 66, 54] },
+  { name: 'TACO SOL', bg: [172, 116, 48] },
+  { name: 'AMBER RIMS', bg: [56, 102, 110] },
+  { name: 'SALTY BAIT CO', bg: [96, 124, 84] },
+  { name: 'PALM LIQUOR', bg: [128, 84, 110] },
+];
+const SIGN_DIMS = { w: 256, h: 36 };
+const SIGN_IMGS = [];
+function signImg(idx) {
+  if (SIGN_IMGS[idx]) return SIGN_IMGS[idx];
+  let cv = null;
+  try {
+    const s = SIGNS[idx % SIGNS.length];
+    cv = document.createElement('canvas'); cv.width = SIGN_DIMS.w; cv.height = SIGN_DIMS.h;
+    const c = cv.getContext('2d');
+    c.fillStyle = `rgb(${s.bg[0]},${s.bg[1]},${s.bg[2]})`; c.fillRect(0, 0, SIGN_DIMS.w, SIGN_DIMS.h);
+    c.strokeStyle = 'rgba(24,18,14,0.55)'; c.lineWidth = 3; c.strokeRect(1.5, 1.5, SIGN_DIMS.w - 3, SIGN_DIMS.h - 3);
+    c.fillStyle = '#f7efdd'; c.font = '700 22px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(s.name, SIGN_DIMS.w / 2, SIGN_DIMS.h / 2 + 1);
+  } catch (e) { cv = null; }
+  SIGN_IMGS[idx] = cv;
+  return cv;
+}
 const GRASS_C = [84, 100, 60], SAND_C = rgb(PALETTE.sand), WATER_C = rgb(PALETTE.water);
 const GLASS = [16, 23, 34], TYRE = [12, 12, 15];
 
@@ -362,7 +425,7 @@ function addPoly(pts, base, opts = {}) {
   }
   const sl = surfaceLight(pts, opts);
   const light = sl.light;
-  const fogT = opts.noFog ? 0 : clamp((depth - 240) / 1150, 0, 0.60);
+  const fogT = opts.noFog ? 0 : clamp((depth - 200) / 1080, 0, 0.66);
   const a = opts.alpha === undefined ? 1 : opts.alpha;
   const fogC = F.fog || FOG;
   const envC = F.envC || [232, 150, 112];
@@ -444,7 +507,8 @@ function addTexQuad(pts, tileName, uvs, opts = {}) {
   const bw = mxx - mnx, bh = mxy - mny;
   if (!opts.force && bh < 36) { addPoly(pts, flat, opts); return false; }
   const ground = opts.kind === 'ground';
-  if (ground) { if (F.texGround >= TEX_GROUND_CAP) { addPoly(pts, flat, opts); return false; } F.texGround++; }
+  if (opts.kind === 'plate' || opts.kind === 'sign') { /* small text quads: outside the surface budgets */ }
+  else if (ground) { if (F.texGround >= TEX_GROUND_CAP) { addPoly(pts, flat, opts); return false; } F.texGround++; }
   else { if (F.texBld >= TEX_BLD_CAP) { addPoly(pts, flat, opts); return false; } F.texBld++; }
   // Lighting: the shared material model. A textured face cannot take
   // per-channel specular/env adds, so those fold into the overlay as a
@@ -453,7 +517,7 @@ function addTexQuad(pts, tileName, uvs, opts = {}) {
   if (opts.matNear || opts.matFar) matOpts.mat = (depth <= 500 ? opts.matNear : opts.matFar) || opts.matFar || opts.matNear;
   const sl = surfaceLight(pts, matOpts);
   const light = sl.light;
-  const fogT = opts.noFog ? 0 : clamp((depth - 240) / 1150, 0, 0.60);
+  const fogT = opts.noFog ? 0 : clamp((depth - 200) / 1080, 0, 0.66);
   const L = light * (F.lightScale || 1);
   // texShade [floor, gain] compresses the overlay's shading range for
   // facades/shops: the tile's lit windows and awnings are emissive-class
@@ -494,7 +558,7 @@ function addTexQuad(pts, tileName, uvs, opts = {}) {
     cells.push({ s: cc.cam.map(projectCam), u: cc.uv, clipped: cc.cam.length !== 4 });
   }
   if (!cells.length) { addPoly(pts, flat, opts); return false; }
-  F.faces.push({ pts: spts, depth, tex: { tile: tileName, cells, alpha: opts.alpha === undefined ? 1 : opts.alpha },
+  F.faces.push({ pts: spts, depth, tex: { tile: tileName, cells, alpha: opts.alpha === undefined ? 1 : opts.alpha, plateId: opts.plateId, signIdx: opts.signIdx },
     overlay: { dark: clamp(1 - Leff, 0, 0.78), lite: clamp(clamp((Leff - 1) * 0.32, 0, 0.2) + specLite, 0, 0.34), fogT, fogC: F.fog || FOG } });
   return true;
 }
@@ -549,8 +613,11 @@ function drawTexCell(ctx, img, t, cell) {
   for (let k = 1; k + 1 < D.length; k++) drawTexTri3(ctx, img, t, [D[0], D[k], D[k + 1]], [S[0], S[k], S[k + 1]]);
 }
 function flushTexFace(ctx, f) {
-  const img = tileImg(f.tex.tile); if (!img) return;
-  const t = TILES[f.tex.tile]; if (!t) return;
+  let img, t;
+  if (f.tex.tile === 'plate') { img = plateImg(f.tex.plateId || 1); t = PLATE_DIMS; }
+  else if (f.tex.tile === 'sign') { img = signImg(f.tex.signIdx || 0); t = SIGN_DIMS; }
+  else { img = tileImg(f.tex.tile); t = TILES[f.tex.tile]; }
+  if (!img || !t) return;
   if (f.tex.alpha < 1) ctx.globalAlpha = f.tex.alpha;
   for (const cell of f.tex.cells) drawTexCell(ctx, img, t, cell);
   ctx.globalAlpha = 1;
@@ -740,9 +807,9 @@ function addBuildingShadow(b, H) {
   const { hull } = shadowHull(corners, len);
   if (hull.length >= 3) {
     const bcx = b.x + b.w / 2, bcy = b.y + b.h / 2;
-    const exp = hull.map(([px, py]) => [bcx + (px - bcx) * 1.05, bcy + (py - bcy) * 1.05]);
-    addPoly(exp.map(([px, py]) => [px, py, 0.33]), [12, 9, 13], { alpha: 0.13, light: 1 }); // outer soft pass
-    addPoly(hull.map(([px, py]) => [px, py, 0.35]), [12, 9, 13], { alpha: 0.30, light: 1 });
+    const exp = hull.map(([px, py]) => [bcx + (px - bcx) * 1.09, bcy + (py - bcy) * 1.09]);
+    addPoly(exp.map(([px, py]) => [px, py, 0.33]), [12, 9, 13], { alpha: 0.15, light: 1 }); // outer soft pass, widened (GTA-V round: feathered shadow edges)
+    addPoly(hull.map(([px, py]) => [px, py, 0.35]), [12, 9, 13], { alpha: 0.26, light: 1 });
   }
   const m = 6; // AO contact band so the volume meets the ground with weight
   addPoly([[b.x - m, b.y - m, 0.45], [b.x + b.w + m, b.y - m, 0.45], [b.x + b.w + m, b.y + b.h + m, 0.45], [b.x - m, b.y + b.h + m, 0.45]], [12, 10, 13], { alpha: 0.22, light: 1 });
@@ -772,7 +839,7 @@ function drawGround(game) {
       if (cx < -420 || cx > WORLD_SIZE + 460 || cy < -420 || cy > WORLD_SIZE + 420) continue;
       const base = groundKind(game, cx, cy);
       const cellHash = hash01((Math.floor(cx / CELL) * 13 + Math.floor(cy / CELL) * 29));
-      const v = 0.90 + cellHash * 0.20;
+      const v = 0.93 + cellHash * 0.14; // narrower cell banding (GTA-V round): hard per-cell steps made ground read as geometry
       const wHash = hash01(Math.floor(cx / 46) * 7 + Math.floor(cy / 46) * 13);
       const col = base === WATER_C && wHash > 0.86 ? [110, 178, 182] : base === WATER_C && wHash > 0.68 ? [64, 138, 152] : [base[0] * v, base[1] * v, base[2] * v];
       const corners = [[-HALF, -HALF], [HALF, -HALF], [HALF, HALF], [-HALF, HALF]].map(([df, dl]) => [
@@ -797,11 +864,15 @@ function drawGround(game) {
         // the concrete slab joints landed every ~11 world units — the
         // mission apron read as oversized wooden decking — and the
         // sandgrass patches spanned whole cells (results-lawn plaid).
-        // Concrete now repeats 2x1 per cell (joints ~2.8 x 5.5 units,
-        // fine paving grain) and sandgrass a full tile width (v stays
-        // inside its grass/sand half). Asphalt keeps its praised 0.5 mapping.
+        // GTA-V round: the wash fix's 2x1 concrete repeat was anisotropic
+        // (joints 2.8 units across, 11 along) — the long unbroken seams
+        // still read as timber planks. Concrete now repeats 1x2 per cell,
+        // so the 64 px joints land SQUARE at ~5.5 x 5.5 units: an
+        // expansion-joint grid, not boards. Sandgrass keeps a full tile
+        // width (v stays inside its grass/sand half). Asphalt keeps its
+        // praised 0.5 mapping.
         let uRng = 0.5, vRng = 0.5;
-        if (gTile === 'concrete') { uRng = 2; vRng = 1; u0 = 0; v0 = 0; }
+        if (gTile === 'concrete') { uRng = 1; vRng = 2; u0 = 0; v0 = 0; }
         else if (gTile === 'sandgrass') { uRng = 1; u0 = 0; }
         const flip = hash01(cellI * 71 + cellJ * 37) > 0.6;
         const US = [0, 1, 1, 0], VS = [0, 0, 1, 1];
@@ -1027,21 +1098,29 @@ function drawBuilding(game, b) {
       { n: [-1, 0], flat: wallSun, wid: b.h, axis: 'x', fixed: b.x, out: -1, mk: (z0, z1) => [[b.x, b.y + b.h, z0], [b.x, b.y, z0], [b.x, b.y, z1], [b.x, b.y + b.h, z1]] },
     ];
     let best = null, bestD = 0;
+    // Board-frame facade treatment (GTA-V round): on the planning screen
+    // the facade beside the stats column collapsed to dark speckle at
+    // 320 px — there only, windows repeat on a larger 130-unit rhythm and
+    // the facade overlay range compresses (lower window contrast). The
+    // board layout and every other frame's facades are untouched.
+    const planScr = F.screen === 'planning';
+    const repDiv = planScr ? 130 : 95;
+    const facShade = planScr ? [0.64, 0.36] : [0.58, 0.42];
     for (const w of walls) {
       const mid = w.axis === 'y' ? [cx, w.fixed, H / 2] : [w.fixed, cy, H / 2];
       const d = (F.cam[0] - mid[0]) * w.n[0] + (F.cam[1] - mid[1]) * w.n[1];
       if (d > bestD) { bestD = d; best = w; }
       if (d <= 0) continue;
-      const uRep = Math.max(1, Math.round(w.wid / 95));
+      const uRep = Math.max(1, Math.round(w.wid / repDiv));
       const wKey = w.axis + ((w.n[0] + w.n[1]) > 0 ? 'p' : 'm');
       if (shopBand) {
         const uRepS = Math.max(1, Math.round(w.wid / 95));
         if (!addTexQuad(w.mk(0, 17), 'shop', [[0, 0], [uRepS, 0], [uRepS, 1], [0, 1]], { flat: w.flat, mat: MAT.FACADE, texShade: [0.68, 0.32] })) texFail.add(wKey);
-        const vRep = Math.max(1, Math.round((H - 17) / 95));
-        if (!addTexQuad(w.mk(17, H), tileT, [[0, 0], [uRep, 0], [uRep, vRep], [0, vRep]], { flat: w.flat, mat: MAT.FACADE, texShade: [0.58, 0.42] })) texFail.add(wKey);
+        const vRep = Math.max(1, Math.round((H - 17) / repDiv));
+        if (!addTexQuad(w.mk(17, H), tileT, [[0, 0], [uRep, 0], [uRep, vRep], [0, vRep]], { flat: w.flat, mat: MAT.FACADE, texShade: facShade })) texFail.add(wKey);
       } else {
-        const vRep = Math.max(1, Math.round(H / 95));
-        if (!addTexQuad(w.mk(0, H), tileT, [[0, 0], [uRep, 0], [uRep, vRep], [0, vRep]], { flat: w.flat, mat: MAT.FACADE, texShade: [0.58, 0.42] })) texFail.add(wKey);
+        const vRep = Math.max(1, Math.round(H / repDiv));
+        if (!addTexQuad(w.mk(0, H), tileT, [[0, 0], [uRep, 0], [uRep, vRep], [0, vRep]], { flat: w.flat, mat: MAT.FACADE, texShade: facShade })) texFail.add(wKey);
       }
     }
     const uRepR = Math.max(1, Math.round(b.w / 70)), vRepR = Math.max(1, Math.round(b.h / 70));
@@ -1056,10 +1135,26 @@ function drawBuilding(game, b) {
         const zAC = 24 + hash01(bidT * 7.1) * Math.max(6, H - 44);
         addBox(best.axis === 'y' ? along : best.fixed + best.out * 1.6, best.axis === 'y' ? best.fixed + best.out * 1.6 : along, zAC, 3.4, 3.4, 2.6, 0, [104, 106, 112], {});
       }
-      if (shopBand && hash01(bidT * 43.9) < 0.55) {
-        const len = Math.min(30, best.wid * 0.5);
-        if (best.axis === 'y') addBox(cx, best.fixed + best.out * 1.8, 14.5, len / 2, 1.1, 2.6, 0, [150, 92, 128], {});
-        else addBox(best.fixed + best.out * 1.8, cy, 14.5, 1.1, len / 2, 2.6, 0, [150, 92, 128], {});
+      if (shopBand && hash01(bidT * 43.9) < 0.85) {
+        // Bold storefront sign inside the shop band (GTA-V round): a muted
+        // backing box carrying a textured face with an invented Amber
+        // Coast business name, sized to read at native resolution on the
+        // chase and mission streets. The quad's along-wall direction is
+        // flipped to the frame's screen-right, so the name never mirrors.
+        const sIdx = Math.floor(hash01(bidT * 97.3) * SIGNS.length) % SIGNS.length;
+        const sBg = SIGNS[sIdx].bg.map((v) => v * 0.82);
+        const len = Math.min(38, best.wid * 0.62);
+        if (best.axis === 'y') addBox(cx, best.fixed + best.out * 1.8, 14.0, len / 2, 1.1, 2.6, 0, sBg, {});
+        else addBox(best.fixed + best.out * 1.8, cy, 14.0, 1.1, len / 2, 2.6, 0, sBg, {});
+        const along = best.axis === 'y' ? [1, 0] : [0, 1];
+        if (along[0] * F.r[0] + along[1] * F.r[1] < 0) { along[0] = -along[0]; along[1] = -along[1]; }
+        const cen = best.axis === 'y' ? [cx, best.fixed + best.out * 3.05] : [best.fixed + best.out * 3.05, cy];
+        const a0 = [cen[0] - along[0] * len / 2, cen[1] - along[1] * len / 2];
+        const a1 = [cen[0] + along[0] * len / 2, cen[1] + along[1] * len / 2];
+        addTexQuad(
+          [[a0[0], a0[1], 11.4], [a1[0], a1[1], 11.4], [a1[0], a1[1], 16.6], [a0[0], a0[1], 16.6]],
+          'sign', [[0, 0], [1, 0], [1, 1], [0, 1]],
+          { flat: sBg, light: 1.05, force: true, maxDist: 700, kind: 'sign', signIdx: sIdx });
       }
     }
     // Wet-street mirror candidates (Stage C collects, render loop draws).
@@ -1140,6 +1235,27 @@ function drawBuilding(game, b) {
           addQuad(mk(tx, 12.7, -0.45), mk(tx + 1.3, 12.7, -0.45), mk(tx + 1.3, 14.6, -0.45), mk(tx, 14.6, -0.45), [38, 30, 26], { light: 1.0 });
         }
       }
+    }
+    // Bold storefront sign on flat-path faces too (GTA-V round): the
+    // chase street's nearest buildings take this path (grazing guard), so
+    // without a flat-path sign the chase frame would carry no readable
+    // signage at all. One sign per face, centred, inside the shop band's
+    // z-range, proud of the tick plates; the along direction flips to
+    // screen-right so the name never mirrors.
+    if (distC < 760 && hash01(bid * 17.3 + (face.axis === 'x' ? 7 : 1)) < 0.75) {
+      const sIdx = Math.floor(hash01(bid * 61.7 + (face.axis === 'x' ? 3 : 0)) * SIGNS.length) % SIGNS.length;
+      const sBg = SIGNS[sIdx].bg.map((v) => v * 0.82);
+      const len = Math.min(38, (face.to - face.from) * 0.4);
+      const mid = (face.from + face.to) / 2;
+      const alongDir = face.axis === 'y' ? [1, 0] : [0, 1];
+      const flip = (alongDir[0] * F.r[0] + alongDir[1] * F.r[1]) < 0;
+      const aA = flip ? mid + len / 2 : mid - len / 2, aB = flip ? mid - len / 2 : mid + len / 2;
+      addBox(face.axis === 'y' ? mid : face.fixed + face.out[0] * 0.1, face.axis === 'y' ? face.fixed + face.out[1] * 0.1 : mid, 14.0,
+        face.axis === 'y' ? len / 2 : 1.0, face.axis === 'y' ? 1.0 : len / 2, 2.6, 0, sBg, {});
+      addTexQuad(
+        [mk(aA, 11.4, 1.3), mk(aB, 11.4, 1.3), mk(aB, 16.6, 1.3), mk(aA, 16.6, 1.3)],
+        'sign', [[0, 0], [1, 0], [1, 1], [0, 1]],
+        { flat: sBg, light: 1.05, force: true, maxDist: 700, kind: 'sign', signIdx: sIdx });
     }
     // Trim bands: a lighter horizontal band every ~50 units breaks the
     // facade into storeys even where windows are sparse (texture pass).
@@ -1319,6 +1435,18 @@ function drawCar3D(car, game) {
     const hg1 = LP(L / 2 + 0.4, W / 2 - 3.4, 5.8), hg2 = LP(L / 2 + 0.4, -W / 2 + 3.4, 5.8);
     addGlow(hg1[0], hg1[1], 5.8, 9, [255, 243, 190], 0.22);
     addGlow(hg2[0], hg2[1], 5.8, 9, [255, 243, 190], 0.22);
+  }
+  // Rear plate (GTA-V round): a light textured plate sitting proud of the
+  // bumper's back face — LEONIDA over a registration derived from this
+  // car's own id (see plateImg). Corners run screen-left to screen-right
+  // as seen from behind (local -y to +y is screen-right from the rear)
+  // with v rising with z, so the text reads true, never mirrored.
+  {
+    const plx = -L / 2 - 2.55, pw2 = 4.3, pz = 4.4, ph2 = 1.35;
+    addTexQuad(
+      [LP(plx, -pw2, pz - ph2), LP(plx, pw2, pz - ph2), LP(plx, pw2, pz + ph2), LP(plx, -pw2, pz + ph2)],
+      'plate', [[0, 0], [1, 0], [1, 1], [0, 1]],
+      { flat: [237, 234, 222], light: 1.04, force: true, maxDist: 900, kind: 'plate', plateId: car.id || 1, ...opts });
   }
   if (car.isCop) {
     // White band + flashing light bar (phase from the frozen game clock: deterministic).
