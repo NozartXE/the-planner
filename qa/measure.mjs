@@ -47,7 +47,7 @@ const scale = await evaluate(`(() => {
 console.log('SCALE', JSON.stringify(scale));
 
 // (b) chase cops in frame + (c) blank estimate per shot
-for (const shot of ['title', 'chase', 'mission', 'results']) {
+for (const shot of ['board', 'chase', 'mission', 'results']) {
   await load(shot);
   const m = await evaluate(`(() => {
     const g = window.__MN.game; const P = window.__MN.project;

@@ -12,6 +12,9 @@ export class Police {
     this.lastSeenX = 0;
     this.lastSeenY = 0;
     this.decaying = false;
+    // Ms between star drops once decay opens; the plan's escape window sets
+    // it at execution (planning.js decayIntervalForPlan), default legacy pace.
+    this.decayIntervalMs = 2800;
   }
   // Tactical state per unit, derived from the cop's REAL position and role
   // relative to the player: close alongside contact range reads PIT, a unit
@@ -64,7 +67,7 @@ export class Police {
     if (nearest < 400) { this.lastSeenAt = now; this.lastSeenX = player.x; this.lastSeenY = player.y; }
     this.assignTactics(player);
     this.decaying = this.stars > 0 && now - this.lastCrimeAt > WANTED_DECAY_MS && now - this.lastSeenAt > 2600;
-    if (this.decaying && now - (this._lastDecayAt || 0) > 2800) {
+    if (this.decaying && now - (this._lastDecayAt || 0) > this.decayIntervalMs) {
       this._lastDecayAt = now;
       this.stars = Math.max(0, this.stars - 1);
       if (this.stars === 0) this.lastCrimeAt = -99999;

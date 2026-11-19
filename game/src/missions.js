@@ -18,6 +18,7 @@ export class Missions {
     this.markedCar = null;
     this.briefUntil = 0;
     this.lastBrief = '';
+    this.lootGrabbed = 0;
   }
   current() { return CHAIN[this.index % CHAIN.length]; }
   payFor(def) { return Math.round(def.pay * (1 + 0.25 * this.loop)); }
@@ -36,7 +37,7 @@ export class Missions {
   marker() {
     const def = this.current();
     if (!this.active) return null;
-    if (this.stage === 'pickup' && def.pickup) return { x: def.pickup.x, y: def.pickup.y, color: 'pickup', label: def.pickup.name };
+    if ((this.stage === 'pickup' || this.stage === 'grab') && def.pickup) return { x: def.pickup.x, y: def.pickup.y, color: 'pickup', label: def.pickup.name };
     if (this.stage === 'stealMarked' && this.markedCar) return { x: this.markedCar.x, y: this.markedCar.y, color: 'pickup', label: 'Armored sedan' };
     if (this.stage === 'steal') return { x: def.deliver.x, y: def.deliver.y, color: 'deliver', label: def.deliver.name, needsCar: true };
     if (this.stage === 'dropA' && def.drops) return { x: def.drops[0].x, y: def.drops[0].y, color: 'deliver', label: def.drops[0].name };
@@ -46,13 +47,15 @@ export class Missions {
     return null;
   }
   // Ordered phase list for the current job definition, so the HUD's stage
-  // pips count real stages of the chain the sim actually walks.
+  // pips count real stages of the chain the sim actually walks. Pickup jobs
+  // walk a GRAB stage: the take accumulates at the plan's grab rate before
+  // the run to the drop — the planning layer made visible in the chain.
   phases() {
     const def = this.current();
     if (def.stealMarked) return ['stealMarked', 'deliver'];
     if (def.requiresCar) return ['steal', 'deliver'];
-    if (def.drops) return ['pickup', 'dropA', 'dropB'];
-    if (def.pickup) return ['pickup', 'deliver'];
+    if (def.drops) return ['pickup', 'grab', 'dropA', 'dropB'];
+    if (def.pickup) return ['pickup', 'grab', 'deliver'];
     return ['deliver'];
   }
   phaseInfo() {
@@ -63,6 +66,7 @@ export class Missions {
   nextText() {
     if (!this.active) return '';
     const m = this.marker();
+    if (this.stage === 'grab') return 'Grab the take at ' + this.current().pickup.name;
     if (this.stage === 'pickup') return 'Reach ' + this.current().pickup.name;
     if (this.stage === 'steal') return 'Steal a car, then reach ' + this.current().deliver.name;
     if (this.stage === 'stealMarked') return 'Steal the marked armored sedan';
@@ -73,6 +77,7 @@ export class Missions {
     if (!this.active) return '';
     const def = this.current();
     const m = this.marker();
+    if (this.stage === 'grab') return `${def.title}: grabbing the take`;
     if (this.stage === 'pickup') return `${def.title}: reach ${def.pickup.name}`;
     if (this.stage === 'steal') return `${def.title}: steal a car, deliver to ${def.deliver.name}`;
     if (this.stage === 'stealMarked') return `${def.title}: steal the marked sedan`;
@@ -105,9 +110,23 @@ export class Missions {
     const at = (place, r) => place && dist(p.x, p.y, place.x, place.y) < (r || 44);
     if (this.stage === 'pickup' && at(def.pickup)) {
       if (ctx.sfx) ctx.sfx.pickup();
-      if (def.forcedOnPickup) ctx.setWanted(def.forcedOnPickup);
-      if (def.drops) { this.stage = 'dropA'; if (ctx.toast) ctx.toast('Package collected — first drop: ' + def.drops[0].name); }
-      else { this.stage = 'deliver'; if (ctx.toast) ctx.toast('Collected — deliver to ' + def.deliver.name); }
+      // The grab: loot accumulates at the plan's crew-driven grab rate; when
+      // the take is full the alarm trips at the plan's forecast heat (which
+      // replaces the old fixed forced heat for planned jobs).
+      this.stage = 'grab';
+      this.lootGrabbed = 0;
+      if (ctx.toast) ctx.toast('Grabbing the take…');
+      return;
+    }
+    if (this.stage === 'grab') {
+      const target = ctx.grabTarget ? ctx.grabTarget() : 0;
+      const rate = ctx.grabRate ? ctx.grabRate() : 99999;
+      this.lootGrabbed = Math.min(target, (this.lootGrabbed || 0) + rate * dt);
+      if (this.lootGrabbed >= target) {
+        if (ctx.onGrabDone) ctx.onGrabDone(this.lootGrabbed);
+        if (def.drops) { this.stage = 'dropA'; if (ctx.toast) ctx.toast('Take secured — first drop: ' + def.drops[0].name); }
+        else { this.stage = 'deliver'; if (ctx.toast) ctx.toast('Take secured — deliver to ' + def.deliver.name); }
+      }
       return;
     }
     if (this.stage === 'stealMarked') {
@@ -126,7 +145,9 @@ export class Missions {
     const finalPlace = this.stage === 'dropB' ? def.drops[1] : def.deliver;
     if ((this.stage === 'deliver' || this.stage === 'dropB') && at(finalPlace)) {
       if (def.requiresCar && !p.inCar) { if (ctx.toast && Math.random() < 0.01) ctx.toast('You need to arrive in a car.'); return; }
-      const pay = this.payFor(def);
+      // The context settles the plan's ledger (gross to net) when it can;
+      // the plain payFor path remains for unplanned (legacy) runs.
+      const pay = ctx.payFor ? ctx.payFor(def, this.lootGrabbed || 0) : this.payFor(def);
       ctx.addMoney(pay);
       if (ctx.sfx) ctx.sfx.jingle();
       if (ctx.toast) ctx.toast(`Job done: ${def.title} — $${pay}`);

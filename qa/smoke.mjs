@@ -39,6 +39,9 @@ const { applyShot } = await import('../game/src/shots.js');
 const { renderGame } = await import('../game/src/render.js');
 const { STATIONS } = await import('../game/src/radio.js');
 const { CHAIN } = await import('../game/src/missions.js');
+const planning = await import('../game/src/planning.js');
+const { applyShot: applyShotFn } = await import('../game/src/shots.js');
+void applyShotFn;
 
 const game = createGame();
 check('1 boot: game created with city, traffic, peds', game.city.buildings.length > 100 && game.traffic.length === 26 && game.peds.length === 64);
@@ -47,10 +50,15 @@ const step = (dt) => updateGame(game, dt || 1 / 60);
 game.screen = 'play';
 for (let i = 0; i < 30; i++) step(1 / 60);
 check('3 sim: 30 play steps advance time without error', game.time > 0.4 && game.player.hp > 0);
-// Mission phases
+// Mission phases + the planning layer: live stats recompute on every change
 const def = game.missions.start(game.nowMs);
 const ph = game.missions.phaseInfo();
-check('4 missions: chain of 5, phase info sane', CHAIN.length === 5 && ph.total >= 2 && ph.index === 1 && game.missions.nextText().length > 3);
+const planA = planning.defaultPlan(2);
+const statsA = planning.planStats(2, planA);
+planning.toggleCrew(planA, 'sana');
+const statsB = planning.planStats(2, planA);
+const entries = new Set([0, 1, 2].map((e) => { const p = { ...planning.defaultPlan(0) }; return planning.entrySpawn(CHAIN[0], { ...p, entry: e }); }).map((s) => s.x + ',' + s.y));
+check('4 missions+planning: chain of 5 with grab phase; stats recompute live; entries stage apart', CHAIN.length === 5 && game.missions.phases().includes('grab') && ph.total >= 2 && game.missions.nextText().length > 3 && statsB.totalCut !== statsA.totalCut && statsB.grabRate !== statsA.grabRate && entries.size === 3);
 // Police tactics + wanted state
 game.police.setStars(5, game.nowMs);
 game.police.cops = [];
@@ -66,34 +74,44 @@ check('7 police: wantedState SEARCHING when unseen', game.police.wantedState(gam
 const before = game.radio.label();
 game.radio.cycle();
 check('8 radio: 4 real stations, cycle changes the readout', STATIONS.length === 4 && STATIONS.every((s) => s.tracks.length >= 3) && game.radio.label() !== before);
-// Weapon: firing spends the magazine
+// Weapon: the gear builds it (extended mag = 18), firing spends it for real
 game.player.inCar = false; game.player.car = null;
-game.weapon.mag = 12; game.weapon.reserve = 48;
+game.weapon = planning.weaponForPlan({ gear: ['extmag'] });
+const gearMagOk = game.weapon.magSize === 18 && planning.weaponForPlan({ gear: [] }).magSize === 12;
 game.input.setKey('Space', true);
 const mag0 = game.weapon.mag;
 for (let i = 0; i < 12; i++) step(1 / 60);
 game.input.setKey('Space', false);
-check('9 weapon: shots fired spend real magazine rounds', game.weapon.mag < mag0 && game.bullets.length >= 0);
+check('9 weapon: gear sets magazine size; shots spend real rounds', gearMagOk && game.weapon.mag < mag0 && game.bullets.length >= 0);
 // Shot staging + 3D render under the stub ctx (all four shipped shots)
 let renderOk = true;
-for (const name of ['title', 'chase', 'mission', 'results']) {
+for (const name of ['board', 'chase', 'mission', 'results']) {
   const g2 = createGame();
-  try { applyShot(g2, name, (dt) => updateGame(g2, dt || 1 / 60)); renderGame(makeCtx(), g2); hud.drawHud(makeCtx(), g2); }
-  catch (e) { renderOk = false; console.log('  render error in', name, e.message); }
+  try {
+    applyShot(g2, name, (dt) => updateGame(g2, dt || 1 / 60)); renderGame(makeCtx(), g2);
+    if (name === 'board') hud.drawPlanning(makeCtx(), g2);
+    else if (name === 'results') hud.drawSummary(makeCtx(), g2);
+    else hud.drawHud(makeCtx(), g2);
+  } catch (e) { renderOk = false; console.log('  render error in', name, e.message); }
 }
-check('10 shots: all 4 stagings render + HUD without error', renderOk);
+check('10 shots: all 4 stagings render + board/HUD/summary without error', renderOk);
 // ID render (scale measurement mode) under the stub
 let idOk = true;
 try { const g3 = createGame(); applyShot(g3, 'scale', (dt) => updateGame(g3, dt || 1 / 60)); g3.idRender = true; renderGame(makeCtx(), g3); } catch (e) { idOk = false; console.log('  id error', e.message); }
 check('11 renderer: idRender scale scene renders', idOk);
-// Chase staging invariants: exactly 5 cops for 5 stars, hero named car
+// Chase staging invariants: the board's forecast IS the chase — 5 forecast
+// stars, 5 stars shown, 5 live interceptors, hero car is the plan's getaway,
+// and the roster's tactics include the PIT + the roadblock pair.
 const g4 = createGame();
 applyShot(g4, 'chase', (dt) => updateGame(g4, dt || 1 / 60));
-check('12 chase staging: 5 live cops == 5 stars, hero car has a name', g4.police.cops.filter((c) => !c.dead).length === 5 && g4.police.stars === 5 && typeof g4.player.car.name === 'string' && g4.player.car.name.length > 3);
-// Summary breakdown rows come from real job earnings
+const tac = g4.police.cops.map((c) => c.tactical);
+check('12 chase: forecast==stars==cops==5, hero is the getaway, PIT+2xROADBLOCK staged', g4.planStatsCache.heatStars === 5 && g4.police.stars === 5 && g4.police.cops.filter((c) => !c.dead).length === 5 && g4.player.car.name === 'VELOZ COMET' && planning.getawayById(g4.plan.getaway).name === g4.player.car.name && tac.filter((t) => t === 'PIT').length === 1 && tac.filter((t) => t === 'ROADBLOCK').length === 2);
+// Results: the ledger reconciles line by line and the chain history is its nets
 const g5 = createGame();
 applyShot(g5, 'results', (dt) => updateGame(g5, dt || 1 / 60));
 hud.drawSummary(makeCtx(), g5);
-check('13 results: summary carries 5 job rows totalling the chain pay', g5.lastSummary && g5.lastSummary.jobRows.length === 5 && g5.lastSummary.jobRows.reduce((a, r) => a + r.pay, 0) === 5200);
+const led = g5.lastLedger;
+const ledOk = led && led.gross - led.fence - led.cutTotal === led.net && led.cuts.reduce((a, c) => a + c.amount, 0) === led.cutTotal;
+check('13 results: ledger reconciles (gross-fence-cuts=net); 5 history rows net $5,200; REP sums', ledOk && g5.lastSummary && g5.lastSummary.jobRows.length === 5 && g5.lastSummary.jobRows.reduce((a, r) => a + r.pay, 0) === 5200 && g5.lastSummary.repTotal === 360 && g5.chainLedger.every((l) => l.gross - l.fence - l.cutTotal === l.net));
 console.log(`\n${pass}/${pass + fail} PASS`);
 process.exit(fail ? 1 : 0);

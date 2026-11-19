@@ -1,6 +1,8 @@
 // hud.js — money, wanted stars, health, mission line and timer, circular minimap, toasts and the menu screens.
 import { VIEW_W, VIEW_H, WORLD_SIZE, PALETTE } from './config.js';
 import { clamp } from './rng.js';
+import { CHAIN } from './missions.js';
+import { CREW_POOL, GEAR_POOL, GETAWAYS, TIMES, jobPlanData, planStats, formatMoney } from './planning.js';
 function panel(ctx, x, y, w, h) {
   ctx.fillStyle = 'rgba(26,14,12,0.66)';
   ctx.beginPath(); ctx.roundRect(x, y, w, h, 8); ctx.fill();
@@ -22,18 +24,20 @@ function drawStars(ctx, game) {
     ctx.fillText(wanted, VIEW_W - 240, 27);
   }
 }
-// Dispatch roster: up to 5 live units, nearest first — callsign, distance
-// band from the real gap, and the tactical state the sim assigned. The count
-// shown never exceeds the live units (and at 5 stars the staged/live hunt
-// fields exactly the units the player can see on the minimap).
+// Dispatch roster, on a diet: the THREE nearest live units — callsign,
+// distance band from the real gap, and the tactical state the sim assigned —
+// plus one "+N more" line for the rest. The header count is the true live
+// total, so the panel never claims a unit the street does not hold.
 function distBand(d) { return d < 150 ? 'CLOSE' : d < 400 ? 'MID' : 'FAR'; }
 export function drawDispatch(ctx, game) {
   const live = game.police.cops.filter((c) => !c.dead);
   if (!live.length || game.police.stars <= 0) return;
   if (game.police.assignTactics) game.police.assignTactics(game.player);
-  const rows = live.map((c) => ({ c, d: Math.hypot(c.x - game.player.x, c.y - game.player.y) }))
-    .sort((a, b) => a.d - b.d).slice(0, 5);
-  const h = 24 + rows.length * 17;
+  const sorted = live.map((c) => ({ c, d: Math.hypot(c.x - game.player.x, c.y - game.player.y) }))
+    .sort((a, b) => a.d - b.d);
+  const rows = sorted.slice(0, 3);
+  const more = sorted.length - rows.length;
+  const h = 24 + rows.length * 17 + (more > 0 ? 15 : 0);
   const x = VIEW_W - 252, y = 62;
   panel(ctx, x, y, 238, h);
   ctx.textBaseline = 'top'; ctx.textAlign = 'left';
@@ -50,6 +54,10 @@ export function drawDispatch(ctx, game) {
     ctx.fillText(r.c.tactical || 'PURSUIT', x + 228, ry + 1);
     ctx.textAlign = 'left';
   });
+  if (more > 0) {
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10px system-ui, sans-serif';
+    ctx.fillText('+ ' + more + ' more unit' + (more === 1 ? '' : 's') + ' in the hunt', x + 10, y + 24 + rows.length * 17);
+  }
 }
 // Dario Venn portrait card: the fixer drawn in the game's own figure style
 // (round head, hair mass, shirt) beside ONE live line — the mission's actual
@@ -118,6 +126,19 @@ export function drawHud(ctx, game) {
     ctx.fillStyle = 'rgba(232,230,223,0.75)';
     ctx.fillText('Free roam — visit the yellow marker when a job is offered, or press Enter near Venn jobs', VIEW_W / 2, 20);
   }
+  // Grab progress while the take accumulates: the plan's loot target and
+  // grab rate against what the crew has actually pulled so far.
+  if (game.missions.active && game.missions.stage === 'grab' && game.plan) {
+    const st = planStats(game.missions.index, game.plan, game.missions.loop);
+    const got = Math.floor(game.missions.lootGrabbed || 0);
+    panel(ctx, VIEW_W / 2 - 170, 80, 340, 40);
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('GRABBING — ' + st.grabRate + '$/s CREW RATE', VIEW_W / 2 - 158, 87);
+    ctx.fillStyle = PALETTE.money; ctx.font = '700 13px system-ui, sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(formatMoney(got) + ' / ' + formatMoney(st.loot), VIEW_W / 2 + 158, 86);
+    ctx.fillStyle = '#4a3628'; ctx.fillRect(VIEW_W / 2 - 158, 106, 316, 7);
+    ctx.fillStyle = '#a8d18b'; ctx.fillRect(VIEW_W / 2 - 158, 106, 316 * clamp(got / Math.max(1, st.loot), 0, 1), 7);
+  }
   // (No separate briefing toast: the Dario Venn dialogue card below carries
   // the same live briefing line — showing both duplicated the text.)
   // Toasts (centre-lower, never over the minimap).
@@ -163,11 +184,11 @@ export function drawHud(ctx, game) {
     ctx.fillText(game.weapon.mag + ' / ' + game.weapon.reserve, 210, VIEW_H - 108);
   }
   if (game.screen === 'play') { drawDispatch(ctx, game); drawDialogue(ctx, game); }
-  // Control hints for the first seconds of play — centred under the mission
-  // bar, clear of every bottom-edge cluster.
+  // Control hints for the first seconds of play: key caps only, no prose —
+  // centred under the mission bar, clear of every bottom-edge cluster.
   if (game.playTime < 9 && game.screen === 'play') {
-    ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(232,230,223,0.8)';
-    ctx.fillText(game.player.inCar ? 'WASD drive · Space handbrake · E exit · P pause' : 'WASD move · Shift sprint · E enter car · Space shoot · P pause · H help', VIEW_W / 2, 88);
+    ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(232,230,223,0.75)';
+    ctx.fillText(game.player.inCar ? '[WASD]  [SPACE]  [E]  [R]  [P]' : '[WASD]  [SHIFT]  [E]  [SPACE]  [P]  [H]', VIEW_W / 2, 88);
   }
   drawMinimap(ctx, game);
   ctx.restore();
@@ -235,6 +256,140 @@ export function drawTitle(ctx, game) {
   const s = game.saveData;
   ctx.fillText(s.missionsCompleted > 0 ? `Saved progress: $${Math.floor(s.money)} · ${s.missionsCompleted} jobs done · $${Math.floor(s.totalEarned)} earned` : 'No saved progress yet — your first sunset on the Amber Coast.', VIEW_W / 2, 524);
 }
+// ---------------------------------------------------------------- planning
+// The Planning Board: a layer over the live 3D street (the renderer orbits
+// the job's target block behind it), in the amber identity — compact muted
+// panels, no wall of boxes. Every figure on it is planStats() output, the
+// same numbers the execution consumes, recomputed on every change.
+function wrapText(ctx, text, maxChars) {
+  const words = text.split(' '); const lines = [''];
+  for (const wd of words) {
+    const cur = lines[lines.length - 1];
+    if ((cur + ' ' + wd).trim().length <= maxChars || !cur) lines[lines.length - 1] = (cur + ' ' + wd).trim();
+    else lines.push(wd);
+  }
+  return lines;
+}
+export function drawPlanning(ctx, game) {
+  const plan = game.plan;
+  if (!plan) return;
+  const idx = game.missions.index % CHAIN.length;
+  const def = CHAIN[idx];
+  const data = jobPlanData(idx);
+  const st = planStats(idx, plan, game.missions.loop);
+  ctx.save();
+  ctx.textBaseline = 'top';
+  // Top strip: what is being planned + the chain's five tabs.
+  panel(ctx, 14, 14, VIEW_W - 28, 40);
+  ctx.textAlign = 'left'; ctx.fillStyle = '#f2c14e'; ctx.font = '700 14px system-ui, sans-serif';
+  ctx.fillText('PLANNING — JOB ' + (idx + 1) + '/5 · ' + def.title.toUpperCase(), 26, 26);
+  ctx.textAlign = 'right'; ctx.font = '600 11px system-ui, sans-serif';
+  let tabX = VIEW_W - 26;
+  for (let i = CHAIN.length - 1; i >= 0; i--) {
+    const label = (i < idx ? '✓ ' : i === idx ? '▸ ' : '· ') + CHAIN[i].title.toUpperCase();
+    const w = ctx.measureText(label).width;
+    ctx.fillStyle = i === idx ? '#f2c14e' : i < idx ? '#8fc97f' : PALETTE.hudMuted;
+    ctx.fillText(label, tabX, 28); tabX -= w + 18;
+  }
+  // Left column: briefing, entry, getaway, time.
+  const lx = 14, lw = 330;
+  panel(ctx, lx, 66, lw, 436);
+  let y = 80;
+  ctx.textAlign = 'left'; ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif';
+  ctx.fillText('BRIEFING — DARIO VENN', lx + 14, y); y += 18;
+  ctx.fillStyle = PALETTE.hudText; ctx.font = '600 12px system-ui, sans-serif';
+  for (const line of wrapText(ctx, def.brief.replace(/^Dario Venn:\s*/, ''), 44)) { ctx.fillText(line, lx + 14, y); y += 16; }
+  y += 12;
+  ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif';
+  ctx.fillText('ENTRY — ◀ ▶', lx + 14, y); y += 18;
+  const entryTags = ['STANDARD', 'QUIET · ALARM +4s', 'BOLD · HEAT +'];
+  data.entries.forEach((name, i) => {
+    if (i === plan.entry) { ctx.fillStyle = 'rgba(242,193,78,0.16)'; ctx.fillRect(lx + 8, y - 3, lw - 16, 24); ctx.fillStyle = '#f2c14e'; ctx.fillRect(lx + 8, y - 3, 3, 24); }
+    ctx.fillStyle = i === plan.entry ? PALETTE.hudText : PALETTE.hudMuted; ctx.font = '600 12px system-ui, sans-serif';
+    ctx.fillText((i === plan.entry ? '▸ ' : '  ') + name, lx + 14, y);
+    ctx.textAlign = 'right'; ctx.font = '600 10px system-ui, sans-serif'; ctx.fillStyle = PALETTE.hudMuted;
+    ctx.fillText(entryTags[i], lx + lw - 14, y + 1); ctx.textAlign = 'left';
+    y += 26;
+  });
+  y += 8;
+  ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif';
+  ctx.fillText('GETAWAY — G', lx + 14, y); y += 18;
+  const gw = GETAWAYS.find((g) => g.id === plan.getaway) || GETAWAYS[0];
+  ctx.fillStyle = PALETTE.hudText; ctx.font = '700 14px system-ui, sans-serif';
+  ctx.fillText(gw.name, lx + 14, y);
+  ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 11px system-ui, sans-serif';
+  ctx.fillText('top ' + gw.topSpeed + ' · escape window ' + st.escape + ' s', lx + 14, y + 19); y += 48;
+  ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif';
+  ctx.fillText('TIME — T', lx + 14, y); y += 18;
+  TIMES.forEach((t) => {
+    if (t.id === plan.timeOfDay) { ctx.fillStyle = 'rgba(242,193,78,0.16)'; ctx.fillRect(lx + 8, y - 3, lw - 16, 24); }
+    ctx.fillStyle = t.id === plan.timeOfDay ? PALETTE.hudText : PALETTE.hudMuted; ctx.font = '600 12px system-ui, sans-serif';
+    ctx.fillText((t.id === plan.timeOfDay ? '▸ ' : '  ') + t.label, lx + 14, y); y += 26;
+  });
+  // Right column: the live plan stats.
+  const rx = VIEW_W - 284, rw = 270;
+  panel(ctx, rx, 66, rw, 296);
+  y = 80;
+  ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('PLAN STATS — LIVE', rx + 14, y); y += 24;
+  const statRows = [
+    ['LOOT ESTIMATE', formatMoney(st.loot)],
+    ['ALARM', st.alarm + ' s'],
+    ['ESCAPE WINDOW', st.escape + ' s'],
+    ['GRAB RATE', '$' + st.grabRate + '/s'],
+    ['CREW CUT', st.totalCut + '%'],
+    ['CREW SKILL', String(st.avgSkill)],
+    ['FENCE FEE', st.fencePct + '%'],
+  ];
+  for (const [k, v] of statRows) {
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(k, rx + 14, y + 2);
+    ctx.fillStyle = PALETTE.hudText; ctx.font = '700 14px system-ui, sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(v, rx + rw - 14, y); y += 25;
+  }
+  ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('HEAT FORECAST', rx + 14, y + 2);
+  ctx.font = '16px sans-serif'; ctx.textAlign = 'right';
+  let stars = '';
+  for (let i = 0; i < 5; i++) stars += i < st.heatStars ? '★' : '☆';
+  ctx.fillStyle = '#f2c14e'; ctx.fillText(stars, rx + rw - 14, y);
+  // Bottom centre: crew and gear over their slots.
+  const bx = 356, bw = 568;
+  panel(ctx, bx, 640, bw, 146);
+  y = 652;
+  ctx.textAlign = 'left'; ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif';
+  ctx.fillText('CREW — 1-6 · ' + plan.crew.length + '/3', bx + 14, y); y += 18;
+  CREW_POOL.forEach((c, i) => {
+    const cxp = bx + 14 + (i % 3) * 182, cyp = y + Math.floor(i / 3) * 26;
+    const sel = plan.crew.includes(c.id);
+    if (sel) { ctx.fillStyle = 'rgba(242,193,78,0.14)'; ctx.fillRect(cxp - 4, cyp - 2, 176, 22); }
+    ctx.fillStyle = c.color; ctx.beginPath(); ctx.arc(cxp + 5, cyp + 8, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = sel ? PALETTE.hudText : PALETTE.hudMuted; ctx.font = '600 10.5px system-ui, sans-serif';
+    ctx.fillText((i + 1) + ' ' + c.name, cxp + 14, cyp);
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 9.5px system-ui, sans-serif';
+    ctx.fillText('SK ' + c.skill + ' · CUT ' + c.cut + '%', cxp + 14, cyp + 11);
+  });
+  y += 58;
+  ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif';
+  ctx.fillText('GEAR — F + SPACE · ' + plan.gear.length + '/3 SLOTS', bx + 14, y); y += 18;
+  GEAR_POOL.forEach((g, i) => {
+    const cxp = bx + 14 + (i % 4) * 138, cyp = y + Math.floor(i / 4) * 20;
+    const sel = plan.gear.includes(g.id);
+    const foc = (game.gearFocus || 0) === i;
+    if (sel) { ctx.fillStyle = 'rgba(143,201,127,0.16)'; ctx.fillRect(cxp - 4, cyp - 2, 132, 17); }
+    if (foc) { ctx.strokeStyle = 'rgba(245,234,216,0.8)'; ctx.lineWidth = 1; ctx.strokeRect(cxp - 4, cyp - 2, 132, 17); }
+    ctx.fillStyle = sel ? PALETTE.hudText : PALETTE.hudMuted; ctx.font = '600 9.5px system-ui, sans-serif';
+    ctx.fillText(g.name, cxp, cyp + 1);
+  });
+  // Execute corner.
+  panel(ctx, VIEW_W - 284, 640, 270, 62);
+  ctx.fillStyle = '#f2c14e'; ctx.font = '700 15px system-ui, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('ENTER — EXECUTE PLAN', VIEW_W - 270, 652);
+  ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10.5px system-ui, sans-serif';
+  const entryName = data.entries[plan.entry];
+  ctx.fillText(entryName + ' · ' + gw.name + ' · ' + (TIMES.find((t) => t.id === plan.timeOfDay) || TIMES[0]).label, VIEW_W - 270, 674);
+  ctx.restore();
+}
 export function drawSummary(ctx, game) {
   const s = game.lastSummary || {
     jobs: game.jobsThisChain || 0, chainEarned: Math.floor(game.chainEarned || 0),
@@ -245,8 +400,8 @@ export function drawSummary(ctx, game) {
   ctx.save();
   ctx.fillStyle = 'rgba(30,12,10,0.30)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   const jobRows = (s.jobRows && s.jobRows.length) ? s.jobRows : [];
-  const px = VIEW_W / 2 - 310, py = VIEW_H / 2 - 258;
-  const PH = jobRows.length ? 516 : 440;
+  const PH = jobRows.length ? 560 : 440;
+  const px = VIEW_W / 2 - 310, py = VIEW_H / 2 - PH / 2;
   panel(ctx, px, py, 620, PH);
   ctx.textBaseline = 'top';
   ctx.textAlign = 'center';
@@ -256,43 +411,63 @@ export function drawSummary(ctx, game) {
   ctx.fillText('CHAIN COMPLETE', VIEW_W / 2, py + 36);
   ctx.fillStyle = PALETTE.hudText; ctx.font = '15px system-ui, sans-serif';
   ctx.fillText('Dario Venn — all five jobs delivered.', VIEW_W / 2, py + 72);
-  // Per-job breakdown: every job in the chain with the payout it earned.
-  let statsY = py + 108;
+  let statsY = py + 104;
+  // THE LEDGER for the chain's last job: gross, the fence's fee, each named
+  // crew member's cut, the net banked and the REP earned — every line is
+  // the previous line's arithmetic, so the column reconciles exactly.
+  const led = s.lastLedger;
+  if (led) {
+    ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('LEDGER — ' + led.title.toUpperCase() + ' (LAST JOB)', px + 36, statsY);
+    const lrows = [['GROSS TAKE', formatMoney(led.gross)], ['FENCE FEE ' + led.fencePct + '%', '−' + formatMoney(led.fence)]];
+    for (const c of led.cuts) lrows.push([c.name + ' CUT ' + c.pct + '%', '−' + formatMoney(c.amount)]);
+    lrows.push(['NET BANKED', '+' + formatMoney(led.net)]);
+    lrows.push(['REP GAIN', '+' + led.repGain + ' REP']);
+    lrows.forEach((row, i) => {
+      const y = statsY + 19 + i * 19;
+      const isNet = row[0] === 'NET BANKED';
+      ctx.fillStyle = isNet ? PALETTE.hudText : PALETTE.hudMuted; ctx.font = '600 12px system-ui, sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText(row[0], px + 36, y);
+      ctx.fillStyle = isNet ? PALETTE.money : PALETTE.hudText; ctx.font = '700 13px system-ui, sans-serif'; ctx.textAlign = 'right';
+      ctx.fillText(row[1], px + 620 - 36, y);
+    });
+    statsY += 19 + lrows.length * 19 + 10;
+  }
+  // Chain history: every job's net, in order — the chain total below is
+  // these five numbers added up.
   if (jobRows.length) {
     ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText('JOB BREAKDOWN', px + 36, statsY);
+    ctx.fillText('CHAIN HISTORY — NET PER JOB', px + 36, statsY);
     jobRows.forEach((jr, i) => {
-      const y = statsY + 20 + i * 21;
-      ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 12px system-ui, sans-serif'; ctx.textAlign = 'left';
+      const y = statsY + 19 + i * 18;
+      ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 11.5px system-ui, sans-serif'; ctx.textAlign = 'left';
       ctx.fillText((i + 1) + '. ' + jr.title, px + 36, y);
-      ctx.fillStyle = PALETTE.money; ctx.font = '700 13px system-ui, sans-serif'; ctx.textAlign = 'right';
-      ctx.fillText('+$' + Math.floor(jr.pay).toLocaleString('en-US'), px + 620 - 36, y);
+      ctx.fillStyle = PALETTE.money; ctx.font = '700 12px system-ui, sans-serif'; ctx.textAlign = 'right';
+      ctx.fillText('+' + formatMoney(jr.pay), px + 620 - 36, y);
     });
-    statsY += 20 + jobRows.length * 21 + 12;
+    statsY += 19 + jobRows.length * 18 + 10;
   }
   const esc = s.bestEscapeMs > 0
     ? `${Math.floor(s.bestEscapeMs / 60000)}:${String(Math.floor((s.bestEscapeMs % 60000) / 1000)).padStart(2, '0')}`
     : '—';
   const rows = [
-    ['JOBS DONE', `${s.jobs} / 5`],
-    ['CHAIN EARNINGS', '$' + Math.floor(s.chainEarned).toLocaleString('en-US')],
-    ['CASH', '$' + Math.floor(s.money).toLocaleString('en-US')],
-    ['LIFETIME EARNED', '$' + Math.floor(s.totalEarned).toLocaleString('en-US')],
+    ['CHAIN NET', formatMoney(s.chainEarned)],
+    ['CASH', formatMoney(s.money)],
+    ['REP (CHAIN)', '+' + (s.repTotal || 0)],
     ['BEST ESCAPE', esc],
     ['CARS STOLEN', String(s.carsStolen)],
-    ['TIMES WASTED', String(s.timesWasted)],
     ['CHAINS FINISHED', String(s.chains)],
   ];
   rows.forEach((row, i) => {
-    const y = statsY + i * 29;
+    const y = statsY + i * 24;
     ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 12px system-ui, sans-serif'; ctx.textAlign = 'left';
     ctx.fillText(row[0], px + 36, y + 3);
-    ctx.fillStyle = PALETTE.hudText; ctx.font = '700 15px system-ui, sans-serif'; ctx.textAlign = 'right';
+    ctx.fillStyle = PALETTE.hudText; ctx.font = '700 14px system-ui, sans-serif'; ctx.textAlign = 'right';
     ctx.fillText(row[1], px + 620 - 36, y);
   });
   ctx.textAlign = 'center';
   ctx.fillStyle = '#f2c14e'; ctx.font = '15px system-ui, sans-serif';
-  ctx.fillText('The chain restarts at +25% pay per loop — press ENTER to keep driving', VIEW_W / 2, py + PH - 34);
+  ctx.fillText('The chain restarts at +25% pay per loop — press ENTER to keep driving', VIEW_W / 2, py + PH - 30);
   ctx.restore();
 }
 export function drawWasted(ctx, game) {

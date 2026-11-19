@@ -13,12 +13,15 @@ import { Fx } from './fx.js';
 import { makeCar } from './cars.js';
 import { makeCamera, updateCamera, renderGame } from './render.js';
 import { projectPoint } from './view3d.js';
-import { drawHud, drawTitle, drawWasted, drawPause, drawSummary } from './hud.js';
+import { drawHud, drawTitle, drawWasted, drawPause, drawSummary, drawPlanning } from './hud.js';
 import { applyShot } from './shots.js';
 import { Radio } from './radio.js';
+import { defaultPlan, planStats, settlePlan, weaponForPlan, decayIntervalForPlan, entrySpawn, cycleEntry, cycleGetaway, cycleTime, toggleCrew, toggleGear, crewById, getawayById, GEAR_POOL } from './planning.js';
+import { CIV_TYPES } from './cars.js';
 
 // The one weapon the player carries: a real magazine/reserve the shooting
 // code decrements and reloads from, so the HUD readout is the sim's truth.
+// Its size is built from the plan's gear (planning.js weaponForPlan).
 export function makeWeapon() {
   return { name: 'VENN 9MM', magSize: 12, mag: 12, reserve: 48 };
 }
@@ -55,6 +58,11 @@ export function createGame() {
     time: 0, nowMs: 0, playTime: 0, wastedUntil: 0, idleMissionTimer: 1.2,
     places: PLACES, markedCarRef: null, sfx,
     shotName: null,
+    // The merge layer: the current job's plan, its board state, and the
+    // economy it settles into (ledger history + REP).
+    plan: null, gearFocus: 0, planTarget: null, planOrbitAngle: null,
+    timeGrade: 'golden', rep: 0, chainLedger: [], lastLedger: null,
+    crewMate: null, lootGrabbedTotal: 0,
   };
   game.traffic = populateTraffic(rng, player);
   game.peds = makePedestrians(rng, 64);
@@ -70,6 +78,8 @@ export function createGame() {
       carsStolen: game.carsStolen, timesWasted: game.timesWasted,
       nextPayBonus: Math.round(game.missions.loop * 25),
       jobRows: game.jobEarnings.slice(-5),
+      lastLedger: game.lastLedger,
+      repTotal: game.chainLedger.reduce((s, l) => s + l.repGain, 0),
     };
     game.screen = 'summary';
   };
@@ -124,12 +134,112 @@ function spawnMarkedCar(game) {
   game.markedCarRef = car;
   game.missions.markedCar = car;
 }
+// ------------------------------------------------------------ the merge
+// Planning flow: when a job comes due the board opens over the live street
+// (renderer orbits the target block). Executing the plan applies every
+// coupling before the mission starts, so what the board promised is what
+// the street does.
+export function openPlanning(game) {
+  const idx = game.missions.index % 5;
+  game.plan = defaultPlan(idx);
+  game.gearFocus = 0;
+  const def = game.missions.current();
+  const target = def.pickup || def.deliver;
+  game.planTarget = { x: target.x, y: target.y };
+  game.planOrbitAngle = null;
+  game.screen = 'planning';
+}
+export function executePlan(game) {
+  const plan = game.plan;
+  const idx = game.missions.index % 5;
+  const def = game.missions.current();
+  const stats = planStats(idx, plan, game.missions.loop);
+  // Gear builds the weapon; time-of-day grades the light; the escape window
+  // paces wanted decay; the forecast is stored for the grab's alarm.
+  game.weapon = weaponForPlan(plan);
+  game.timeGrade = plan.timeOfDay;
+  game.police.decayIntervalMs = decayIntervalForPlan(plan, idx);
+  game.planStatsCache = stats;
+  // Entry: the crew stages at the chosen way in, by the target.
+  const spawn = entrySpawn(def, plan);
+  const fixed = collideCircleBuildings(game.city, spawn.x, spawn.y, 8);
+  game.player.x = fixed.x; game.player.y = fixed.y;
+  game.player.inCar = false; game.player.car = null;
+  // Getaway: a car of the chosen type is parked at the entry, engine ready.
+  const gw = getawayById(plan.getaway);
+  const typeIdx = Math.max(0, CIV_TYPES.findIndex((t) => t.kind === gw.kind));
+  let car = game.traffic.find((c) => !c.dead && !c.occupiedByPlayer);
+  if (car) {
+    const t = CIV_TYPES[typeIdx];
+    car.kind = t.kind; car.name = t.name; car.maxSpeed = t.maxSpeed; car.accel = t.accel;
+    car.hp = t.hp; car.maxHp = t.hp; car.len = t.kind === 'van' ? 44 : 38; car.wid = t.kind === 'van' ? 21 : 19;
+    car.x = fixed.x + 30; car.y = fixed.y + 10; car.angle = 0; car.speed = 0; car.dead = false;
+    game.getawayCar = car;
+  }
+  // Crew: the first pick works the job on foot beside the player.
+  const lead = plan.crew.length ? crewById(plan.crew[0]) : null;
+  game.crewMate = lead ? { id: lead.id, name: lead.name, color: lead.color, x: fixed.x - 16, y: fixed.y + 14, angle: 0, walkPhase: 0, pose: 'walk' } : null;
+  const started = game.missions.start(game.nowMs);
+  if (started.stealMarked && !game.markedCarRef) spawnMarkedCar(game);
+  game.missions.lootGrabbed = 0;
+  game.screen = 'play';
+  game.toast('Plan set — ' + def.title + '. Heat forecast ' + stats.heatStars + ' stars.');
+}
+export function updatePlanning(game, dt) {
+  // The street stays alive behind the board.
+  updateTraffic(game.rng, game.traffic, dt, game.player, allCars(game));
+  updatePedestrians(game.peds, dt, game.nowMs, null);
+  game.fx.update(dt);
+  const input = game.input, plan = game.plan;
+  if (!plan) { game.screen = 'play'; return; }
+  if (input.wasPressed('ArrowLeft')) cycleEntry(plan, -1);
+  if (input.wasPressed('ArrowRight')) cycleEntry(plan, 1);
+  if (input.wasPressed('KeyG')) cycleGetaway(plan, 1);
+  if (input.wasPressed('KeyT')) cycleTime(plan, 1);
+  for (let i = 0; i < 6; i++) if (input.wasPressed('Digit' + (i + 1))) toggleCrew(plan, ['dex', 'priya', 'bo', 'sana', 'milo', 'ruth'][i]);
+  if (input.wasPressed('KeyF')) game.gearFocus = ((game.gearFocus || 0) + 1) % GEAR_POOL.length;
+  if (input.wasPressed('Space')) toggleGear(plan, GEAR_POOL[game.gearFocus || 0].id);
+  if (input.wasPressed('Enter')) executePlan(game);
+}
+function updateCrewMate(game, dt) {
+  const cm = game.crewMate;
+  if (!cm || game.player.inCar) return;
+  const tx = game.player.x - Math.cos(game.player.angle) * 6 - 14, ty = game.player.y + 16;
+  const dx = tx - cm.x, dy = ty - cm.y, d = Math.hypot(dx, dy);
+  if (d > 10) {
+    const sp = Math.min(d, 190 * dt);
+    cm.x += (dx / d) * sp; cm.y += (dy / d) * sp;
+    cm.angle = Math.atan2(dy, dx); cm.walkPhase += dt * 7; cm.pose = 'walk';
+  } else cm.pose = game.missions.stage === 'grab' ? 'aim' : 'stand';
+  const fixed = collideCircleBuildings(game.city, cm.x, cm.y, 8);
+  cm.x = fixed.x; cm.y = fixed.y;
+}
 function missionCtx(game) {
   return {
     player: game.player, now: game.nowMs,
     addMoney: (n) => { game.money += n; game.totalEarned += n; },
     setWanted: (n) => game.police.setStars(Math.max(game.police.stars, n), game.nowMs),
     toast: (t) => game.toast(t), sfx,
+    // The grab runs on the plan: its target is the board's loot estimate and
+    // its pace is the board's grab rate; when it completes, the alarm trips
+    // at exactly the forecast heat.
+    grabTarget: () => (game.planStatsCache ? game.planStatsCache.loot : 0),
+    grabRate: () => (game.planStatsCache ? game.planStatsCache.grabRate : 99999),
+    onGrabDone: (loot) => {
+      game.lootGrabbedTotal = loot;
+      if (game.planStatsCache) game.police.setStars(Math.max(game.police.stars, game.planStatsCache.heatStars), game.nowMs);
+    },
+    // Settlement: the job's ledger is computed from the plan and the take
+    // actually grabbed; the NET is what the player banks.
+    payFor: (def, lootGrabbed) => {
+      const idx = game.missions.index % 5;
+      const gross = lootGrabbed > 0 ? Math.round(lootGrabbed) : planStats(idx, game.plan || defaultPlan(idx), game.missions.loop).loot;
+      const led = settlePlan(idx, game.plan || defaultPlan(idx), gross);
+      game.lastLedger = led;
+      game.chainLedger.push(led);
+      game.rep += led.repGain;
+      return led.net;
+    },
     onMissionComplete: (def, pay) => {
       game.missionsCompleted += 1;
       game.jobsThisChain += 1;
@@ -141,7 +251,7 @@ function missionCtx(game) {
       if (game._chainJustDone) {
         game._chainJustDone = false;
         game.showSummary();
-        game.chainEarned = 0; game.jobsThisChain = 0; game.jobEarnings = [];
+        game.chainEarned = 0; game.jobsThisChain = 0; game.jobEarnings = []; game.chainLedger = [];
         game.persist();
       }
     },
@@ -153,9 +263,8 @@ function startNextMissionIfIdle(game, dt) {
   game.idleMissionTimer -= dt;
   if (game.idleMissionTimer > 0) return;
   game.idleMissionTimer = 2.2;
-  const def = game.missions.start(game.nowMs);
-  if (def.stealMarked && !game.markedCarRef) spawnMarkedCar(game);
-  // The briefing itself is shown by the HUD briefing panel; no duplicate toast.
+  // Every job is planned first: the board opens over the target street.
+  openPlanning(game);
 }
 function killPlayer(game) {
   game.timesWasted += 1;
@@ -340,6 +449,11 @@ export function updateGame(game, dt) {
     input.endFrame();
     return;
   }
+  if (game.screen === 'planning') {
+    updatePlanning(game, dt);
+    input.endFrame();
+    return;
+  }
   // Play.
   game.playTime += dt;
   if (input.wasPressed('KeyP')) { game.screen = 'paused'; game.help = false; input.endFrame(); return; }
@@ -362,6 +476,7 @@ export function updateGame(game, dt) {
   if (game.lastShotAt && game.nowMs - game.lastShotAt < 500) danger.push({ x: game.player.x, y: game.player.y, r: 130 });
   if (game.player.inCar && game.player.car && Math.abs(game.player.car.speed) > 165) danger.push({ x: game.player.x, y: game.player.y, r: 95 });
   updatePedestrians(game.peds, dt, game.nowMs, danger.length ? danger : null);
+  updateCrewMate(game, dt);
   updateCarCollisions(game);
   startNextMissionIfIdle(game, dt);
   game.missions.update(dt, missionCtx(game));
@@ -396,6 +511,7 @@ function boot() {
       ctx.clearRect(0, 0, VIEW_W, VIEW_H);
       renderGame(ctx, game);
       if (game.screen === 'play' || game.screen === 'paused') drawHud(ctx, game);
+      if (game.screen === 'planning') drawPlanning(ctx, game);
       if (game.screen === 'summary') drawSummary(ctx, game);
       if (game.screen === 'title') { drawHudTitleSafe(ctx, game); }
       if (game.screen === 'wasted') drawWasted(ctx, game);

@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
 /** The entry this program hands in: AMBER COAST, a 3D chase-cam coastal open-world crime game. */
-const ENTRY_TITLE = 'AMBER COAST — a 3D chase-cam coastal open-world crime game (golden hour, palms, beachfront, traffic, police, 5-mission chain)';
+const ENTRY_TITLE = 'AMBER COAST — THE PLANNER MERGE: plan every job on a live board (entry, crew, gear, getaway, time of day — stats recompute live), then execute it in a 3D chase-cam coastal city where the plan drives the weapon, the heat, the getaway car, the light and the take; every job settles through a gross-to-net ledger with named crew cuts and REP';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';

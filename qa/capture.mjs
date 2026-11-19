@@ -1,5 +1,5 @@
 // capture.mjs — deterministic screenshot capture via headless Chromium CDP.
-// Usage: node qa/capture.mjs <outDir> [shot ...]   (default: title chase mission results)
+// Usage: node qa/capture.mjs <outDir> [shot ...]   (default: board chase mission results)
 // Serves game/ on a local port, loads each ?shot= page twice (two independent
 // sets), writes <shot>.jpg per set, and prints sizes + ERROR-banner status.
 import { createServer } from 'node:http';
@@ -8,7 +8,7 @@ import { join, extname } from 'node:path';
 import { spawn } from 'node:child_process';
 
 const outDir = process.argv[2] || 'qa/set1';
-const shots = process.argv.slice(3).length ? process.argv.slice(3) : ['title', 'chase', 'mission', 'results'];
+const shots = process.argv.slice(3).length ? process.argv.slice(3) : ['board', 'chase', 'mission', 'results'];
 const root = new URL('../game/', import.meta.url).pathname;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 const server = createServer((req, res) => {

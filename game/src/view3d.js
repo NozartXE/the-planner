@@ -31,6 +31,14 @@ const SUNSET_MID = [199, 108, 112];  // rose
 const SUNSET_HOR = [255, 178, 112];  // orange-pink horizon
 const FOG = [226, 152, 118];
 const SUN = [255, 196, 116];
+// Time-of-day grades — the plan's time choice made visible. GOLDEN is the
+// game's established sunset; DUSK is the same sun an hour later: deeper
+// plum sky, redder horizon, heavier fog and a dimmer light scale on every
+// shaded face. renderView3D selects one per frame from game.timeGrade.
+const GRADES = {
+  golden: { top: SUNSET_TOP, mid: SUNSET_MID, hor: SUNSET_HOR, fog: FOG, sun: SUN, light: 1.0, wash: 1.0 },
+  dusk: { top: [38, 26, 64], mid: [120, 52, 92], hor: [214, 102, 84], fog: [150, 88, 96], sun: [240, 150, 90], light: 0.78, wash: 1.6 },
+};
 // Sun low in the WEST (world -x), slightly north: shadows stretch EAST.
 const SUN_DIR = (() => { const v = [-0.90, -0.24, 0.34]; const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; })();
 const SHADOW_K = Math.hypot(SUN_DIR[0], SUN_DIR[1]) / SUN_DIR[2]; // ≈2.86: shadow length per unit height
@@ -115,10 +123,13 @@ function addPoly(pts, base, opts = {}) {
   }
   const fogT = opts.noFog ? 0 : clamp((depth - 240) / 1150, 0, 0.60);
   const a = opts.alpha === undefined ? 1 : opts.alpha;
-  const shade = (L) => {
-    const rC = clamp(base[0] * L + (FOG[0] - base[0] * L) * fogT, 0, 255);
-    const gC = clamp(base[1] * L + (FOG[1] - base[1] * L) * fogT, 0, 255);
-    const bC = clamp(base[2] * L + (FOG[2] - base[2] * L) * fogT, 0, 255);
+  const fogC = F.fog || FOG;
+  const lScale = F.lightScale || 1;
+  const shade = (L0) => {
+    const L = L0 * lScale;
+    const rC = clamp(base[0] * L + (fogC[0] - base[0] * L) * fogT, 0, 255);
+    const gC = clamp(base[1] * L + (fogC[1] - base[1] * L) * fogT, 0, 255);
+    const bC = clamp(base[2] * L + (fogC[2] - base[2] * L) * fogT, 0, 255);
     return a >= 1 ? `rgb(${rC | 0},${gC | 0},${bC | 0})` : `rgba(${rC | 0},${gC | 0},${bC | 0},${a})`;
   };
   const face = { pts: clipped.map(projectCam), depth, col: shade(light) };
@@ -258,7 +269,8 @@ function drawGround(game) {
       const cy = F.cam[1] + fh[1] * fwd + rh[1] * lat;
       if (cx < -420 || cx > WORLD_SIZE + 460 || cy < -420 || cy > WORLD_SIZE + 420) continue;
       const base = groundKind(game, cx, cy);
-      const v = 0.96 + hash01((Math.floor(cx / CELL) * 13 + Math.floor(cy / CELL) * 29)) * 0.08;
+      const cellHash = hash01((Math.floor(cx / CELL) * 13 + Math.floor(cy / CELL) * 29));
+      const v = 0.90 + cellHash * 0.20;
       const col = base === WATER_C && hash01(Math.floor(cx / 46) * 7 + Math.floor(cy / 46) * 13) > 0.82
         ? [86, 150, 158] : [base[0] * v, base[1] * v, base[2] * v];
       const corners = [[-HALF, -HALF], [HALF, -HALF], [HALF, HALF], [-HALF, HALF]].map(([df, dl]) => [
@@ -266,6 +278,18 @@ function drawGround(game) {
         F.cam[1] + fh[1] * (fwd + df) + rh[1] * (lat + dl), 0.12,
       ]);
       addPoly(corners, col, { light: 0.92 });
+      // Asphalt repair patches on road cells: tonal rectangles inset from
+      // the cell edge, deterministic per cell — real streets are patchwork,
+      // and the patchwork keeps the road plane from reading as one flat
+      // empty surface in the foreground of the action cameras.
+      if (base === ASPHALT && cellHash > 0.70) {
+        const inset = 7, dark = cellHash > 0.86;
+        const pc = [[-HALF + inset, -HALF + inset], [HALF - inset, -HALF + inset], [HALF - inset, HALF - inset], [-HALF + inset, HALF - inset]].map(([df, dl]) => [
+          F.cam[0] + fh[0] * (fwd + df) + rh[0] * (lat + dl),
+          F.cam[1] + fh[1] * (fwd + df) + rh[1] * (lat + dl), 0.2,
+        ]);
+        addPoly(pc, dark ? [34, 31, 33] : [88, 79, 74], { light: 0.92, alpha: dark ? 0.30 : 0.20 });
+      }
     }
   }
   // Centre dashes as thin ground quads.
@@ -283,6 +307,20 @@ function drawGround(game) {
         if (!inRange(x, c)) continue;
         if (hash01(x + c * 3) < 0.10) continue;
         addQuad([x, c - 1.2, 0.3], [x + 21, c - 1.2, 0.3], [x + 21, c + 1.2, 0.3], [x, c + 1.2, 0.3], [203, 185, 138], { light: 0.95 });
+      }
+    }
+  }
+  // Crosswalk zebras at intersections: pale stripes across both roads just
+  // north/east of each centre — street furniture that also breaks the road
+  // plane's flatness where the action cameras sit (intersections).
+  for (const cx of centers) {
+    for (const cy of centers) {
+      if (!inRange(cx, cy)) continue;
+      for (let i = 0; i < 5; i++) {
+        const sx = cx - 34 + i * 14;
+        addQuad([sx, cy - 74, 0.42], [sx + 7, cy - 74, 0.42], [sx + 7, cy - 52, 0.42], [sx, cy - 52, 0.42], [216, 207, 192], { light: 0.9, alpha: 0.55 });
+        const sy = cy - 34 + i * 14;
+        addQuad([cx + 52, sy, 0.42], [cx + 74, sy, 0.42], [cx + 74, sy + 7, 0.42], [cx + 52, sy + 7, 0.42], [216, 207, 192], { light: 0.9, alpha: 0.55 });
       }
     }
   }
@@ -683,11 +721,24 @@ function drawPalm(pm) {
 function drawTree(t) {
   const dx = t.x - F.cam[0], dy = t.y - F.cam[1];
   if (dx * dx + dy * dy > 760 * 760) return;
+  const r = t.r || 13;
+  // Foliage stays clear of the wordmark and the results panel, as palms do:
+  // a crown projecting into either zone is culled on those screens.
+  if (F.screen === 'title' || F.screen === 'summary') {
+    const crownP = projectPoint(t.x, t.y, 15 + r);
+    if (crownP) {
+      if (F.screen === 'title' && crownP.y > 140 && crownP.y < 370 && crownP.x > 220 && crownP.x < 1060) return;
+      if (F.screen === 'summary' && crownP.y > 50 && crownP.y < 750 && crownP.x > 230 && crownP.x < 1050) return;
+    }
+  }
   addShadow(t.x, t.y, 4, 4, 0, 15, 0.22);
   addTaperedLimb([t.x, t.y, 0], [t.x, t.y, 13], 3.6, 2.6, 3.6, 2.6, [96, 74, 48], [0, 0, 1]);
-  const r = t.r || 13;
-  addBlob(t.x, t.y, 15 + r * 0.55, r, rgb(PALETTE.treeDark), {});
-  addBlob(t.x - r * 0.4, t.y + r * 0.3, 13 + r * 0.4, r * 0.62, rgb(PALETTE.treeLight), {});
+  // Rounded canopy: three overlapping lathed spheres read as foliage mass
+  // from every angle — the old octahedron blobs read as cut diamonds.
+  const cz = 15 + r * 0.55;
+  addSphere(t.x, t.y, cz, r * 0.95, rgb(PALETTE.treeDark), {});
+  addSphere(t.x - r * 0.42, t.y + r * 0.3, cz - r * 0.16, r * 0.62, rgb(PALETTE.treeLight), {});
+  addSphere(t.x + r * 0.38, t.y - r * 0.26, cz + r * 0.3, r * 0.5, rgb(PALETTE.treeLight).map((v) => v * 0.82), {});
 }
 function drawLamp(l) {
   const dx = l.x - F.cam[0], dy = l.y - F.cam[1];
@@ -734,41 +785,65 @@ function drawParticles(game) {
 export function renderView3D(ctx, game) {
   const p = game.player;
   if (!p) return;
+  const grade = GRADES[game.timeGrade] || GRADES.golden;
   const isDrive = !!p.inCar && !!p.car;
   const anchor = isDrive ? p.car : p;
   const yaw = anchor.angle || 0;
-  // Camera: low chase cam behind the hero, smoothed in live play, snapped exactly
-  // when the state is frozen (screenshot staging) so captures are deterministic.
-  const back = isDrive ? 84 : 64;
-  const camH = isDrive ? 30 : 24;
-  const fh = [Math.cos(yaw), Math.sin(yaw)];
-  const wantX = anchor.x - fh[0] * back, wantY = anchor.y - fh[1] * back;
-  let camX = wantX, camY = wantY;
-  if (!game.frozen) {
-    const prev = game.cam3d;
-    if (prev) {
-      const k = 0.22;
-      camX = prev.x + (wantX - prev.x) * k;
-      camY = prev.y + (wantY - prev.y) * k;
+  // Planning camera: while the board is up the world stays live behind it —
+  // a slow orbit of the job's target block, the street the plan is about.
+  // Staged captures pin planOrbitAngle, so the frame is deterministic.
+  const planning = game.screen === 'planning' && game.planTarget;
+  let camX, camY, camH;
+  if (planning) {
+    const t = game.planTarget;
+    // Live: a slow swing along the target's street canyon, never a full
+    // rotation into the blocks behind. Staged: the pinned angle.
+    const ang = typeof game.planOrbitAngle === 'number' ? game.planOrbitAngle : -0.5 + Math.sin((game.time || 0) * 0.07) * 0.75;
+    camX = t.x + Math.cos(ang) * 235; camY = t.y + Math.sin(ang) * 235; camH = 105;
+    F = newFrame([camX, camY, camH], [t.x - camX, t.y - camY, 6 - camH]);
+  } else {
+    // Camera: low chase cam behind the hero, smoothed in live play, snapped
+    // exactly when frozen (screenshot staging) so captures are deterministic.
+    // On foot the cam sits closer and higher than the original build
+    // (52 back / 30 up, looking down at z 8 vs 72 / 26 / 10): a steeper
+    // pitch and a larger player shrink the vacant band between the lens
+    // and the player. (Measured: pitch beyond this stops helping — the
+    // foreground is road-toned at any pitch; texture, not angle, is what
+    // breaks it up, hence the crosswalks and asphalt patchwork below.)
+    const back = isDrive ? 84 : 52;
+    camH = isDrive ? 30 : 30;
+    const fh = [Math.cos(yaw), Math.sin(yaw)];
+    const wantX = anchor.x - fh[0] * back, wantY = anchor.y - fh[1] * back;
+    camX = wantX; camY = wantY;
+    if (!game.frozen) {
+      const prev = game.cam3d;
+      if (prev) {
+        const k = 0.22;
+        camX = prev.x + (wantX - prev.x) * k;
+        camY = prev.y + (wantY - prev.y) * k;
+      }
+      game.cam3d = { x: camX, y: camY };
     }
-    game.cam3d = { x: camX, y: camY };
-  }
-  // Camera collision safety (live play): if the chase point lands inside a
-  // building footprint, pull it toward the hero until it is in open air. Staged
-  // shots are already framed in the open, so this never fires for captures.
-  if (pointInBuilding(game.city, camX, camY)) {
-    for (const t of [0.3, 0.55, 0.8]) {
-      const tx = anchor.x - fh[0] * back * (1 - t), ty = anchor.y - fh[1] * back * (1 - t);
-      if (!pointInBuilding(game.city, tx, ty)) { camX = tx; camY = ty; break; }
+    // Camera collision safety (live play): if the chase point lands inside a
+    // building footprint, pull it toward the hero until it is in open air.
+    // Staged shots are already framed in the open, so this never fires there.
+    if (pointInBuilding(game.city, camX, camY)) {
+      for (const t of [0.3, 0.55, 0.8]) {
+        const tx = anchor.x - fh[0] * back * (1 - t), ty = anchor.y - fh[1] * back * (1 - t);
+        if (!pointInBuilding(game.city, tx, ty)) { camX = tx; camY = ty; break; }
+      }
     }
+    const lookX = anchor.x + fh[0] * 40, lookY = anchor.y + fh[1] * 40;
+    const lookZ = isDrive ? 9 : 8;
+    F = newFrame([camX, camY, camH], [lookX - camX, lookY - camY, lookZ - camH]);
   }
-  const lookX = anchor.x + fh[0] * 40, lookY = anchor.y + fh[1] * 40;
-  const lookZ = isDrive ? 9 : 10;
-  F = newFrame([camX, camY, camH], [lookX - camX, lookY - camY, lookZ - camH]);
   F.idMode = !!game.idRender;
   F.heroCar = isDrive ? p.car : (game.shotHeroCar || null);
   F.time = game.time || 0;
   F.screen = game.screen || 'play';
+  F.fog = grade.fog;
+  F.lightScale = grade.light;
+  F.wash = grade.wash;
   F.softSprites = []; // smoke rendered as soft radial sprites after the painter pass
 
   // Sky: sunset gradient (plum top → rose → orange-pink horizon) + low western sun.
@@ -777,9 +852,9 @@ export function renderView3D(ctx, game) {
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   } else {
     const grad = ctx.createLinearGradient(0, 0, 0, VIEW_H * 0.78);
-    grad.addColorStop(0, `rgb(${SUNSET_TOP[0]},${SUNSET_TOP[1]},${SUNSET_TOP[2]})`);
-    grad.addColorStop(0.55, `rgb(${SUNSET_MID[0]},${SUNSET_MID[1]},${SUNSET_MID[2]})`);
-    grad.addColorStop(1, `rgb(${SUNSET_HOR[0]},${SUNSET_HOR[1]},${SUNSET_HOR[2]})`);
+    grad.addColorStop(0, `rgb(${grade.top[0]},${grade.top[1]},${grade.top[2]})`);
+    grad.addColorStop(0.55, `rgb(${grade.mid[0]},${grade.mid[1]},${grade.mid[2]})`);
+    grad.addColorStop(1, `rgb(${grade.hor[0]},${grade.hor[1]},${grade.hor[2]})`);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     const sunPt = projectPoint(camX + SUN_DIR[0] * 1200, camY + SUN_DIR[1] * 1200, camH + SUN_DIR[2] * 1200);
@@ -791,7 +866,7 @@ export function renderView3D(ctx, game) {
       sg.addColorStop(1, 'rgba(255,150,80,0)');
       ctx.fillStyle = sg;
       ctx.fillRect(sunPt.x - R, sunPt.y - R, R * 2, R * 2);
-      ctx.fillStyle = `rgb(${SUN[0]},${SUN[1]},${SUN[2]})`;
+      ctx.fillStyle = `rgb(${grade.sun[0]},${grade.sun[1]},${grade.sun[2]})`;
       ctx.beginPath(); ctx.arc(sunPt.x, sunPt.y, 26, 0, Math.PI * 2); ctx.fill();
     }
   }
@@ -819,6 +894,17 @@ export function renderView3D(ctx, game) {
       pose: ped.dead ? 'stand' : fleeing ? 'run' : 'walk', dead: !!ped.dead,
       shirt: rgb(ped.shirt), skin: rgb(ped.skin || '#d9b48f'), pants: rgb(ped.pants || '#2e3440'),
       hair: rgb(ped.hairColor || '#2b2118'), isPlayer: false,
+    });
+  }
+  // The plan's crew mate on foot: the first picked crew member, in their own
+  // colour, working the job beside the player (the grab is a two-hander).
+  if (game.crewMate && !game.player.inCar) {
+    const cm = game.crewMate;
+    drawFigure3D({
+      x: cm.x, y: cm.y, angle: cm.angle, phase: cm.walkPhase || 0,
+      pose: cm.pose || 'walk', dead: false,
+      shirt: rgb(cm.color || '#e8c832'), skin: rgb('#d9b48f'), pants: [40, 38, 44],
+      hair: [30, 22, 16], isPlayer: false,
     });
   }
   // Player on foot (in a car the car itself is the hero, drawn above).
@@ -884,11 +970,12 @@ export function renderView3D(ctx, game) {
       }
       ctx.restore();
     }
-    // Sunset wash + warm vignette.
+    // Sunset wash + warm vignette (heavier at dusk, per the frame's grade).
+    const wA = F.wash || 1;
     const sg2 = ctx.createLinearGradient(0, 0, VIEW_W, VIEW_H * 0.4);
-    sg2.addColorStop(0, 'rgba(255,116,58,0.13)');
-    sg2.addColorStop(0.45, 'rgba(255,92,120,0.05)');
-    sg2.addColorStop(1, 'rgba(38,14,54,0.08)');
+    sg2.addColorStop(0, `rgba(255,116,58,${0.13 * wA})`);
+    sg2.addColorStop(0.45, `rgba(255,92,120,${0.05 * wA})`);
+    sg2.addColorStop(1, `rgba(38,14,54,${0.08 * wA})`);
     ctx.fillStyle = sg2; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     const vg = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.42, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.88);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
