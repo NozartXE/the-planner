@@ -193,12 +193,19 @@ export function drawHud(ctx, game) {
   if (game.screen === 'play' && !game.player.inCar
     && ((game.bullets && game.bullets.length > 0) || (game.lastShotAt && game.nowMs - game.lastShotAt < 700))) {
     const cx = VIEW_W * 0.536, cy = VIEW_H * 0.5;
+    const reticlePath = () => {
+      ctx.beginPath();
+      ctx.moveTo(cx - 25, cy); ctx.lineTo(cx - 10, cy);
+      ctx.moveTo(cx + 10, cy); ctx.lineTo(cx + 25, cy);
+      ctx.moveTo(cx, cy + 10); ctx.lineTo(cx, cy + 23);
+    };
+    // Dark halo pass first (same geometry, wider): a thin dark outline
+    // around the white ticks keeps the aim point findable on any
+    // background — the standard GTA reticle treatment.
+    ctx.strokeStyle = 'rgba(10,10,12,0.85)'; ctx.lineWidth = 5;
+    reticlePath(); ctx.stroke();
     ctx.strokeStyle = 'rgba(255,255,255,0.92)'; ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(cx - 25, cy); ctx.lineTo(cx - 10, cy);
-    ctx.moveTo(cx + 10, cy); ctx.lineTo(cx + 25, cy);
-    ctx.moveTo(cx, cy + 10); ctx.lineTo(cx, cy + 23);
-    ctx.stroke();
+    reticlePath(); ctx.stroke();
   }
   if (game.screen === 'play') { drawDispatch(ctx, game); drawDialogue(ctx, game); }
   // Control hints for the first seconds of play: key caps only, no prose —
