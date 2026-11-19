@@ -22,7 +22,12 @@ await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 const dbgPort = 19000 + Math.floor(Math.random() * 2000);
 const CHROME = process.env.CHROME_BIN || '/home/hatch/.cache/ms-playwright/chromium_headless_shell-1255/chrome-headless-shell-linux64/chrome-headless-shell';
-const chrome = spawn(CHROME, ['--disable-gpu', '--no-sandbox', '--hide-scrollbars', `--user-data-dir=/tmp/chr-capture-${dbgPort}`, `--remote-debugging-port=${dbgPort}`, '--window-size=1280,800', 'about:blank'], { stdio: 'ignore' });
+// --enable-unsafe-swiftshader (real3d round): chrome-headless-shell runs with
+// --disable-gpu, under which WebGL context creation FAILS outright; the flag
+// enables the SwiftShader software GL stack so the Three.js renderer can run
+// in captures at all (verified by a probe page: WebGL 2.0 via SwiftShader,
+// drawImage composite of the WebGL canvas reads back correctly).
+const chrome = spawn(CHROME, ['--disable-gpu', '--enable-unsafe-swiftshader', '--no-sandbox', '--hide-scrollbars', `--user-data-dir=/tmp/chr-capture-${dbgPort}`, `--remote-debugging-port=${dbgPort}`, '--window-size=1280,800', 'about:blank'], { stdio: 'ignore' });
 async function waitJson() {
   for (let i = 0; i < 60; i++) {
     try { const r = await fetch(`http://127.0.0.1:${dbgPort}/json/list`); const j = await r.json(); if (j.length) return j[0]; } catch (e) {}

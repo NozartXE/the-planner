@@ -13,7 +13,10 @@ const server = createServer((req, res) => { const p = new URL(req.url, 'http://x
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 const dbg = 19000 + Math.floor(Math.random() * 2000);
-const chrome = spawn(process.env.CHROME_BIN || '/home/hatch/.cache/ms-playwright/chromium_headless_shell-1255/chrome-headless-shell-linux64/chrome-headless-shell', ['--disable-gpu', '--no-sandbox', `--user-data-dir=/tmp/chr-measure-${dbg}`, `--remote-debugging-port=${dbg}`, '--window-size=1280,800', 'about:blank'], { stdio: 'ignore' });
+// --enable-unsafe-swiftshader: same WebGL-in-headless fix as qa/capture.mjs
+// (WebGL context creation fails under --disable-gpu alone; SwiftShader GL is
+// required for the Three.js renderer to produce the ID renders measured here).
+const chrome = spawn(process.env.CHROME_BIN || '/home/hatch/.cache/ms-playwright/chromium_headless_shell-1255/chrome-headless-shell-linux64/chrome-headless-shell', ['--disable-gpu', '--enable-unsafe-swiftshader', '--no-sandbox', `--user-data-dir=/tmp/chr-measure-${dbg}`, `--remote-debugging-port=${dbg}`, '--window-size=1280,800', 'about:blank'], { stdio: 'ignore' });
 async function tj() { for (let i = 0; i < 40; i++) { try { const r = await fetch(`http://127.0.0.1:${dbg}/json/list`); const j = await r.json(); if (j.length) return j[0]; } catch (e) {} await new Promise((r) => setTimeout(r, 250)); } throw new Error('no chrome'); }
 const t = await tj();
 const ws = new WebSocket(t.webSocketDebuggerUrl);

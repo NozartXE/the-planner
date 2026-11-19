@@ -11,6 +11,15 @@ function panel(ctx, x, y, w, h) {
   ctx.beginPath(); ctx.roundRect(x, y, w, h, 8); ctx.fill();
   ctx.strokeStyle = 'rgba(255,214,170,0.18)'; ctx.lineWidth = 1; ctx.stroke();
 }
+// Opaque variant for the Planning Board (HUD debt fix): board panels sit
+// over the live street, and at 66% alpha the city and its signage ghosted
+// through the PLAN STATS text. Board panels are fully opaque — the street
+// stays visible only in the open corridor between them.
+function panelSolid(ctx, x, y, w, h) {
+  ctx.fillStyle = 'rgb(26,14,12)';
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 8); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,214,170,0.18)'; ctx.lineWidth = 1; ctx.stroke();
+}
 function drawStars(ctx, game) {
   const stars = game.police.stars;
   const flash = game.police.decaying && Math.sin(game.time * 7) > 0;
@@ -41,7 +50,11 @@ export function drawDispatch(ctx, game) {
   const rows = sorted.slice(0, 3);
   const more = sorted.length - rows.length;
   const h = 24 + rows.length * 17 + (more > 0 ? 15 : 0);
-  const x = VIEW_W - 252, y = 62;
+  // HUD debt fix: dispatch lives in the empty bottom-right quadrant of
+  // action frames (stacked above the radio strip when that is showing),
+  // not under the wanted stars where it crowded the top-right cluster.
+  const radioOn = !!(game.player.inCar && game.radio);
+  const x = VIEW_W - 252, y = VIEW_H - 14 - (radioOn ? 32 : 0) - h;
   panel(ctx, x, y, 238, h);
   ctx.textBaseline = 'top'; ctx.textAlign = 'left';
   ctx.fillStyle = '#f0d9a0'; ctx.font = '700 10px system-ui, sans-serif';
@@ -193,7 +206,7 @@ export function drawMinimap(ctx, game) {
   // a RECTANGULAR grey road minimap, a yellow GPS route to the live
   // objective with its REAL distance printed under the map, thin state
   // bars directly beneath the map, and one compact text line under the
-  // bars. The radio line rides on top of the stack while driving. The
+  // bars. (The radio line lives bottom-right with dispatch now.) The
   // whole stack keeps roughly the old bottom-left panels' footprint.
   const mapX = 14, mapW = 176, mapH = 104;
   const textY = VIEW_H - 27;   // compact text line row
@@ -202,11 +215,13 @@ export function drawMinimap(ctx, game) {
   const mapY = distY - mapH - 3;
   const px = game.player.x, py = game.player.y;
   const inCar = !!(game.player.inCar && game.player.car);
-  // Radio strip on top of the stack: the real station + track.
+  // Radio strip: the real station + track. HUD debt fix — it rides in the
+  // bottom-right quadrant with the dispatch panel now, not on top of the
+  // minimap stack, so the bottom-left stays map + bars + one text line.
   if (inCar && game.radio) {
-    panel(ctx, mapX, mapY - 26, 232, 22);
+    panel(ctx, VIEW_W - 246, VIEW_H - 38, 232, 22);
     ctx.fillStyle = '#9fc9b8'; ctx.font = '600 10px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText('♪ ' + game.radio.label(), mapX + 12, mapY - 20);
+    ctx.fillText('♪ ' + game.radio.label(), VIEW_W - 234, VIEW_H - 32);
   }
   const scale = mapW / 1500; // the old circular map's 1,500-unit window, kept
   const cx = mapX + mapW / 2, cy = mapY + mapH / 2;
@@ -298,9 +313,14 @@ export function drawMinimap(ctx, game) {
   // heat-progress value — police.stars is an integer level and the plan's
   // fractional heat is a board forecast, not live progress — so no bar is
   // drawn rather than inventing one.)
+  // HUD debt fix: the health bar carries its HEALTH label in the stack —
+  // a small label column on the left, both bars indented to match.
+  ctx.fillStyle = PALETTE.hudMuted; ctx.font = '700 9px system-ui, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('HEALTH', mapX + 2, barY - 1);
+  const barX = mapX + 46, barW = mapW - 46;
   const bar = (y, frac, col) => {
-    ctx.fillStyle = 'rgba(16,13,11,0.55)'; ctx.fillRect(mapX, y, mapW, 6);
-    ctx.fillStyle = col; ctx.fillRect(mapX, y, mapW * clamp(frac, 0, 1), 6);
+    ctx.fillStyle = 'rgba(16,13,11,0.55)'; ctx.fillRect(barX, y, barW, 6);
+    ctx.fillStyle = col; ctx.fillRect(barX, y, barW * clamp(frac, 0, 1), 6);
   };
   bar(barY, game.player.hp / 100, game.player.hp > 30 ? '#63b06a' : PALETTE.danger);
   if (inCar) bar(barY + 9, game.player.car.hp / game.player.car.maxHp, '#5f88c4');
@@ -464,7 +484,7 @@ export function drawPlanning(ctx, game) {
   ctx.save();
   ctx.textBaseline = 'top';
   // Top strip: what is being planned + the chain's five tabs.
-  panel(ctx, 14, 14, VIEW_W - 28, 40);
+  panelSolid(ctx, 14, 14, VIEW_W - 28, 40);
   ctx.textAlign = 'left'; ctx.fillStyle = '#f2c14e'; ctx.font = '700 14px system-ui, sans-serif';
   ctx.fillText('PLANNING — JOB ' + (idx + 1) + '/5 · ' + def.title.toUpperCase(), 26, 26);
   ctx.textAlign = 'right'; ctx.font = '600 11px system-ui, sans-serif';
@@ -477,7 +497,7 @@ export function drawPlanning(ctx, game) {
   }
   // Left column: briefing, entry, getaway, time.
   const lx = 14, lw = 330;
-  panel(ctx, lx, 66, lw, 436);
+  panelSolid(ctx, lx, 66, lw, 436);
   let y = 80;
   ctx.textAlign = 'left'; ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif';
   ctx.fillText('BRIEFING — DARIO VENN', lx + 14, y); y += 18;
@@ -512,7 +532,7 @@ export function drawPlanning(ctx, game) {
   });
   // Right column: the live plan stats.
   const rx = VIEW_W - 284, rw = 270;
-  panel(ctx, rx, 66, rw, 296);
+  panelSolid(ctx, rx, 66, rw, 296);
   y = 80;
   ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
   ctx.fillText('PLAN STATS — LIVE', rx + 14, y); y += 24;
@@ -538,12 +558,12 @@ export function drawPlanning(ctx, game) {
   for (let i = 0; i < 5; i++) stars += i < st.heatStars ? '★' : '☆';
   ctx.fillStyle = '#f2c14e'; ctx.fillText(stars, rx + rw - 14, y);
   // District map (VC-style cartography, our geography) under the stats.
-  panel(ctx, rx, 374, rw, 180);
+  panelSolid(ctx, rx, 374, rw, 180);
   ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
   ctx.fillText('DISTRICT MAP — TARGET + ESCAPE ROUTE', rx + 14, 386);
   drawDistrictMap(ctx, game, rx + 12, 406, rw - 24, 136);
   // Arsenal strip: the mission weapon picked from the full 56-weapon table.
-  panel(ctx, rx, 566, rw, 62);
+  panelSolid(ctx, rx, 566, rw, 62);
   const wdef = weaponById(plan.weaponId || 'venn-9mm');
   ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
   ctx.fillText('ARSENAL — J / K · 56 WEAPONS', rx + 14, 576);
@@ -554,7 +574,7 @@ export function drawPlanning(ctx, game) {
   ctx.textAlign = 'left';
   // Bottom centre: crew and gear over their slots.
   const bx = 356, bw = 568;
-  panel(ctx, bx, 640, bw, 146);
+  panelSolid(ctx, bx, 640, bw, 146);
   y = 652;
   ctx.textAlign = 'left'; ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif';
   ctx.fillText('CREW — 1-6 · ' + plan.crew.length + '/3', bx + 14, y); y += 18;
@@ -581,7 +601,7 @@ export function drawPlanning(ctx, game) {
     ctx.fillText(g.name, cxp, cyp + 1);
   });
   // Execute corner.
-  panel(ctx, VIEW_W - 284, 640, 270, 62);
+  panelSolid(ctx, VIEW_W - 284, 640, 270, 62);
   ctx.fillStyle = '#f2c14e'; ctx.font = '700 15px system-ui, sans-serif'; ctx.textAlign = 'left';
   ctx.fillText('ENTER — EXECUTE PLAN', VIEW_W - 270, 652);
   ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10.5px system-ui, sans-serif';
