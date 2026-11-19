@@ -86,13 +86,22 @@ export function applyShot(game, name, step) {
     game.player.inCar = false; game.player.car = null;
     game.player.x = 1042; game.player.y = 1004; game.player.angle = Math.PI;
     game.player.hp = 100;
-    setCar(game.traffic[1], 1150, 963, Math.PI, 30);
-    setCar(game.traffic[2], 760, 1009, 0, 35);
-    setCar(game.traffic[3], 986, 760, Math.PI / 2, 0);
+    // Backdrop traffic on the target street itself (the east–west road the
+    // board looks down): a westbound car mid-ground, two eastbound cars at
+    // far and foreground range, one more westbound car in the far distance —
+    // four cars in the visible street area, none under a panel's text.
+    setCar(game.traffic[1], 880, 963, Math.PI, 30);
+    setCar(game.traffic[2], 700, 1009, 0, 35);
+    setCar(game.traffic[3], 1090, 1009, 0, 30);
+    setCar(game.traffic[4], 600, 963, Math.PI, 30);
     stagePed(game, 0, 920, 928, 0.4, 1.2, 0);
     stagePed(game, 1, 1060, 928, -0.6, 3.0, 1);
     stagePed(game, 2, 930, 1044, 2.6, 5.0, 2);
     stagePed(game, 3, 1080, 1044, -2.2, 2.2, 3);
+    // Mid-ground pedestrians on the depth road's sidewalks (north side
+    // y≈932, south side y≈1040 — both clear of the road surface 940–1032).
+    stagePed(game, 4, 780, 932, -0.6, 4.2, 1);
+    stagePed(game, 5, 850, 1040, 2.6, 1.4, 2);
     game.police.cops = [];
     game.police.setStars(0, game.nowMs);
     game.bullets = []; game.fx.particles = []; game.fx.skids = []; game.toasts = [];
@@ -141,8 +150,9 @@ export function applyShot(game, name, step) {
   }
   if (name === 'chase') {
     // 5-star pursuit east along the Hotel Aurelia avenue (Old Town), frozen at the PIT
-    // contact moment: an interceptor is on the hero's rear-left quarter, sparks and tyre
-    // smoke at the contact, skid arcs behind both cars, a second cop cutting in ahead.
+    // contact moment: an interceptor runs in the north lane with its front quarter
+    // pressed into the hero's front-left quarter, sparks and smoke at the contact,
+    // skid arcs behind both cars, pursuit units in echelon and a roadblock ahead.
     // Jobs 1–2 are done ($1,350) and the current job is 3, "Front Page".
     // Displayed speed: round(225 * 0.62) = 140 km/h.
     // 3D framing: the chase cam sits ~84 units behind the hero, so the alongside cop
@@ -155,40 +165,49 @@ export function applyShot(game, name, step) {
     // in open crossing tarmac, so no building corner hugs the lens (the old
     // staging's camera stood beside a south-side plot and its face filled
     // the frame's right third).
-    putPlayerInCar(game, game.traffic[0], 1456, 1477, 0.10, 225, { kind: 'coupe', color: '#7a4a3a', hp: 31, maxHp: 90 });
+    putPlayerInCar(game, game.traffic[0], 1456, 1477, 0, 225, { kind: 'coupe', color: '#7a4a3a', hp: 31, maxHp: 90 });
     const hero = game.traffic[0];
     const rot = (a, x, y) => ({ x: x * Math.cos(a) - y * Math.sin(a), y: x * Math.sin(a) + y * Math.cos(a) });
     const at = (car, x, y) => { const r = rot(car.angle, x, y); return { x: car.x + r.x, y: car.y + r.y }; };
-    // Traffic on the road surface only: one braking in the south lane ahead
-    // (clear of the roadblock pair), one further ahead in the north lane.
-    setCar(game.traffic[1], hero.x + 165, hero.y + 18, 0.5, 0);
-    setCar(game.traffic[2], hero.x + 430, hero.y - 30, 0.30, 40);
+    // Traffic on the road surface only: ONE distant westbound car stopped
+    // behind the roadblock (a civilian halted by the block — it sits above
+    // the roadblock pair in frame, clear of their silhouettes), and the
+    // other traffic car staged behind the camera, out of the hunt's read.
+    setCar(game.traffic[1], hero.x + 700, hero.y - 20, Math.PI, 0);
+    setCar(game.traffic[2], hero.x - 380, hero.y + 15, 0, 40);
     game.police.cops = [];
-    // Formation-true hunt: EXACTLY five interceptors for the plan's forecast
-    // five stars, staged so the roster's claims are visible in the frame —
-    // one interceptor in nose-in PIT contact on the hero's front-left
-    // quarter, two in pursuit, and a pair swung PERPENDICULAR across both
-    // lanes of the avenue ahead as the roadblock. All fully in frame at
-    // mid-ground; the hero stays the largest vehicle in its own chase.
-    const contact = at(hero, 22, -10);
-    const pitAngle = 0.90;
-    const pitPos = at(hero, 14, -24);
+    // Formation-true hunt, staged PROJECTION-FIRST (every placement was
+    // solved against the chase cam's own projection before being written
+    // here): EXACTLY five interceptors for the plan's forecast five stars.
+    // The hero is the largest vehicle, centre-low and clear of the pack.
+    // ONE interceptor runs near-parallel in the north lane with its front
+    // quarter pressed into the hero's front-left quarter — the PIT contact,
+    // sparked and smoked at the touch point. Two pursuit units follow in
+    // echelon in the centre/south lanes at mid-ground. The roadblock pair
+    // sits PERPENDICULAR across both lanes far ahead, silhouettes fully
+    // separated. No cop exceeds a quarter of the frame width; none clips.
+    const contact = at(hero, 15, -10);
+    const pitAngle = 0.08;
+    const pitPos = at(hero, 22, -19.5);
     const pit = addCop(game, pitPos.x, pitPos.y, pitAngle);
     pit.speed = 150;
-    const wing = addCop(game, hero.x + 88, hero.y - 52, -0.20); wing.speed = 150;
-    const cutter = addCop(game, hero.x + 125, hero.y - 34, -0.30); cutter.speed = 150;
-    // Roadblock pair: across the road ahead, noses north/south.
-    const block1 = addCop(game, hero.x + 215, hero.y - 20, 1.57); block1.speed = 0;
-    const block2 = addCop(game, hero.x + 222, hero.y + 14, 1.57); block2.speed = 0;
+    const pursuit1 = addCop(game, hero.x + 118, hero.y - 9, 0); pursuit1.speed = 150;
+    const pursuit2 = addCop(game, hero.x + 128, hero.y + 13, 0); pursuit2.speed = 150;
+    // Roadblock pair: across both lanes of the road ahead (the road spans
+    // hero-relative −67…+25), noses pointing opposite ways, a car's width
+    // of daylight between their inner ends.
+    const block1 = addCop(game, hero.x + 268, hero.y - 40, -Math.PI / 2); block1.speed = 0;
+    const block2 = addCop(game, hero.x + 276, hero.y + 2, Math.PI / 2); block2.speed = 0;
     game.police.assignTactics(game.player);
     game.police.lastSeenX = hero.x; game.police.lastSeenY = hero.y;
-    // Peds on the sidewalks only (clear of the road surface both sides).
-    stagePed(game, 0, 1600, 1396, 0, 0.7, 0);
-    stagePed(game, 1, 1750, 1396, Math.PI, 2.4, 1);
-    stagePed(game, 2, 1500, 1396, 0, 4.0, 2);
-    stagePed(game, 3, 1650, 1516, Math.PI, 1.5, 3);
-    stagePed(game, 4, 1850, 1516, 0, 5.3, 0);
-    stagePed(game, 5, 1700, 1516, Math.PI, 3.1, 1);
+    // Peds clear of the roadway: two on the north sidewalk (y 1396, the
+    // strip north of the road's 1410 edge), three in the park block south
+    // of the road (y 1548+, on grass well clear of the 1502 road edge).
+    stagePed(game, 0, 1720, 1396, 0, 0.7, 0);
+    stagePed(game, 1, 1900, 1396, Math.PI, 2.4, 1);
+    stagePed(game, 2, 1620, 1560, Math.PI, 4.0, 2);
+    stagePed(game, 3, 1780, 1600, 0, 1.5, 3);
+    stagePed(game, 4, 1860, 1548, Math.PI, 5.3, 0);
     game.money = 1350;
     game.radio.stationIdx = 1; game.radio.trackIdx = 0;
     // The plan from the board, executed: its forecast IS the wanted level
@@ -237,6 +256,10 @@ export function applyShot(game, name, step) {
     smokePts.forEach((p, i) => {
       game.fx.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.75, maxLife: 1.0, color: 'rgba(120,120,125,0.55)', size: smokeSizes[i], drag: 0 });
     });
+    // Contact smoke at the PIT touch point itself: the impact reads as a
+    // live scrape, not two parked cars — smoke + the sparks above at the
+    // exact point where the two bodies meet.
+    game.fx.particles.push({ x: contact.x, y: contact.y, vx: 0, vy: 0, life: 0.85, maxLife: 1.0, color: 'rgba(120,120,125,0.55)', size: 7, drag: 0 });
     finish(game);
     return true;
   }
@@ -262,14 +285,19 @@ export function applyShot(game, name, step) {
     game.player.walkPhase = 1.1; game.player.vx = 30; game.player.vy = -4; game.player.hp = 88;
     const a = game.player.angle;
     setCar(game.traffic[1], 2470, 1000, -0.35, 0, { kind: 'sedan', color: '#54604f', hp: 22, maxHp: 100 });
-    setCar(game.traffic[2], 2585, 965, Math.PI, 0);
-    setCar(game.traffic[3], 2670, 1007, 0, 55);
+    setCar(game.traffic[2], 2735, 965, Math.PI, 0);
+    setCar(game.traffic[3], 2866, 850, Math.PI / 2, 40);
     game.police.cops = [];
-    const cop1 = addCop(game, 2610, 1075, -2.7); cop1.speed = 40;
-    const cop2 = addCop(game, 2760, 960, Math.PI); cop2.speed = 0;
+    // The roster's 2× ROADBLOCK, staged as what it claims: a pair swung
+    // PERPENDICULAR across both lanes of the avenue ahead (the road spans
+    // y 940–1032; unit A covers the north half, unit B the south half, a
+    // small gap between their inner ends), both fully visible in frame at
+    // mid-distance, flanking the target car's escape line.
+    const cop1 = addCop(game, 2648, 968, -Math.PI / 2); cop1.speed = 0;
+    const cop2 = addCop(game, 2662, 1012, Math.PI / 2); cop2.speed = 0;
     game.police.assignTactics(game.player);
     game.police.lastSeenX = game.player.x; game.police.lastSeenY = game.player.y;
-    // Peds on sidewalks only; ONE figure crossing at the crosswalk.
+    // Peds on sidewalks only — none stands on the road surface.
     stagePed(game, 0, 2480, 922, 0.3, 2.2, 0);
     stagePed(game, 1, 2560, 925, 1.2, 4.4, 0);
     stagePed(game, 2, 2500, 1048, -2.4, 0.4, 0);
@@ -277,7 +305,10 @@ export function applyShot(game, name, step) {
     stagePed(game, 4, 2462, 1050, 2.8, 3.6, 2);
     stagePed(game, 5, 2660, 928, -Math.PI / 2, 5.1, 3);
     stagePed(game, 6, 2720, 1090, Math.PI, 0.8, 1);
-    stagePed(game, 7, 2448, 1018, 0, 2.9, 0);
+    // (Was staged mid-roadway at the intersection's east edge; moved to the
+    // north sidewalk strip, y 934 — no staged pedestrian stands on the road
+    // surface in this frame.)
+    stagePed(game, 7, 2536, 934, 0, 2.9, 0);
     // The three peds nearest the gunfire are caught mid-flee (run pose in the renderer).
     for (const idx of [0, 1, 2]) {
       const ped = game.peds[idx];

@@ -671,7 +671,11 @@ function drawPalm(pm) {
     const crownP = projectPoint(pm.x + leanX * 2.2, pm.y, H + 2);
     if (crownP) {
       if (F.screen === 'title' && crownP.y > 150 && crownP.y < 360 && crownP.x > 240 && crownP.x < 1040) return;
-      if (F.screen === 'summary' && crownP.y > 40 && crownP.y < 760 && crownP.x > -280 && crownP.x < 1150) return;
+      // Summary bound extends well past the frame's right edge: the palm
+      // whose fronds entered the results frame's top-right corner has its
+      // crown projecting at x≈1,530 (off-frame), and its ~26-unit fronds
+      // still reach into the picture — cull by crown out to 1,700.
+      if (F.screen === 'summary' && crownP.y > 40 && crownP.y < 760 && crownP.x > -280 && crownP.x < 1700) return;
     }
   }
   addShadow(pm.x, pm.y, 3.5, 3.5, 0, 16, 0.22);
