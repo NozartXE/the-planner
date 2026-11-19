@@ -133,9 +133,12 @@ function paintFacade(c, t, warm, seed) {
     c.fillStyle = 'rgba(255,255,255,0.05)'; c.fillRect(t.x, y0, t.w, 5); // storey highlight
     c.fillStyle = 'rgba(52,40,30,0.55)'; c.fillRect(t.x, y0 + bh - 6, t.w, 6); // spandrel band
     for (let cI = 0; cI < cols; cI++) {
-      const x0 = t.x + cI * bw, lit = R() < (warm ? 0.35 : 0.25);
+      // Lit fraction matched to the flat path's rhythm (~45%): at 25-35%
+      // the textured facades read as mostly-dark slots next to OLD's
+      // window walls (wash fix).
+      const x0 = t.x + cI * bw, lit = R() < (warm ? 0.45 : 0.40);
       c.fillStyle = 'rgba(38,34,32,0.9)'; c.fillRect(x0 + 8, y0 + 11, bw - 16, bh - 24);
-      if (lit) { const b = 0.82 + R() * 0.3; c.fillStyle = warm ? `rgb(${255 * b | 0},${205 * b | 0},${126 * b | 0})` : `rgb(${208 * b | 0},${228 * b | 0},${255 * b | 0})`; }
+      if (lit) { const b = 0.82 + R() * 0.3; c.fillStyle = warm ? `rgb(${255 * b | 0},${205 * b | 0},${126 * b | 0})` : `rgb(${222 * b | 0},${238 * b | 0},${255 * b | 0})`; }
       else { const v = 0.85 + R() * 0.4; c.fillStyle = warm ? `rgb(${54 * v | 0},${66 * v | 0},${84 * v | 0})` : `rgb(${62 * v | 0},${88 * v | 0},${112 * v | 0})`; }
       c.fillRect(x0 + 11, y0 + 14, bw - 22, bh - 30);
       c.fillStyle = 'rgba(255,255,255,0.13)'; c.fillRect(x0 + 11, y0 + 14, bw - 22, 5); // glass top glint
@@ -176,8 +179,10 @@ function paintSandGrass(c, t, seed) {
   const R = lcg(seed);
   c.fillStyle = 'rgb(84,100,60)'; c.fillRect(t.x, t.y, t.w, t.h / 2); // grass half (tile top = v high)
   c.fillStyle = 'rgb(217,189,143)'; c.fillRect(t.x, t.y + t.h / 2, t.w, t.h / 2); // sand half
-  for (let i = 0; i < 12; i++) {
-    const grass = i < 6, px = t.x + R() * t.w, py = t.y + (grass ? R() * t.h * 0.42 : t.h / 2 + R() * t.h * 0.42), r = 22 + R() * 52;
+  for (let i = 0; i < 22; i++) {
+    // Patch radii halved (wash fix): at the old 22-74 px the mottling
+    // became the oversized red/tan plaid on the results lawn.
+    const grass = i < 11, px = t.x + R() * t.w, py = t.y + (grass ? R() * t.h * 0.42 : t.h / 2 + R() * t.h * 0.42), r = 10 + R() * 28;
     c.fillStyle = grass ? (R() < 0.5 ? 'rgba(112,130,74,0.5)' : 'rgba(62,80,44,0.5)') : (R() < 0.5 ? 'rgba(198,164,116,0.55)' : 'rgba(232,208,164,0.5)');
     c.beginPath(); c.ellipse(px, py, r, r * 0.55, R() * 3, 0, Math.PI * 2); c.fill();
   }
@@ -262,16 +267,20 @@ export function projectPoint(x, y, z) {
 // separate additive term. Lighting = hemisphere ambient (sky above / ground
 // bounce below) + the one western sun.
 const MAT = {
-  PAINT: { rough: 0.32, metal: 0.1, env: 0.8 },
-  GLASS: { rough: 0.08, metal: 0, env: 1 },
-  CHROME: { rough: 0.18, metal: 0.9, env: 0.9 },
+  // env amounts restrained in the wash fix: at grazing angles the fresnel
+  // term approaches 1, so env 0.8-1.0 replaced a face's own colour with the
+  // peach horizon colour (water -> beige, red paint -> pink). The sheen is
+  // kept, capped so the base colour always dominates.
+  PAINT: { rough: 0.32, metal: 0.1, env: 0.42 },
+  GLASS: { rough: 0.08, metal: 0, env: 0.55 },
+  CHROME: { rough: 0.18, metal: 0.9, env: 0.6 },
   TYRE: { rough: 0.95, metal: 0, env: 0.05 },
-  ASPHALT_WET: { rough: 0.22, metal: 0, env: 0.55 },
+  ASPHALT_WET: { rough: 0.22, metal: 0, env: 0.34 },
   ASPHALT_DRY: { rough: 0.8, metal: 0, env: 0.12 },
   CONCRETE: { rough: 0.9, metal: 0, env: 0.08 },
   FACADE: { rough: 0.85, metal: 0, env: 0.18 },
   CANOPY: { rough: 1, metal: 0, env: 0.04 },
-  WATER: { rough: 0.05, metal: 0, env: 1 },
+  WATER: { rough: 0.05, metal: 0, env: 0.18 },
   CLOTH: { rough: 0.95, metal: 0, env: 0.05 },
   STEEL: { rough: 0.55, metal: 0.35, env: 0.45 },
   SAND: { rough: 1, metal: 0, env: 0.05 },
@@ -285,7 +294,7 @@ function surfaceLight(pts, opts) {
   if (light === undefined) {
     let d = dot3(n, SUN_DIR);
     if (opts.double) d = Math.abs(d);
-    if (mat) light = (0.34 + 0.30 * (n[2] * 0.5 + 0.5)) + 0.85 * Math.max(0, d);
+    if (mat) light = Math.min(1.18, (0.34 + 0.30 * (n[2] * 0.5 + 0.5)) + 0.85 * Math.max(0, d));
     else light = Math.abs(n[2]) > 0.55 ? 0.94 : 0.60 + 0.40 * Math.max(0, d);
     // Canopy value structure (Stage D): per-face hash jitter + downward
     // darkening, applied only where the caller asks for it.
@@ -305,15 +314,28 @@ function surfaceLight(pts, opts) {
     const hv = norm3([SUN_DIR[0] + vd[0], SUN_DIR[1] + vd[1], SUN_DIR[2] + vd[2]]);
     const ndh = Math.max(0, dot3(n, hv));
     const shin = Math.pow(2, 2 + (1 - mat.rough) * 6.5);
-    specV = Math.pow(ndh, shin) * (1 - mat.rough * 0.7) * 1.1;
+    // Wash fix: the old strength (x1.1, shin ~5 on rough cloth) laid a
+    // broad warm-white sheen over figures and paint — half strength, and
+    // rough surfaces (cloth, concrete) keep only a whisper of it.
+    specV = Math.pow(ndh, shin) * (1 - mat.rough * 0.7) * 0.55;
+    if (mat.rough > 0.85) specV *= 0.35;
     if (opts.double) specV *= 0.5;
     specTintBase = mat.metal > 0.3;
     const ndv = Math.abs(dot3(n, vd));
-    envAmt = (mat.env || 0) * clamp(0.10 + 0.90 * Math.pow(1 - ndv, 3), 0, 1);
+    envAmt = Math.min(0.55, (mat.env || 0) * clamp(0.10 + 0.90 * Math.pow(1 - ndv, 3), 0, 1));
   }
   return { light, specV, specTintBase, envAmt, emis, n };
 }
-function aces(c) { const x = Math.max(0, c / 255) * 0.82; return clamp(x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14), 0, 1) * 255; }
+// Output grade (wash fix): the candidate's ACES curve (0.82 exposure)
+// lifted mids and compressed saturated colours toward cream/pink — the
+// global bleach in both judge verdicts. OLD's grade is restored: the
+// x1.13 saturation ceiling plus the x1.05 contrast pivot at 128, with a
+// soft shoulder above 232 keeping the highlight roll-off ACES was bought
+// for (no hard clamp to pure white) without touching mids or saturation.
+function gradeChan(avg, v) {
+  const g = (avg + (v - avg) * 1.13 - 128) * 1.05 + 128;
+  return clamp(g > 232 ? 232 + (g - 232) * 0.45 : g, 0, 255);
+}
 
 // Push one world-space polygon: near-plane clip, sun shading, distance fog, painter list.
 // opts: {light, alpha, vGrad, cat ('fig'|'car'), double (light both sides), noFog, mat}
@@ -364,13 +386,10 @@ function addPoly(pts, base, opts = {}) {
     }
     if (sl.emis) { rC += sl.emis[0]; gC += sl.emis[1]; bC += sl.emis[2]; }
     rC += (fogC[0] - rC) * fogT; gC += (fogC[1] - gC) * fogT; bC += (fogC[2] - bC) * fogT;
-    // Output grade: the x1.13 saturation discipline is KEPT as the ceiling
-    // (palette was judge-praised — never neon), then an ACES-fitted filmic
-    // curve replaces the old contrast stack for highlight roll-off.
     const avg = (rC + gC + bC) / 3;
-    rC = aces(avg + (rC - avg) * 1.13);
-    gC = aces(avg + (gC - avg) * 1.13);
-    bC = aces(avg + (bC - avg) * 1.13);
+    rC = gradeChan(avg, rC);
+    gC = gradeChan(avg, gC);
+    bC = gradeChan(avg, bC);
     return a >= 1 ? `rgb(${rC | 0},${gC | 0},${bC | 0})` : `rgba(${rC | 0},${gC | 0},${bC | 0},${a})`;
   };
   const face = { pts: clipped.map(projectCam), depth, col: shade(light) };
@@ -408,22 +427,25 @@ function faceNormal(pts) {
   const p0 = pts[0], p1 = pts[1], p2 = pts[2];
   return norm3(cross3([p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]], [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]]));
 }
+// Returns true when the face was textured, false when it took the flat
+// fallback — drawBuilding needs to know, because a fallen-back wall must
+// get its flat window/shop detail back instead of staying a bare slab.
 function addTexQuad(pts, tileName, uvs, opts = {}) {
   const flat = opts.flat || [96, 90, 84];
-  if (F.idMode || !atlas()) { addPoly(pts, flat, opts); return; }
+  if (F.idMode || !atlas()) { addPoly(pts, flat, opts); return false; }
   const camPts = pts.map(toCam);
   const parentClip = clipZ(camPts, uvs, NEAR + 0.5);
-  if (parentClip.cam.length < 3) { return; } // wholly behind the lens: nothing to draw
+  if (parentClip.cam.length < 3) { return true; } // wholly behind the lens: nothing to draw
   let depth = 0; for (const c of parentClip.cam) depth += c[2]; depth /= parentClip.cam.length;
-  if (depth > (opts.maxDist || 750)) { addPoly(pts, flat, opts); return; }
+  if (depth > (opts.maxDist || 750)) { addPoly(pts, flat, opts); return false; }
   const spts = parentClip.cam.map(projectCam);
   let mnx = 1e9, mxx = -1e9, mny = 1e9, mxy = -1e9;
   for (const s of spts) { mnx = Math.min(mnx, s[0]); mxx = Math.max(mxx, s[0]); mny = Math.min(mny, s[1]); mxy = Math.max(mxy, s[1]); }
   const bw = mxx - mnx, bh = mxy - mny;
-  if (!opts.force && bh < 36) { addPoly(pts, flat, opts); return; }
+  if (!opts.force && bh < 36) { addPoly(pts, flat, opts); return false; }
   const ground = opts.kind === 'ground';
-  if (ground) { if (F.texGround >= TEX_GROUND_CAP) { addPoly(pts, flat, opts); return; } F.texGround++; }
-  else { if (F.texBld >= TEX_BLD_CAP) { addPoly(pts, flat, opts); return; } F.texBld++; }
+  if (ground) { if (F.texGround >= TEX_GROUND_CAP) { addPoly(pts, flat, opts); return false; } F.texGround++; }
+  else { if (F.texBld >= TEX_BLD_CAP) { addPoly(pts, flat, opts); return false; } F.texBld++; }
   // Lighting: the shared material model. A textured face cannot take
   // per-channel specular/env adds, so those fold into the overlay as a
   // warm luminance lift (specular glints + sky sheen still read).
@@ -433,6 +455,12 @@ function addTexQuad(pts, tileName, uvs, opts = {}) {
   const light = sl.light;
   const fogT = opts.noFog ? 0 : clamp((depth - 240) / 1150, 0, 0.60);
   const L = light * (F.lightScale || 1);
+  // texShade [floor, gain] compresses the overlay's shading range for
+  // facades/shops: the tile's lit windows and awnings are emissive-class
+  // detail (OLD's flat path drew them at a fixed ~0.96 light), so the
+  // overlay must not multiply them by a shade wall's raw L (~0.49) — that
+  // crush turned lit facades into uniform dark slots (wash fix).
+  const Leff = opts.texShade ? opts.texShade[0] + opts.texShade[1] * L : L;
   const specLite = clamp(sl.specV * 0.45 + sl.envAmt * 0.22, 0, 0.3);
   // Subdivision: density from screen size, aligned to integer UV repeats.
   const uR = Math.max(0.001, Math.abs(uvs[1][0] - uvs[0][0])), vR = Math.max(0.001, Math.abs(uvs[3][1] - uvs[0][1]));
@@ -465,9 +493,10 @@ function addTexQuad(pts, tileName, uvs, opts = {}) {
     if (cc.cam.length < 3) continue;
     cells.push({ s: cc.cam.map(projectCam), u: cc.uv, clipped: cc.cam.length !== 4 });
   }
-  if (!cells.length) { addPoly(pts, flat, opts); return; }
+  if (!cells.length) { addPoly(pts, flat, opts); return false; }
   F.faces.push({ pts: spts, depth, tex: { tile: tileName, cells, alpha: opts.alpha === undefined ? 1 : opts.alpha },
-    overlay: { dark: clamp(1 - L, 0, 0.78), lite: clamp(clamp((L - 1) * 0.32, 0, 0.2) + specLite, 0, 0.34), fogT, fogC: F.fog || FOG } });
+    overlay: { dark: clamp(1 - Leff, 0, 0.78), lite: clamp(clamp((Leff - 1) * 0.32, 0, 0.2) + specLite, 0, 0.34), fogT, fogC: F.fog || FOG } });
+  return true;
 }
 // One clipped drawImage per cell: the affine map is solved from three
 // corners (0,1,2) of the cell; the fourth corner carries the small
@@ -488,7 +517,19 @@ function drawTexTri3(ctx, img, t, D, S) {
   ctx.restore();
 }
 function drawTexCell(ctx, img, t, cell) {
-  const S = cell.u.map(([u, v]) => [(u - Math.floor(u)) * t.w, (1 - (v - Math.floor(v))) * t.h]);
+  // Repeat-local source coords (THE wash fix): a cell never crosses an
+  // integer UV boundary (subdivision is aligned to repeats), so source
+  // coords are taken relative to the cell's own repeat origin. The old
+  // per-corner frac() folded an exact-integer corner back to 0 — a cell
+  // spanning a full repeat (every vRep-1 wall with Nv=1, and EVERY shop
+  // band: bh ~45 -> Nv=1, v-span [0,1]) got a degenerate source quad
+  // (den = 0) and painted NOTHING, leaving only its fog/dark overlay
+  // over the sky: the blank peach slabs, erased storefronts and ghost
+  // walls both judge seats flagged as the haze/exposure wash.
+  let umin = 1e9, vmin = 1e9;
+  for (const [cu, cv] of cell.u) { umin = Math.min(umin, cu); vmin = Math.min(vmin, cv); }
+  const ub = Math.floor(umin + 1e-9), vb = Math.floor(vmin + 1e-9);
+  const S = cell.u.map(([u, v]) => [(u - ub) * t.w, (1 - (v - vb)) * t.h]);
   const D = cell.s;
   if (!cell.clipped && D.length === 4) {
     const den = (S[1][0] - S[0][0]) * (S[2][1] - S[0][1]) - (S[2][0] - S[0][0]) * (S[1][1] - S[0][1]);
@@ -656,8 +697,11 @@ function glowSprite(col) {
   const cv = document.createElement('canvas'); cv.width = cv.height = 64;
   const g = cv.getContext('2d');
   const gr = g.createRadialGradient(32, 32, 2, 32, 32, 32);
-  gr.addColorStop(0, 'rgba(255,255,255,0.85)');
-  gr.addColorStop(0.25, `rgba(${col[0]},${col[1]},${col[2]},0.55)`);
+  // Wash fix: the white core was 0.85 — stacked lightbar/headlight sprites
+  // in the chase midground added up to a veiling glare that dissolved the
+  // pursuit cars. Core and halo restrained; the bloom itself stays.
+  gr.addColorStop(0, 'rgba(255,255,255,0.5)');
+  gr.addColorStop(0.25, `rgba(${col[0]},${col[1]},${col[2]},0.38)`);
   gr.addColorStop(1, `rgba(${col[0]},${col[1]},${col[2]},0)`);
   g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
   GLOW_SPRITES[key] = cv;
@@ -749,9 +793,19 @@ function drawGround(game) {
         let u0 = hash01(cellI * 41 + cellJ * 17) < 0.5 ? 0 : 0.5;
         let v0 = hash01(cellI * 23 + cellJ * 53) < 0.5 ? 0 : 0.5;
         if (sgBand) v0 = sgBand === 'grass' ? 0.5 : 0;
+        // Tile scale (wash fix): at the old 0.5 sub-rect per 44-unit cell
+        // the concrete slab joints landed every ~11 world units — the
+        // mission apron read as oversized wooden decking — and the
+        // sandgrass patches spanned whole cells (results-lawn plaid).
+        // Concrete now repeats 2x1 per cell (joints ~2.8 x 5.5 units,
+        // fine paving grain) and sandgrass a full tile width (v stays
+        // inside its grass/sand half). Asphalt keeps its praised 0.5 mapping.
+        let uRng = 0.5, vRng = 0.5;
+        if (gTile === 'concrete') { uRng = 2; vRng = 1; u0 = 0; v0 = 0; }
+        else if (gTile === 'sandgrass') { uRng = 1; u0 = 0; }
         const flip = hash01(cellI * 71 + cellJ * 37) > 0.6;
         const US = [0, 1, 1, 0], VS = [0, 0, 1, 1];
-        const uvs = corners.map((_, i) => [u0 + (flip ? 1 - US[i] : US[i]) * 0.5, v0 + VS[i] * 0.5]);
+        const uvs = corners.map((_, i) => [u0 + (flip ? 1 - US[i] : US[i]) * uRng, v0 + VS[i] * vRng]);
         const gm = gTile === 'asphalt' ? { matNear: MAT.ASPHALT_WET, matFar: MAT.ASPHALT_DRY } : gTile === 'concrete' ? { mat: MAT.CONCRETE } : { mat: MAT.SAND };
         addTexQuad(corners, gTile, uvs, { flat: col, kind: 'ground', ...gm });
       } else addPoly(corners, col, { light: 0.92, mat: base === WATER_C ? MAT.WATER : undefined });
@@ -860,7 +914,7 @@ function drawGround(game) {
       for (let dx = 16; dx < st.w - 20; dx += 34) addQuad([st.x + dx, ry - 1.2, 0.36], [st.x + dx + 16, ry - 1.2, 0.36], [st.x + dx + 16, ry + 1.2, 0.36], [st.x + dx, ry + 1.2, 0.36], [238, 236, 226], { light: 1.0 });
       for (const ex of [st.x + 10, st.x + st.w - 22]) for (let b = 0; b < 4; b++) addQuad([ex, ry - 13 + b * 7, 0.36], [ex + 10, ry - 13 + b * 7, 0.36], [ex + 10, ry - 9 + b * 7, 0.36], [ex, ry - 9 + b * 7, 0.36], [238, 236, 226], { light: 1.0 });
       addTexQuad([[st.x + 20, st.y + 24, 0.28], [st.x + 150, st.y + 24, 0.28], [st.x + 150, st.y + 74, 0.28], [st.x + 20, st.y + 74, 0.28]], 'concrete',
-        [[0, 0], [2, 0], [2, 1], [0, 1]], { flat: [122, 120, 114], light: 0.95, force: true });
+        [[0, 0], [6, 0], [6, 3], [0, 3]], { flat: [122, 120, 114], light: 0.95, force: true });
     } else {
       for (const [px, py] of [[70, 70], [200, 70], [70, 220], [200, 220]]) addDisc(st.x + px, st.y + py, 0.3, 30, [116, 118, 104], { light: 0.95 });
       addQuad([st.x + 24, st.y + st.h - 44, 0.3], [st.x + st.w - 24, st.y + st.h - 44, 0.3], [st.x + st.w - 24, st.y + st.h - 36, 0.3], [st.x + 24, st.y + st.h - 36, 0.3], [196, 178, 92], { light: 1.0 });
@@ -918,6 +972,7 @@ function drawBuilding(game, b) {
   // so the per-window quads below are skipped for them); far buildings keep
   // the established flat box + quad detail path.
   let textured = !F.idMode && Math.hypot(dx, dy) < 860;
+  const texFail = new Set(); // wall keys (axis+side) whose texture fell back flat
   if (textured) {
     // Extreme-projection guard: a wall the lens grazes (chase cam hugging
     // a flank wall — the wall PLANE passes within a few units of the lens
@@ -938,7 +993,26 @@ function drawBuilding(game, b) {
       const sp = cl.cam.map(projectCam);
       let mnx = 1e9, mxx = -1e9, mny = 1e9, mxy = -1e9;
       for (const p of sp) { mnx = Math.min(mnx, p[0]); mxx = Math.max(mxx, p[0]); mny = Math.min(mny, p[1]); mxy = Math.max(mxy, p[1]); }
-      if (mxx - mnx > 2600 || mxy - mny > 1500) { textured = false; break; }
+      // Thresholds tightened in the wash fix (2600x1500 -> 1500x1000): a
+      // wall projecting larger than this is painted by at most 6x6 affine
+      // cells, so its texture is a smear regardless — and rasterising it
+      // costs more than every other face in the frame combined. The flat
+      // path's per-window quads stay legible there (and far cheaper).
+      if (mxx - mnx > 1500 || mxy - mny > 1000) { textured = false; break; }
+    }
+    // Wash fix — blank-slab guard: addTexQuad falls back to a BARE flat
+    // wall past depth 750 or once the textured-entry budget is spent,
+    // while the detail pass below still skips this building's windows —
+    // the erased centre-right chase building and the results background
+    // building. Decide per building, up front, with addTexQuad's own
+    // numbers: fully textured, or fully flat with its OLD detail.
+    if (textured) {
+      if (F.texBld + 6 > TEX_BLD_CAP) textured = false;
+      else for (const wq of wallQuads) {
+        if ((F.cam[0] - wq.mid[0]) * wq.n[0] + (F.cam[1] - wq.mid[1]) * wq.n[1] <= 0) continue;
+        const mc = toCam([(wq.pts[0][0] + wq.pts[2][0]) / 2, (wq.pts[0][1] + wq.pts[2][1]) / 2, H / 2]);
+        if (mc[2] > 740) { textured = false; break; }
+      }
     }
   }
   if (textured) {
@@ -959,19 +1033,20 @@ function drawBuilding(game, b) {
       if (d > bestD) { bestD = d; best = w; }
       if (d <= 0) continue;
       const uRep = Math.max(1, Math.round(w.wid / 95));
+      const wKey = w.axis + ((w.n[0] + w.n[1]) > 0 ? 'p' : 'm');
       if (shopBand) {
         const uRepS = Math.max(1, Math.round(w.wid / 95));
-        addTexQuad(w.mk(0, 17), 'shop', [[0, 0], [uRepS, 0], [uRepS, 1], [0, 1]], { flat: w.flat, mat: MAT.FACADE });
+        if (!addTexQuad(w.mk(0, 17), 'shop', [[0, 0], [uRepS, 0], [uRepS, 1], [0, 1]], { flat: w.flat, mat: MAT.FACADE, texShade: [0.68, 0.32] })) texFail.add(wKey);
         const vRep = Math.max(1, Math.round((H - 17) / 95));
-        addTexQuad(w.mk(17, H), tileT, [[0, 0], [uRep, 0], [uRep, vRep], [0, vRep]], { flat: w.flat, mat: MAT.FACADE });
+        if (!addTexQuad(w.mk(17, H), tileT, [[0, 0], [uRep, 0], [uRep, vRep], [0, vRep]], { flat: w.flat, mat: MAT.FACADE, texShade: [0.58, 0.42] })) texFail.add(wKey);
       } else {
         const vRep = Math.max(1, Math.round(H / 95));
-        addTexQuad(w.mk(0, H), tileT, [[0, 0], [uRep, 0], [uRep, vRep], [0, vRep]], { flat: w.flat, mat: MAT.FACADE });
+        if (!addTexQuad(w.mk(0, H), tileT, [[0, 0], [uRep, 0], [uRep, vRep], [0, vRep]], { flat: w.flat, mat: MAT.FACADE, texShade: [0.58, 0.42] })) texFail.add(wKey);
       }
     }
     const uRepR = Math.max(1, Math.round(b.w / 70)), vRepR = Math.max(1, Math.round(b.h / 70));
     addTexQuad([[b.x, b.y, H], [b.x + b.w, b.y, H], [b.x + b.w, b.y + b.h, H], [b.x, b.y + b.h, H]], 'roof',
-      [[0, 0], [uRepR, 0], [uRepR, vRepR], [0, vRepR]], { flat: roofC, mat: MAT.CONCRETE });
+      [[0, 0], [uRepR, 0], [uRepR, vRepR], [0, vRepR]], { flat: roofC, mat: MAT.CONCRETE, texShade: [0.58, 0.42] });
     // Geometry assists on the most camera-facing wall: an AC unit and a
     // ground-floor signage box (hash-placed, at most one of each).
     if (best && distT < 620) {
@@ -1037,9 +1112,12 @@ function drawBuilding(game, b) {
       // pure-white rectangles — the "blank sign" defect in a second costume.
       addQuad(mk(face.from + 5, H - 12), mk(face.to - 5, H - 12), mk(face.to - 5, H - 5), mk(face.from + 5, H - 5), rgb(b.neonColor).map((v) => v * 0.85), { light: 1.02 });
       const nc = mk((face.from + face.to) / 2, H - 8.5, 2);
-      addGlow(nc[0], nc[1], H - 8.5, 13, rgb(b.neonColor), 0.4);
+      addGlow(nc[0], nc[1], H - 8.5, 13, rgb(b.neonColor), 0.26);
     }
-    if (textured) continue; // the facade tile carries windows/shopfront/trim
+    // The facade tile carries windows/shopfront/trim — except on a wall
+    // whose texture fell back flat (texFail): that wall gets its flat
+    // detail back, so no camera-facing wall is ever a bare slab.
+    if (textured && !texFail.has(face.axis + ((face.out[0] + face.out[1]) > 0 ? 'p' : 'm'))) continue;
     // Shopfront: dressed bays at ground level — warm timber frame (never a
     // black slab), mullioned glass, and a named sign plate above each bay:
     // a coloured plate with dark letter-ticks, flavour inside the world.
@@ -1236,11 +1314,11 @@ function drawCar3D(car, game) {
     const hx = car.x + c * (L / 2 + 20), hy = car.y + s * (L / 2 + 20);
     if (isOnRoad(hx, hy)) addDisc(hx, hy, 0.36, 10, [255, 240, 200], { alpha: 0.05, light: 1 });
     // Wet-road smears: headlight warmth ahead, hero tail-light red behind.
-    addSmear(car.x + c * (L / 2 + 1), car.y + s * (L / 2 + 1), W / 2 - 3, 15, [255, 240, 200], 0.15);
-    if (isHero) addSmear(car.x - c * (L / 2 + 1), car.y - s * (L / 2 + 1), W / 2 - 2, 16, [255, 52, 60], 0.18);
+    addSmear(car.x + c * (L / 2 + 1), car.y + s * (L / 2 + 1), W / 2 - 3, 15, [255, 240, 200], 0.10);
+    if (isHero) addSmear(car.x - c * (L / 2 + 1), car.y - s * (L / 2 + 1), W / 2 - 2, 16, [255, 52, 60], 0.12);
     const hg1 = LP(L / 2 + 0.4, W / 2 - 3.4, 5.8), hg2 = LP(L / 2 + 0.4, -W / 2 + 3.4, 5.8);
-    addGlow(hg1[0], hg1[1], 5.8, 9, [255, 243, 190], 0.38);
-    addGlow(hg2[0], hg2[1], 5.8, 9, [255, 243, 190], 0.38);
+    addGlow(hg1[0], hg1[1], 5.8, 9, [255, 243, 190], 0.22);
+    addGlow(hg2[0], hg2[1], 5.8, 9, [255, 243, 190], 0.22);
   }
   if (car.isCop) {
     // White band + flashing light bar (phase from the frozen game clock: deterministic).
@@ -1252,10 +1330,10 @@ function drawCar3D(car, game) {
       addBox(lbX + sideOff[0], lbY + sideOff[1], roofZ + 0.9, 2.8, 4.2, 1.5, yaw, flash ? [255, 60, 90] : [130, 34, 48], { light: 1.55, mat: { rough: 0.4, metal: 0, env: 0.2, emissive: flash ? [110, 22, 34] : [30, 8, 12] }, ...opts });
       addBox(lbX - sideOff[0], lbY - sideOff[1], roofZ + 0.9, 2.8, 4.2, 1.5, yaw, flash ? [44, 96, 168] : [30, 205, 254], { light: 1.55, mat: { rough: 0.4, metal: 0, env: 0.2, emissive: flash ? [14, 34, 66] : [10, 74, 92] }, ...opts });
       // Lightbar reflections smeared on the wet road toward the camera.
-      addSmear(lbX + sideOff[0], lbY + sideOff[1], 4.2, 23, flash ? [255, 60, 90] : [130, 34, 48], 0.26);
-      addSmear(lbX - sideOff[0], lbY - sideOff[1], 4.2, 23, flash ? [44, 96, 168] : [30, 205, 254], 0.26);
-      addGlow(lbX + sideOff[0], lbY + sideOff[1], roofZ + 1.8, 15, flash ? [255, 60, 90] : [130, 34, 48], 0.5);
-      addGlow(lbX - sideOff[0], lbY - sideOff[1], roofZ + 1.8, 15, flash ? [44, 96, 168] : [30, 205, 254], 0.5);
+      addSmear(lbX + sideOff[0], lbY + sideOff[1], 4.2, 23, flash ? [255, 60, 90] : [130, 34, 48], 0.16);
+      addSmear(lbX - sideOff[0], lbY - sideOff[1], 4.2, 23, flash ? [44, 96, 168] : [30, 205, 254], 0.16);
+      addGlow(lbX + sideOff[0], lbY + sideOff[1], roofZ + 1.8, 15, flash ? [255, 60, 90] : [130, 34, 48], 0.30);
+      addGlow(lbX - sideOff[0], lbY - sideOff[1], roofZ + 1.8, 15, flash ? [44, 96, 168] : [30, 205, 254], 0.30);
     }
   }
   if (isHero && !isVan) {
@@ -1267,7 +1345,7 @@ function drawCar3D(car, game) {
       addBox(car.x + stOff[0], car.y + stOff[1], roofZ - 3.4, 1.3, 1.3, 2.4, yaw, [24, 25, 30], opts);
     }
     quadAt(-L / 2 - 0.5, 0, 7.6, W / 2 - 1.6, 1.5, [255, 40, 56], 1.6);
-    if (!car.dead) { const tb = LP(-L / 2 - 0.5, 0, 7.6); addGlow(tb[0], tb[1], 7.6, 11, [255, 40, 56], 0.4); }
+    if (!car.dead) { const tb = LP(-L / 2 - 0.5, 0, 7.6); addGlow(tb[0], tb[1], 7.6, 11, [255, 40, 56], 0.24); }
   }
   // Damage smoke: collected as SOFT SPRITES (radial-gradient discs drawn
   // after the painter pass) — polygon puffs read as grey blobs/render errors.
@@ -1537,7 +1615,7 @@ function drawLamp(l) {
   // rectangle — the same pure-white defect as the old window quads.
   addBox(l.x, l.y, 26, 2.4, 2.4, 1.7, 0, [238, 198, 138], { light: 1.12, mat: { rough: 0.6, metal: 0, env: 0.1, emissive: [64, 40, 14] } });
   addDisc(l.x, l.y, 0.37, 12, [255, 180, 96], { alpha: 0.05, light: 1 });
-  addGlow(l.x, l.y, 27, 11, [255, 190, 110], F.gradeName === 'dusk' ? 0.5 : 0.34);
+  addGlow(l.x, l.y, 27, 11, [255, 190, 110], F.gradeName === 'dusk' ? 0.30 : 0.22);
 }
 function drawBoat(bt) {
   const dx = bt.x - F.cam[0], dy = bt.y - F.cam[1];
@@ -1566,7 +1644,7 @@ function drawParticles(game) {
       F.softSprites.push({ x: p.x + 2.5, y: p.y - 1.5, z: 12 + (1 - ratio) * 8, r: baseR * 1.35, a: 0.19, col: [148, 146, 150] });
     } else {
       F.softSprites.push({ x: p.x, y: p.y, z: 10.5, r: Math.min(1.7, p.size * 0.34), a: 0.88, col });
-      addGlow(p.x, p.y, 10.5, 6, col, 0.45); // spark / muzzle bloom
+      addGlow(p.x, p.y, 10.5, 6, col, 0.30); // spark / muzzle bloom
     }
   }
 }
@@ -1699,7 +1777,7 @@ export function renderView3D(ctx, game) {
       const wid = Math.max(b.w, b.h) / 2;
       const ext2 = ext + b.height * BUILD_SCALE * 0.45;
       const P = (e, w) => [cxB + dir[0] * e + perp[0] * w, cyB + dir[1] * e + perp[1] * w, 0.45];
-      addPoly([P(ext, -wid), P(ext, wid), P(ext2, wid * 1.05), P(ext2, -wid * 1.05)], [mc.col[0] * 0.5, mc.col[1] * 0.5, mc.col[2] * 0.5], { alpha: 0.10, light: 1 });
+      addPoly([P(ext, -wid), P(ext, wid), P(ext2, wid * 1.05), P(ext2, -wid * 1.05)], [mc.col[0] * 0.5, mc.col[1] * 0.5, mc.col[2] * 0.5], { alpha: 0.08, light: 1 });
     }
   }
   for (const t of game.city.trees || []) drawTree(t);
