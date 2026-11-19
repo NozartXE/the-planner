@@ -184,6 +184,22 @@ export function drawHud(ctx, game) {
     ctx.fillStyle = PALETTE.hudText; ctx.font = '700 13px system-ui, sans-serif'; ctx.textAlign = 'right';
     ctx.fillText(game.weapon.mag + ' / ' + game.weapon.reserve, 210, VIEW_H - 108);
   }
+  // GTA free-aim reticle: drawn while on foot in play and the aim predicate
+  // holds (bullets in flight or a shot inside the last 700 ms — the same
+  // predicate that switches view3d to the over-the-shoulder camera).
+  // EXACT reference geometry: two horizontal ticks and one tick below the
+  // centre — NO top tick, NO centre dot, NO circle — static, no sway, no
+  // pulse, no target highlight (free aim).
+  if (game.screen === 'play' && !game.player.inCar
+    && ((game.bullets && game.bullets.length > 0) || (game.lastShotAt && game.nowMs - game.lastShotAt < 700))) {
+    const cx = VIEW_W * 0.536, cy = VIEW_H * 0.5;
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 25, cy); ctx.lineTo(cx - 10, cy);
+    ctx.moveTo(cx + 10, cy); ctx.lineTo(cx + 25, cy);
+    ctx.moveTo(cx, cy + 10); ctx.lineTo(cx, cy + 23);
+    ctx.stroke();
+  }
   if (game.screen === 'play') { drawDispatch(ctx, game); drawDialogue(ctx, game); }
   // Control hints for the first seconds of play: key caps only, no prose —
   // centred under the mission bar, clear of every bottom-edge cluster.

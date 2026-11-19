@@ -689,19 +689,25 @@ function drawFigure3D(o) {
   const sideHint = [s[0], s[1], 0];
   addShadow(o.x, o.y, 6.5, 6.5, a, 13, 0.28);
   if (o.dead) {
-    // Fallen body: low elongated volumes along the facing, head at the front.
+    // Fallen body: low elongated volumes along the facing, head at the front —
+    // a flatter angular slab + hair slab, consistent with the slab-built head.
     addBox(o.x, o.y, 1.6, 8.6, 3.0, 1.6, a, o.shirt, opts);
-    const hc = P(10.6, 0, 1.7);
-    addBox(hc[0], hc[1], hc[2], 1.6, 1.6, 1.6, a, o.skin, opts);
+    const hc = P(10.6, 0, 1.5);
+    addBox(hc[0], hc[1], hc[2], 1.9, 1.9, 0.85, a, o.skin, opts);
+    const hr = P(10.1, 0, 2.15);
+    addBox(hr[0], hr[1], hr[2], 1.6, 1.95, 0.35, a, o.hair, opts);
     return;
   }
   // (No ground identity ring in 3D: at chase-cam distance an 11–13-unit ring
   // projects as a huge arc across the foreground. The player is the centred
   // figure in the shirt colour — identity needs no marker here.)
   const pose = o.pose, ph = o.phase || 0;
-  const hipZ = 7.2, shoZ = 11.8;
+  // Polygon War proportions (ported as original code): the bigger angular
+  // head is compensated by a slightly shorter body — hip 6.8 (thigh 3.5 +
+  // shin 3.3), shoulders 11.2, crown still exactly FIG_H 15.4.
+  const hipZ = 6.8, shoZ = 11.2;
   const lean = pose === 'run' ? 2.6 : pose === 'aim' ? 1.6 : pose === 'walk' ? 0.8 : 0;
-  // Legs: thigh (3.7) + shin (3.5), tapered, hips wide enough that the two legs
+  // Legs: thigh (3.5) + shin (3.3), tapered, hips wide enough that the two legs
   // stay separate volumes from behind instead of merging into one slab.
   for (const sideSign of [1, -1]) {
     const hip = P(0, sideSign * 1.9, hipZ);
@@ -710,13 +716,13 @@ function drawFigure3D(o) {
       const amp = pose === 'run' ? 0.82 : 0.52;
       const sw = Math.sin(ph + (sideSign > 0 ? 0 : Math.PI)) * amp;
       const sw2 = sw - (pose === 'run' ? 0.55 : 0.40);
-      knee = P(Math.sin(sw) * 3.7, sideSign * 1.9, hipZ - Math.cos(sw) * 3.7);
-      foot = P(Math.sin(sw) * 3.7 + Math.sin(sw2) * 3.5, sideSign * 2.0, Math.max(0.75, hipZ - Math.cos(sw) * 3.7 - Math.cos(sw2) * 3.5));
+      knee = P(Math.sin(sw) * 3.5, sideSign * 1.9, hipZ - Math.cos(sw) * 3.5);
+      foot = P(Math.sin(sw) * 3.5 + Math.sin(sw2) * 3.3, sideSign * 2.0, Math.max(0.75, hipZ - Math.cos(sw) * 3.5 - Math.cos(sw2) * 3.3));
     } else if (pose === 'aim') {
-      if (sideSign > 0) { knee = P(4.0, 2.0, hipZ - 3.5); foot = P(8.4, 2.3, 0.75); }
-      else { knee = P(-2.7, -2.0, hipZ - 3.6); foot = P(-6.6, -2.4, 0.75); }
+      if (sideSign > 0) { knee = P(4.0, 2.0, hipZ - 3.3); foot = P(8.4, 2.3, 0.75); }
+      else { knee = P(-2.7, -2.0, hipZ - 3.4); foot = P(-6.6, -2.4, 0.75); }
     } else {
-      knee = P(0.3, sideSign * 2.0, hipZ - 3.7);
+      knee = P(0.3, sideSign * 2.0, hipZ - 3.5);
       foot = P(0.9, sideSign * 2.15, 0.75);
     }
     addTaperedLimb(hip, knee, 2.4, 1.9, 2.4, 1.9, o.pants, sideHint, opts);
@@ -727,21 +733,65 @@ function drawFigure3D(o) {
   addBox(o.x, o.y, hipZ - 0.7, 2.3, 2.8, 1.7, a, o.pants, opts);
   const hipC = P(0, 0, hipZ + 0.5), shoC = P(lean, 0, shoZ);
   addTaperedLimb(hipC, shoC, 4.6, 5.6, 3.0, 3.3, o.shirt, sideHint, opts);
-  // Neck + ROUNDED head (lathed sphere, not a box) with a hair sphere offset
-  // up/back, so the skull reads as a head at thumbnail scale. Crown at ≈ FIG_H.
-  const headC = P(lean + 0.3, 0, shoZ + 2.1);
-  addTaperedLimb(P(lean, 0, shoZ - 0.4), headC, 2.1, 2.1, 2.1, 2.1, o.skin, sideHint, opts);
-  addSphere(headC[0], headC[1], headC[2], 1.62, o.skin, opts);
-  addSphere(headC[0] - f[0] * 0.34, headC[1] - f[1] * 0.34, headC[2] + 0.52, 1.68, o.hair, opts);
+  // Modular tactical gear (player + crew only; peds are unarmed civilians):
+  // olive vest slabs front + back NARROWER (4.4) than the 5.6 torso, so the
+  // shirt colour still frames both sides, three khaki mag pouches on the
+  // front slab, olive-dark shoulder straps, darkened-shirt shoulder pads.
+  if (o.gear) {
+    const OLIVE = [86, 93, 63], OLIVE_D = [57, 64, 45], KHAKI = [139, 138, 103];
+    const midZ = (hipZ + shoZ) / 2, midLean = lean * 0.55, vestHZ = (shoZ - hipZ) * 0.42;
+    const vf = P(midLean + 1.72, 0, midZ), vb = P(midLean - 1.72, 0, midZ);
+    addBox(vf[0], vf[1], vf[2], 0.30, 2.2, vestHZ, a, OLIVE, opts);
+    addBox(vb[0], vb[1], vb[2], 0.30, 2.2, vestHZ, a, OLIVE, opts);
+    for (const px of [-1.35, 0, 1.35]) {
+      const pp = P(midLean + 2.12, px, hipZ + 1.55);
+      addBox(pp[0], pp[1], pp[2], 0.34, 0.52, 0.72, a, KHAKI, opts);
+    }
+    for (const sx of [1, -1]) {
+      const st = P(lean * 0.85, sx * 1.45, shoZ - 0.25);
+      addBox(st[0], st[1], st[2], 1.75, 0.45, 0.30, a, OLIVE_D, opts);
+      const pd = P(lean, sx * 3.15, shoZ - 0.05);
+      addBox(pd[0], pd[1], pd[2], 1.55, 1.0, 0.5, a, o.shirt.map((v) => v * 0.62), opts);
+    }
+    // Slung long gun on the back when not aiming: a slim dark vertical box
+    // behind the torso, spanning hipZ+0.5 → shoZ+0.8.
+    if (pose === 'stand' || pose === 'walk' || pose === 'run') {
+      const sg = P(-2.4, 0, (hipZ + 0.5 + shoZ + 0.8) / 2);
+      addBox(sg[0], sg[1], sg[2], 0.45, 0.55, (shoZ + 0.8 - hipZ - 0.5) / 2, a, [37, 39, 45], opts);
+    }
+  }
+  // Neck + ANGULAR SLAB HEAD (Polygon War read — no spheres): stacked
+  // tapered slabs, narrow jaw → wide cranium (≈4.5, 80% of the 5.6 torso)
+  // → crown, with flat hair slabs (top cap + back + sides) and a hair-colour
+  // brow ridge on the front face. The assembly spans shoZ → FIG_H (15.4):
+  // silhouette is the goal — big angular head, hard edges, flat tones.
+  addTaperedLimb(P(lean, 0, shoZ - 0.4), P(lean + 0.2, 0, shoZ + 0.55), 2.0, 2.0, 2.0, 2.0, o.skin, sideHint, opts); // neck stub
+  addTaperedLimb(P(lean + 0.25, 0, shoZ + 0.35), P(lean + 0.3, 0, shoZ + 1.7), 2.9, 3.5, 2.7, 3.1, o.skin, sideHint, opts); // jaw slab
+  addTaperedLimb(P(lean + 0.3, 0, shoZ + 1.7), P(lean + 0.3, 0, shoZ + 3.2), 3.5, 4.5, 3.1, 3.4, o.skin, sideHint, opts); // cranium slab
+  addTaperedLimb(P(lean + 0.3, 0, shoZ + 3.2), P(lean + 0.3, 0, FIG_H - 0.25), 4.5, 4.0, 3.4, 3.0, o.skin, sideHint, opts); // crown slab
+  {
+    const ht = P(lean + 0.3, 0, FIG_H - 0.25);
+    addBox(ht[0], ht[1], ht[2], 1.72, 2.15, 0.25, a, o.hair, opts); // hair top cap (top at FIG_H)
+    const hb = P(lean + 0.3 - 1.62, 0, shoZ + 2.75);
+    addBox(hb[0], hb[1], hb[2], 0.32, 2.05, 1.30, a, o.hair, opts); // hair back slab
+    for (const sx of [1, -1]) {
+      const hs = P(lean + 0.3, sx * 2.18, shoZ + 2.85);
+      addBox(hs[0], hs[1], hs[2], 1.50, 0.28, 1.12, a, o.hair, opts); // hair side slabs
+    }
+    const br = P(lean + 0.3 + 1.78, 0, shoZ + 2.65);
+    addBox(br[0], br[1], br[2], 0.20, 1.85, 0.30, a, o.hair, opts); // brow ridge
+  }
   // Arms: upper (3.4) + forearm (3.2), tapered; hands in skin tone.
   for (const sideSign of [1, -1]) {
     const sho = P(lean, sideSign * 3.15, shoZ - 0.3);
     let elbow, hand;
     if (pose === 'aim') {
-      // Elbows wide and dropped, hands converging forward-down: from behind, the
-      // arms silhouette OUTSIDE the torso instead of merging into a shoulder slab.
-      elbow = P(lean + 5.2, sideSign * 3.05, shoZ - 1.9);
-      hand = P(lean + 11.0, sideSign * 0.9, shoZ - 1.3);
+      // Two-handed long-gun aim: elbows dropped and wide, the gun-side hand
+      // back at the grip, the support hand forward under the handguard —
+      // from behind, the arms silhouette OUTSIDE the torso instead of
+      // merging into a shoulder slab.
+      if (sideSign > 0) { elbow = P(lean + 1.0, 3.6, shoZ - 2.2); hand = P(lean + 4.2, 1.1, shoZ - 1.2); }
+      else { elbow = P(lean + 5.2, -3.05, shoZ - 1.9); hand = P(lean + 10.5, 0.5, shoZ - 0.6); }
     } else if (pose === 'walk' || pose === 'run') {
       const amp = pose === 'run' ? 0.78 : 0.44;
       const sw = Math.sin(ph + (sideSign > 0 ? Math.PI : 0)) * amp;
@@ -756,14 +806,23 @@ function drawFigure3D(o) {
     addTaperedLimb(elbow, hand, 1.75, 1.35, 1.75, 1.35, o.skin, sideHint, opts);
     addBox(hand[0], hand[1], hand[2], 0.85, 0.85, 0.85, a, o.skin, opts);
     if (pose === 'aim' && sideSign > 0) {
-      // The pistol: a long dark barrel + grip block, long enough to read at
-      // mid-shot range, with a lighter muzzle tip catching the sunset.
-      const g1 = P(lean + 18.6, 0.4, shoZ - 1.3);
-      addTaperedLimb(hand, g1, 2.1, 1.6, 2.8, 2.3, [22, 24, 30], sideHint, opts);
-      const g2 = P(lean + 20.6, 0.4, shoZ - 1.15);
-      addTaperedLimb(g1, g2, 1.5, 1.3, 2.1, 1.9, [88, 92, 102], sideHint, opts);
-      const grip = P(lean + 12.2, 0.7, shoZ - 3.4);
-      addTaperedLimb(hand, grip, 1.8, 1.5, 2.2, 1.9, [22, 24, 30], sideHint, opts);
+      // The TWO-HANDED LONG GUN at shoulder height (Polygon War gun greys):
+      // stock block against the shoulder, receiver running forward along
+      // the facing at z ≈ shoZ + 0.2 (sight line near the cheek), barrel
+      // extension to ≈ +20 forward, magazine angled down below the receiver.
+      const GUN = [37, 39, 45], GUN_TIP = [52, 55, 63];
+      const stock = P(lean + 0.9, 0.95, shoZ + 0.05);
+      addBox(stock[0], stock[1], stock[2], 1.6, 0.55, 0.95, a, GUN, opts);
+      const r0 = P(lean + 2.4, 0.8, shoZ + 0.2), r1 = P(lean + 11.0, 0.6, shoZ + 0.2);
+      addTaperedLimb(r0, r1, 1.5, 1.25, 1.9, 1.6, GUN, [0, 0, 1], opts); // receiver + handguard
+      const b1 = P(lean + 18.4, 0.55, shoZ + 0.25);
+      addTaperedLimb(r1, b1, 0.75, 0.65, 0.95, 0.85, GUN, [0, 0, 1], opts); // barrel
+      const b2 = P(lean + 20.4, 0.55, shoZ + 0.3);
+      addTaperedLimb(b1, b2, 0.95, 0.85, 1.15, 1.05, GUN_TIP, [0, 0, 1], opts); // muzzle tip
+      const m0 = P(lean + 6.4, 0.7, shoZ - 0.1), m1 = P(lean + 7.4, 0.7, shoZ - 2.3);
+      addTaperedLimb(m0, m1, 1.05, 0.9, 1.45, 1.3, GUN, sideHint, opts); // magazine, angled down
+      const s1 = P(lean + 5.4, 0.65, shoZ + 1.15);
+      addBox(s1[0], s1[1], s1[2], 0.9, 0.4, 0.45, a, GUN_TIP, opts); // rear sight block
     }
   }
 }
@@ -926,10 +985,27 @@ export function renderView3D(ctx, game) {
     // and the player. (Measured: pitch beyond this stops helping — the
     // foreground is road-toned at any pitch; texture, not angle, is what
     // breaks it up, hence the crosswalks and asphalt patchwork below.)
-    const back = isDrive ? 84 : 52;
-    camH = isDrive ? 30 : 30;
+    // GTA over-the-shoulder aim camera: while the aim predicate holds on
+    // foot (bullets in flight or a shot inside the last 700 ms), the cam
+    // closes to ≈30 back / ≈21 up and shifts laterally to the player's
+    // gun side (+side, solved by projection: the player then lands in the
+    // lower-LEFT of frame, big in the foreground) while the look target
+    // swings to the opposite side, so the aim line runs up-frame through
+    // the HUD reticle at (0.536·W, 0.5·H). Solved with a throwaway
+    // projection solver against the renderer's own math, then verified
+    // on the staged mission frame's ID render: player bbox centre
+    // (394, 603) — x inside the 0.30–0.34·W band, y in the lower third
+    // (the figure's feet crop at the frame bottom in true OTS style, so
+    // the clipped bbox centre sits below the 0.66·H mark) — aim-line
+    // distance to the reticle 9.4 px (bound ≈14), and the target sedan,
+    // the tank, both roadblock cops and Dex all fully inside the frame.
+    const aiming = !isDrive && ((game.bullets && game.bullets.length > 0) || (game.lastShotAt && game.nowMs - game.lastShotAt < 700));
+    const back = isDrive ? 84 : aiming ? 30 : 52;
+    camH = isDrive ? 30 : aiming ? 21 : 30;
     const fh = [Math.cos(yaw), Math.sin(yaw)];
-    const wantX = anchor.x - fh[0] * back, wantY = anchor.y - fh[1] * back;
+    const sh = [-fh[1], fh[0]]; // screen-right side vector of the facing
+    const camLat = aiming ? 24 : 0;
+    const wantX = anchor.x - fh[0] * back + sh[0] * camLat, wantY = anchor.y - fh[1] * back + sh[1] * camLat;
     camX = wantX; camY = wantY;
     if (!game.frozen) {
       const prev = game.cam3d;
@@ -949,8 +1025,10 @@ export function renderView3D(ctx, game) {
         if (!pointInBuilding(game.city, tx, ty)) { camX = tx; camY = ty; break; }
       }
     }
-    const lookX = anchor.x + fh[0] * 40, lookY = anchor.y + fh[1] * 40;
-    const lookZ = isDrive ? 9 : 8;
+    const lookLat = aiming ? -11 : 0;
+    const lookFwd = aiming ? 55 : 40;
+    const lookX = anchor.x + fh[0] * lookFwd + sh[0] * lookLat, lookY = anchor.y + fh[1] * lookFwd + sh[1] * lookLat;
+    const lookZ = isDrive ? 9 : aiming ? 9 : 8;
     F = newFrame([camX, camY, camH], [lookX - camX, lookY - camY, lookZ - camH]);
   }
   F.idMode = !!game.idRender;
@@ -1010,7 +1088,7 @@ export function renderView3D(ctx, game) {
       x: ped.x, y: ped.y, angle: ped.angle, phase: ped.walkPhase || 0,
       pose: ped.dead ? 'stand' : fleeing ? 'run' : 'walk', dead: !!ped.dead,
       shirt: rgb(ped.shirt), skin: rgb(ped.skin || '#d9b48f'), pants: rgb(ped.pants || '#2e3440'),
-      hair: rgb(ped.hairColor || '#2b2118'), isPlayer: false,
+      hair: rgb(ped.hairColor || '#2b2118'), isPlayer: false, gear: false,
     });
   }
   // The plan's crew mate on foot: the first picked crew member, in their own
@@ -1021,7 +1099,7 @@ export function renderView3D(ctx, game) {
       x: cm.x, y: cm.y, angle: cm.angle, phase: cm.walkPhase || 0,
       pose: cm.pose || 'walk', dead: false,
       shirt: rgb(cm.color || '#e8c832'), skin: rgb('#d9b48f'), pants: [40, 38, 44],
-      hair: [30, 22, 16], isPlayer: false,
+      hair: [30, 22, 16], isPlayer: false, gear: true,
     });
   }
   // Player on foot (in a car the car itself is the hero, drawn above).
@@ -1032,7 +1110,7 @@ export function renderView3D(ctx, game) {
       x: p.x, y: p.y, angle: p.angle, phase: p.walkPhase || 0,
       pose: aiming ? 'aim' : moving ? 'walk' : 'stand', dead: false,
       shirt: rgb(PALETTE.playerShirt), skin: rgb(PALETTE.playerSkin), pants: [46, 52, 64],
-      hair: [36, 26, 18], isPlayer: true,
+      hair: [36, 26, 18], isPlayer: true, gear: true,
     });
   }
   drawParticles(game);
