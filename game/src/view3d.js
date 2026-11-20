@@ -442,7 +442,10 @@ function buildGL() {
     // directional specular so sunlit car paint carries a highlight
     // streak tied to the sun — Lambert has no specular channel at all.
     paint: new THREE.MeshPhongMaterial({ vertexColors: true, specular: linColor([255, 205, 150]), shininess: 24 }),
-    glasspaint: new THREE.MeshPhongMaterial({ vertexColors: true, specular: linColor([255, 205, 150]), shininess: 24 }),
+    // Top-3 rebuild Phase 1 (D3): glass gets its OWN specular — a cooler,
+    // tighter highlight than paint's warm streak, so the glasshouse reads
+    // as reflective glass against the paint instead of a black slab.
+    glasspaint: new THREE.MeshPhongMaterial({ vertexColors: true, specular: linColor([205, 228, 255]), shininess: 52 }),
     basic: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }),
     alpha: new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide }),
     asphalt: new THREE.MeshLambertMaterial({ map: asphaltTex }),
@@ -614,6 +617,39 @@ function ball(batch, x, y, z, r, color, detail = 0) {
 function disc(batch, x, y, z, r, color, seg = 20) {
   const g = new THREE.CircleGeometry(r, seg);
   batch.push(g, mat4(x, z, y, 0).multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2)), color);
+  g.dispose();
+}
+// Trapezoid prism in CAR-LOCAL space (x forward, y up, z lateral) — the
+// shaped-profile primitive of the Phase 1 vehicle rebuild (D3): a box
+// whose top face slopes from rRear (fraction of height at x −0.5) to
+// rFront (at x +0.5), flat-shaded with computed face normals, pushed
+// through the same batcher as box(). Heights are fractions so one unit
+// geometry serves every slope; the local matrix supplies real size.
+function prismGeo(rRear, rFront) {
+  const RBL = [-0.5, 0, -0.5], RBR = [-0.5, 0, 0.5], RTL = [-0.5, rRear, -0.5], RTR = [-0.5, rRear, 0.5];
+  const FBL = [0.5, 0, -0.5], FBR = [0.5, 0, 0.5], FTL = [0.5, rFront, -0.5], FTR = [0.5, rFront, 0.5];
+  const tris = [
+    RTL, RTR, FTR, RTL, FTR, FTL, // top (sloped)
+    RBL, FBR, RBR, RBL, FBL, FBR, // bottom
+    RBL, FTL, FBL, RBL, RTL, FTL, // left flank
+    RBR, FBR, FTR, RBR, FTR, RTR, // right flank
+    RBL, RBR, RTR, RBL, RTR, RTL, // rear face
+    FBL, FTL, FTR, FBL, FTR, FBR, // front face
+  ];
+  const pos = [];
+  for (const v of tris) pos.push(v[0], v[1], v[2]);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals(); // non-indexed → one flat normal per face
+  return g;
+}
+// Push a prism into a batch in car-local space: centre x cx, base at
+// zBase (world-up units), length/wid along the car, top edge heights
+// hRear / hFront measured up from zBase.
+function prism(batch, M, cx, zBase, len, wid, hRear, hFront, color) {
+  const hMax = Math.max(hRear, hFront, 0.01);
+  const g = prismGeo(hRear / hMax, hFront / hMax);
+  batch.push(g, M.clone().multiply(mat4(cx, zBase, 0, 0, len, hMax, wid)), color);
   g.dispose();
 }
 
@@ -1141,6 +1177,13 @@ function buildBuildings(gl, game, B) {
 const TYRE_G = new THREE.CylinderGeometry(2.9, 2.9, 3.8, 14).rotateX(Math.PI / 2);
 const HUB_G = new THREE.CylinderGeometry(1.8, 1.8, 4.0, 10).rotateX(Math.PI / 2);
 const CAP_G = new THREE.CylinderGeometry(0.75, 0.75, 4.15, 8).rotateX(Math.PI / 2);
+// Phase 1 wheel depth (D3): a recessed rim barrel, a tyre shoulder ring
+// and five spoke boxes layered over the hub, all sharing the wheel's
+// spin/steer matrix, so the wheel stops reading as a flat disc. Radius
+// and placement stay the Phase 3 contract (r 2.9, centre z 2.9).
+const RIM_G = new THREE.CylinderGeometry(2.02, 2.02, 0.5, 14).rotateX(Math.PI / 2);
+const SHOULDER_G = new THREE.TorusGeometry(2.45, 0.42, 6, 16);
+const SPOKE_G = new THREE.BoxGeometry(0.55, 1.7, 0.34);
 function buildTank(gl, game, B, car) {
   curCat = 'tank';
   const yaw = car.angle, L = car.len, W = car.wid;
@@ -1211,10 +1254,38 @@ function buildCar(gl, game, B, car) {
   const M = mat4(car.x, 0, car.y, -yaw);
   const part = (geom, local, color, uvMul, uvOff) => B.flat.push(geom, M.clone().multiply(local), color, uvMul, uvOff);
   const partPaint = (geom, local, color, uvMul, uvOff) => B.paint.push(geom, M.clone().multiply(local), color, uvMul, uvOff);
-  // Lower body + sloped hood / trunk.
-  partPaint(UNIT_BOX, mat4(0, (1.8 + bodyTopZ) / 2, 0, 0, L, bodyTopZ - 1.8, W), body);
-  B.paint.quad(LP(L / 2, -W / 2 + 1, bodyTopZ - 1.2), LP(L / 2, W / 2 - 1, bodyTopZ - 1.2), LP(L * 0.24, W / 2 - 1.6, bodyTopZ + 0.4), LP(L * 0.24, -W / 2 + 1.6, bodyTopZ + 0.4), bodyTop);
-  B.paint.quad(LP(-L * 0.24, -W / 2 + 1.6, bodyTopZ + 0.4), LP(-L * 0.24, W / 2 - 1.6, bodyTopZ + 0.4), LP(-L / 2, W / 2 - 1, bodyTopZ - 0.9), LP(-L / 2, -W / 2 + 1, bodyTopZ - 0.9), bodyTop);
+  // ---- Shaped body (Top-3 rebuild Phase 1, defect D3) ----------------
+  // The stacked-box body is gone for the car classes: a centre box
+  // carries the flanks and a trapezoid prism at each end gives a real
+  // side profile — a nose/hood falling toward the bumper and a deck
+  // rising to the glasshouse. Profiles differ per class while EVERY
+  // class keeps its cabin roof at exactly CAR_ROOF 12.6, so the scale
+  // contract is untouched. The sim already exposes the class on
+  // car.kind; an unrecognised kind falls back to a deterministic
+  // id-hash pick so frames stay reproducible. Vans keep their standing
+  // slab body (their own class, roof 11.6).
+  const variant = isVan ? 'van'
+    : car.isCop || car.kind === 'interceptor' ? 'interceptor'
+    : car.kind === 'sedan' || car.kind === 'coupe' || car.kind === 'hatch' || car.kind === 'armored' ? car.kind
+    : ['sedan', 'coupe', 'hatch'][Math.floor(hash01((car.id || 1) * 3.13) * 3) % 3];
+  const bodyDark = car.dead ? body : lin(rgb(car.color).map((v) => v * 0.85));
+  if (isVan) {
+    partPaint(UNIT_BOX, mat4(0, (1.8 + bodyTopZ) / 2, 0, 0, L, bodyTopZ - 1.8, W), body);
+    B.paint.quad(LP(L / 2, -W / 2 + 1, bodyTopZ - 1.2), LP(L / 2, W / 2 - 1, bodyTopZ - 1.2), LP(L * 0.24, W / 2 - 1.6, bodyTopZ + 0.4), LP(L * 0.24, -W / 2 + 1.6, bodyTopZ + 0.4), bodyTop);
+    B.paint.quad(LP(-L * 0.24, -W / 2 + 1.6, bodyTopZ + 0.4), LP(-L * 0.24, W / 2 - 1.6, bodyTopZ + 0.4), LP(-L / 2, W / 2 - 1, bodyTopZ - 0.9), LP(-L / 2, -W / 2 + 1, bodyTopZ - 0.9), bodyTop);
+  } else {
+    const PROF = {
+      sedan: { noseX: 0.22, noseDrop: 1.7, deckX: -0.26, deckDrop: 1.0 },
+      coupe: { noseX: 0.08, noseDrop: 2.0, deckX: -0.20, deckDrop: 0.8 },
+      hatch: { noseX: 0.24, noseDrop: 1.5, deckX: -0.40, deckDrop: -0.3 },
+      armored: { noseX: 0.26, noseDrop: 1.0, deckX: -0.26, deckDrop: 0.7 },
+      interceptor: { noseX: 0.22, noseDrop: 1.7, deckX: -0.26, deckDrop: 1.0 },
+    }[variant];
+    const noseX = L * PROF.noseX, deckX = L * PROF.deckX;
+    partPaint(UNIT_BOX, mat4((noseX + deckX) / 2, (1.8 + bodyTopZ) / 2, 0, 0, noseX - deckX, bodyTopZ - 1.8, W), body);
+    prism(B.paint, M, (noseX + L / 2) / 2, 1.8, L / 2 - noseX, W - 1.4, bodyTopZ + 0.4 - 1.8, bodyTopZ - PROF.noseDrop - 1.8, bodyTop);
+    prism(B.paint, M, (deckX - L / 2) / 2, 1.8, deckX + L / 2, W - 1.4, bodyTopZ - PROF.deckDrop - 1.8, bodyTopZ + 0.4 - 1.8, bodyTop);
+  }
   // Bumpers.
   part(UNIT_BOX, mat4(L / 2 + 0.8, 3.6, 0, 0, 3.2, 4.4, W - 1.2), lin([30, 31, 36]));
   part(UNIT_BOX, mat4(-L / 2 - 0.8, 3.6, 0, 0, 3.2, 4.4, W - 1.2), lin([30, 31, 36]));
@@ -1222,9 +1293,12 @@ function buildCar(gl, game, B, car) {
   // glass band sits nearly flush with the frame (inset 0.9, not 2.0) and
   // runs deeper, so the glasshouse reads as its own band against the body
   // colour from the rear three-quarter — not as a dark box on a slab.
-  const cabLen = isVan ? L * 0.52 : L * 0.46, cabWid = W - 3.4;
-  const cabOff = isVan ? -L * 0.08 : L * 0.03;
-  partPaint(UNIT_BOX, mat4(cabOff, (bodyTopZ + roofZ) / 2, 0, 0, cabLen, roofZ - bodyTopZ, cabWid), car.dead ? body : lin(rgb(car.color).map((v) => v * 0.85)));
+  // Phase 1 (D3): cabin length/placement now follow the class — the
+  // coupe's glasshouse sits further back under a long hood, the hatch's
+  // runs almost to the tail; the roof height never moves.
+  const cabLen = isVan ? L * 0.52 : variant === 'coupe' ? L * 0.42 : variant === 'hatch' ? L * 0.60 : L * 0.46, cabWid = W - 3.4;
+  const cabOff = isVan ? -L * 0.08 : variant === 'coupe' ? -L * 0.05 : variant === 'hatch' ? -L * 0.07 : variant === 'armored' ? L * 0.02 : L * 0.03;
+  partPaint(UNIT_BOX, mat4(cabOff, (bodyTopZ + roofZ) / 2, 0, 0, cabLen, roofZ - bodyTopZ, cabWid), bodyDark);
   // Phase 10 F2 glass (Phase 9 F3 TUNED values, re-scoped): the band
   // sits PROUD at cabWid+0.3 (the standing cabWid-0.9 box is enclosed
   // by the cabin frame and never renders), split into 4 hard-edged
@@ -1241,13 +1315,30 @@ function buildCar(gl, game, B, car) {
       B.glasspaint.push(UNIT_BOX, M.clone().multiply(mat4(segC, gZ, 0, 0, segL, gH, cabWid + 0.3)), lin(PANES[pi].map((v) => Math.min(255, v * jit))));
     }
   }
-  partPaint(UNIT_BOX, mat4(cabOff, roofZ - 0.4, 0, 0, cabLen - 4.4, 1.1, cabWid - 3.8), bodyTop);
+  const roofLen = isVan ? cabLen - 4.4 : variant === 'coupe' ? cabLen - 7.0 : variant === 'hatch' ? cabLen - 3.4 : cabLen - 4.4;
+  partPaint(UNIT_BOX, mat4(cabOff, roofZ - 0.4, 0, 0, roofLen, 1.1, cabWid - 3.8), bodyTop);
+  if (!isVan) {
+    // Sloped windshield + rear glass in the specular glass batch,
+    // framed by body-colour A/C pillar limbs over the side band — the
+    // glasshouse reads as glass set INTO a pillared frame. The coupe's
+    // rear glass runs long (fastback), the hatch's stands near-vertical.
+    const cabFront = cabOff + cabLen / 2, cabRear = cabOff - cabLen / 2;
+    const wsIn = variant === 'coupe' ? 4.2 : variant === 'hatch' ? 3.0 : variant === 'armored' ? 2.6 : 3.4;
+    const rsIn = variant === 'coupe' ? 7.5 : variant === 'hatch' ? 1.1 : variant === 'armored' ? 2.4 : 3.0;
+    const wsCol = lin([58, 78, 98].map((v) => Math.min(255, v * (0.85 + 0.30 * hash01((car.id || 1) * 5.77)))));
+    B.glasspaint.quad(LP(cabFront + 0.55, cabWid / 2 - 0.55, bodyTopZ + 0.55), LP(cabFront + 0.55, -(cabWid / 2 - 0.55), bodyTopZ + 0.55), LP(cabFront - wsIn, -(cabWid / 2 - 0.75), roofZ - 0.75), LP(cabFront - wsIn, cabWid / 2 - 0.75, roofZ - 0.75), wsCol);
+    B.glasspaint.quad(LP(cabRear - 0.55, -(cabWid / 2 - 0.55), bodyTopZ + 0.6), LP(cabRear - 0.55, cabWid / 2 - 0.55, bodyTopZ + 0.6), LP(cabRear + rsIn, cabWid / 2 - 0.75, roofZ - 0.75), LP(cabRear + rsIn, -(cabWid / 2 - 0.75), roofZ - 0.75), wsCol);
+    for (const sy of [1, -1]) {
+      limb(B.paint, LP(cabFront + 0.3, sy * (cabWid / 2 + 0.05), bodyTopZ + 0.5), LP(cabFront - wsIn + 0.3, sy * (cabWid / 2 - 0.35), roofZ - 0.7), 0.5, 0.45, bodyDark, 5);
+      limb(B.paint, LP(cabRear - 0.3, sy * (cabWid / 2 + 0.05), bodyTopZ + 0.55), LP(cabRear + rsIn - 0.3, sy * (cabWid / 2 - 0.35), roofZ - 0.7), variant === 'coupe' ? 0.85 : 0.55, 0.5, bodyDark, 5);
+    }
+  }
   // Phase 8 car detail — all surface-hugging or inside the standing
   // silhouette (no glass-colour change, no bbox growth): a body-colour
   // B-pillar dividing the glasshouse into front/rear panes, a chrome
   // side trim strip, a roof antenna fin (top exactly at roofZ) and an
   // exhaust tip seated in the rear bumper.
-  partPaint(UNIT_BOX, mat4(cabOff, (bodyTopZ + roofZ) / 2 - 0.2, 0, 0, 0.7, roofZ - bodyTopZ - 0.5, cabWid + 0.45), car.dead ? body : lin(rgb(car.color).map((v) => v * 0.85)));
+  partPaint(UNIT_BOX, mat4(cabOff, (bodyTopZ + roofZ) / 2 - 0.2, 0, 0, 0.7, roofZ - bodyTopZ - 0.5, cabWid + 0.45), bodyDark);
   for (const sy of [1, -1]) part(UNIT_BOX, mat4(-0.5, 4.6, sy * (W / 2 + 0.06), 0, L * 0.62, 0.55, 0.12), lin([198, 200, 205]));
   if (!isVan) part(UNIT_BOX, mat4(cabOff - cabLen / 2 + 2.2, roofZ - 0.55, 0, 0, 2.6, 1.1, 0.5), lin([24, 25, 30]));
   part(UNIT_BOX, mat4(-L / 2 - 1.6, 2.2, W / 2 - 3.4, 0, 1.8, 0.9, 0.9), lin([120, 122, 128]));
@@ -1259,12 +1350,25 @@ function buildCar(gl, game, B, car) {
       B.flat.quad(LP(lx, sy * (W / 2 + 0.14), 2.6), LP(lx + 0.8, sy * (W / 2 + 0.14), 2.6), LP(lx + 0.8, sy * (W / 2 + 0.14), bodyTopZ - 0.6), LP(lx, sy * (W / 2 + 0.14), bodyTopZ - 0.6), lin([16, 17, 21]));
     }
   }
+  // Class trim (Phase 1): the coupe wears a trunk-lip spoiler, dark
+  // side skirts and a front splitter (the lower-stance read); the
+  // armored car wears flank armour skirts over the same sedan profile.
+  if (variant === 'coupe') {
+    part(UNIT_BOX, mat4(-L / 2 + 0.9, bodyTopZ - 0.35, 0, 0, 2.4, 0.55, W - 5.2), bodyDark);
+    for (const sy of [1, -1]) part(UNIT_BOX, mat4(-0.5, 1.9, sy * (W / 2 + 0.05), 0, L * 0.6, 1.3, 0.3), lin([24, 24, 28]));
+    part(UNIT_BOX, mat4(L / 2 + 0.6, 1.6, 0, 0, 2.6, 0.7, W - 2), lin([24, 24, 28]));
+  } else if (variant === 'armored') {
+    for (const sy of [1, -1]) part(UNIT_BOX, mat4(0, 2.4, sy * (W / 2 + 0.05), 0, L * 0.55, 2.0, 0.35), lin([34, 36, 40]));
+  }
   // FOUR REAL WHEELS: cylinder tyres + bright hubs + dark lug caps,
   // spinning with travel (angle = speed × sim time / radius — a pure
   // function of state) and the front pair yawing with the car's steer
   // value. Phase 2: wider tyres track proud of the body (offset W/2−0.35)
   // behind a dark arch flare, so tyre/hub/body separation survives the
-  // 320 px thumbnail instead of melting into the slab.
+  // 320 px thumbnail instead of melting into the slab. Phase 1 (D3):
+  // rim depth — a dark shoulder ring on the tyre's outer face, a
+  // recessed rim barrel and five alloy spokes layered over the hub, all
+  // riding the same spin/steer matrix.
   const spin = ((car.speed || 0) * (game.time || 0)) / 2.9;
   const steer = car.steer || 0;
   for (const [lx, lz, front] of [[L / 2 - 7.5, W / 2 - 0.35, 1], [L / 2 - 7.5, -W / 2 + 0.35, 1], [-L / 2 + 7.5, W / 2 - 0.35, 0], [-L / 2 + 7.5, -W / 2 + 0.35, 0]]) {
@@ -1273,6 +1377,13 @@ function buildCar(gl, game, B, car) {
       .multiply(new THREE.Matrix4().makeRotationY(front ? -steer : 0))
       .multiply(new THREE.Matrix4().makeRotationZ(spin));
     B.flat.push(TYRE_G, M.clone().multiply(wm), lin(TYRE));
+    const out = Math.sign(lz);
+    B.flat.push(SHOULDER_G, M.clone().multiply(wm.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, out * 1.55))), lin([9, 9, 11]));
+    B.flat.push(RIM_G, M.clone().multiply(wm.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, out * 1.62))), lin([62, 64, 70]));
+    for (let k = 0; k < 5; k++) {
+      const sm = wm.clone().multiply(new THREE.Matrix4().makeRotationZ((k * Math.PI * 2) / 5)).multiply(new THREE.Matrix4().makeTranslation(0, 1.02, out * 1.9));
+      B.flat.push(SPOKE_G, M.clone().multiply(sm), lin([172, 176, 184]));
+    }
     B.flat.push(HUB_G, M.clone().multiply(wm), lin([190, 194, 202]));
     B.flat.push(CAP_G, M.clone().multiply(wm), lin([38, 40, 46]));
   }
@@ -1320,16 +1431,36 @@ function buildCar(gl, game, B, car) {
     // exact same white — the Phase 1 row of identical boxes is gone.
     const copShade = 0.90 + hash01((car.id || 1) * 3.7) * 0.10;
     partPaint(UNIT_BOX, mat4(0, 5.4, 0, 0, L * 0.60, 6.8, W + 0.44), lin([236 * copShade, 239 * copShade, 243 * copShade]));
+    // Interceptor push bar (Phase 1): two uprights and a crossbar ahead
+    // of the front bumper, tied back to it with short struts — the
+    // pursuit read that separates the police build from a white sedan.
+    part(UNIT_BOX, mat4(L / 2 + 2.5, 4.5, 0, 0, 1.0, 1.1, W - 4.2), lin([26, 27, 32]));
+    for (const sy of [1, -1]) {
+      part(UNIT_BOX, mat4(L / 2 + 2.5, 4.3, sy * (W / 2 - 3.6), 0, 1.0, 4.4, 1.0), lin([26, 27, 32]));
+      part(UNIT_BOX, mat4(L / 2 + 1.3, 3.9, sy * (W / 2 - 3.6), 0, 2.4, 0.8, 0.8), lin([26, 27, 32]));
+    }
     const flash = Math.sin((game.time || 0) * 10 + (car.sirenPhase || 0)) > 0;
-    // Light-bar housing (Phase 8): a dark tray seating the two lamp
-    // boxes, so the bar reads as mounted hardware, not floating slabs.
-    part(UNIT_BOX, mat4(cabOff, roofZ + 0.28, 0, 0, 3.2, 0.55, cabWid - 0.6), lin([24, 25, 30]));
+    // Light bar (Phase 1 rework, D3): a low dark housing on a slim tray
+    // carrying SEPARATE red / blue lens segments — two per side around a
+    // clear centre section, lenses standing proud of the housing front
+    // and rear faces — in true red/blue emissive-look colours. The old
+    // solid cyan/pink slabs are gone.
+    part(UNIT_BOX, mat4(cabOff, roofZ + 0.2, 0, 0, 3.4, 0.4, cabWid - 0.8), lin([24, 25, 30]));
+    part(UNIT_BOX, mat4(cabOff, roofZ + 0.62, 0, 0, 2.6, 0.85, cabWid - 1.2), lin([20, 21, 26]));
     if (!car.dead) {
-      const lb1 = LP(cabOff, 4.4, roofZ + 0.9), lb2 = LP(cabOff, -4.4, roofZ + 0.9);
-      box(B.basic, lb1[0], lb1[1], lb1[2], 2.8, 4.2, 1.5, yaw, lin(flash ? [255, 60, 90] : [130, 34, 48]));
-      box(B.basic, lb2[0], lb2[1], lb2[2], 2.8, 4.2, 1.5, yaw, lin(flash ? [44, 96, 168] : [30, 205, 254]));
-      addGlow(gl, lb1[0], lb1[1], roofZ + 1.8, 11, lin(flash ? [255, 60, 90] : [130, 34, 48]), 0.24);
-      addGlow(gl, lb2[0], lb2[1], roofZ + 1.8, 11, lin(flash ? [44, 96, 168] : [30, 205, 254]), 0.24);
+      for (const side of [1, -1]) {
+        const on = side > 0 ? flash : !flash;
+        const bright = side > 0 ? [255, 66, 60] : [70, 140, 255];
+        const dim = side > 0 ? [128, 32, 32] : [36, 64, 128];
+        for (const latC of [2.05, 4.55]) {
+          const lp = LP(cabOff, side * latC, roofZ + 0.62);
+          box(B.basic, lp[0], lp[1], lp[2], 1.6, 1.12, 0.46, yaw, lin(on ? bright : dim));
+        }
+        const gp = LP(cabOff, side * 3.3, roofZ + 1.15);
+        addGlow(gl, gp[0], gp[1], roofZ + 1.15, 9, lin(on ? bright : dim), on ? 0.26 : 0.10);
+      }
+      const cp2 = LP(cabOff, 0, roofZ + 0.62);
+      box(B.basic, cp2[0], cp2[1], cp2[2], 1.6, 0.65, 0.46, yaw, lin([196, 202, 208]));
     }
   }
   if (isHero && !isVan) {
@@ -1413,8 +1544,36 @@ function buildFigure(gl, game, B, o) {
     curCat = null;
     return;
   }
+  if (o.pose === 'down') {
+    // Fallen figure (Phase 1 pose, for the D4/D7 set): lying on its back
+    // along the facing axis, built from the SAME segment lengths as the
+    // standing figure — legs extended behind the hips, torso flat, head
+    // at the far end, arms fallen open to the sides.
+    for (const sideSign of [1, -1]) {
+      const hipD = P(1.2, sideSign * 1.0, 1.15), kneeD = P(-3.4, sideSign * 1.05, 1.05), footD = P(-8.3, sideSign * 1.1, 0.9);
+      limb(B.flat, hipD, kneeD, 1.22, 1.0, pants, 7);
+      ball(B.flat, kneeD[0], kneeD[1], kneeD[2], 1.02, pants);
+      limb(B.flat, kneeD, footD, 0.98, 0.72, pants, 7);
+      box(B.flat, footD[0] - f[0] * 0.7, footD[1] - f[1] * 0.7, 0.55, 1.5, 0.8, 0.5, a, lin([26, 22, 19]));
+    }
+    const torsoD = P(3.4, 0, 1.35);
+    box(B.flat, torsoD[0], torsoD[1], torsoD[2], 3.1, 1.95, 1.15, a, shirt);
+    if (o.gear) { const vestD = P(3.6, 0, 2.3); box(B.flat, vestD[0], vestD[1], vestD[2], 2.2, 1.6, 0.35, a, lin([86, 93, 63])); }
+    const headD = P(7.6, 0, 1.25);
+    ball(B.flat, headD[0], headD[1], headD[2], 0.92, skin, 1);
+    const hairD = P(7.3, 0, 1.5);
+    ball(B.flat, hairD[0], hairD[1], hairD[2], 0.98, hair, 1);
+    for (const sideSign of [1, -1]) {
+      const shoD = P(5.6, sideSign * 1.9, 1.2), elbD = P(4.6, sideSign * 4.6, 0.95), handD = P(3.4, sideSign * 6.8, 0.8);
+      limb(B.flat, shoD, elbD, 0.78, 0.64, shirt, 7);
+      limb(B.flat, elbD, handD, 0.62, 0.5, skin, 7);
+      ball(B.flat, handD[0], handD[1], handD[2], 0.52, skin);
+    }
+    curCat = null;
+    return;
+  }
   const pose = o.pose, ph = o.phase || 0;
-  const lean = pose === 'run' ? 2.4 : pose === 'aim' ? 1.5 : pose === 'walk' ? 0.7 : 0;
+  const lean = pose === 'flee' ? 2.8 : pose === 'run' ? 2.4 : pose === 'aim' ? 1.5 : pose === 'walk' ? 0.7 : 0;
   // Legs: thigh 3.89 + shin 3.71 (Phase 11: scaled by 7.6/8.6 with the
   // hip drop — normal human proportion, see HIP_Z) with believable
   // thickness, knee joint volume at the bend, hip attachment at ±1.05
@@ -1428,7 +1587,13 @@ function buildFigure(gl, game, B, o) {
       const sw = Math.sin(ph + (sideSign > 0 ? 0 : Math.PI)) * amp;
       const sw2 = sw - (pose === 'run' ? 0.55 : 0.40);
       knee = P(Math.sin(sw) * 3.89, sideSign * 1.05, HIP_Z - Math.cos(sw) * 3.89);
-      foot = P(Math.sin(sw) * 3.89 + Math.sin(sw2) * 3.71, sideSign * 1.12, Math.max(0.55, HIP_Z - Math.cos(sw) * 3.89 - Math.cos(sw2) * 3.71));
+      foot = P(Math.sin(sw) * 3.89 + Math.sin(sw2) * 3.71, sideSign * 1.05, Math.max(0.55, HIP_Z - Math.cos(sw) * 3.89 - Math.cos(sw2) * 3.71));
+    } else if (pose === 'flee') {
+      // Wide mid-stride (Phase 1 pose): front foot planted far ahead,
+      // back foot kicked up behind — the run's bigger, desperate
+      // sibling, feet still under the hip line laterally.
+      if (sideSign > 0) { knee = P(4.4, 1.02, HIP_Z - 3.1); foot = P(7.0, 1.05, 0.55); }
+      else { knee = P(-3.6, -1.02, HIP_Z - 3.3); foot = P(-6.6, -1.05, 2.3); }
     } else if (pose === 'aim') {
       // Compact brace: front foot +5.66, back foot −4.95 (spread 10.6;
       // Phase 11: the whole stance scaled by 7.6/8.6 with the leg
@@ -1438,13 +1603,19 @@ function buildFigure(gl, game, B, o) {
       if (sideSign > 0) { knee = P(3.0, 1.1, HIP_Z - 3.71); foot = P(5.66, 1.22, 0.55); }
       else { knee = P(-2.3, -1.1, HIP_Z - 3.8); foot = P(-4.95, -1.22, 0.55); }
     } else {
-      knee = P(0.3, sideSign * 1.08, HIP_Z - 3.89);
-      foot = P(0.6, sideSign * 1.14, 0.55);
+      // Stand (and armsup, which shares these legs): feet directly
+      // under the hips at ±1.05 — no splay (Phase 1, D4).
+      knee = P(0.3, sideSign * 1.05, HIP_Z - 3.89);
+      foot = P(0.6, sideSign * 1.05, 0.55);
     }
     limb(B.flat, hip, knee, 1.22, 1.0, pants, 7);
     ball(B.flat, knee[0], knee[1], knee[2], 1.02, pants);
     limb(B.flat, knee, foot, 0.98, 0.72, pants, 7);
-    box(B.flat, foot[0] + f[0] * 0.9, foot[1] + f[1] * 0.9, 0.55, 1.95, 1.05, 0.55, a, lin([26, 22, 19])); // shoe
+    // Shoe (Phase 1, D4): elongated FORWARD of the ankle with a short
+    // heel — a shoe last, not the old slab that ran as far behind the
+    // ankle as ahead of it. Grounded poses keep the sole at z 0.55.
+    const shoeZ = pose === 'flee' ? foot[2] : 0.55;
+    box(B.flat, foot[0] + f[0] * 1.05, foot[1] + f[1] * 1.05, shoeZ, 1.5, 0.8, 0.5, a, lin([26, 22, 19]));
   }
   // Torso: box-modelled — slim pelvis box, wider chest box (shoulders),
   // a waist step between them; the pair leans with the pose.
@@ -1465,6 +1636,16 @@ function buildFigure(gl, game, B, o) {
   box(B.flat, chestP[0], chestP[1], chestZ, 1.3, 2.0, 1.5, a, shirt);
   const waistP = P(lean * 0.4, 0, HIP_Z + 2.6);
   box(B.flat, waistP[0], waistP[1], HIP_Z + 2.6, 1.22, 1.75, 1.15, a, shirt);
+  // Clothing read (Phase 1, D4): a chest panel sitting slightly proud
+  // of the chest in a lighter tone of the shirt, plus a dark belt line
+  // at the waist — the figure reads CLOTHED, not moulded from one tone.
+  // Geared figures skip the panel; the vest owns their chest.
+  if (!o.gear) {
+    const panelP = P(lean * 0.82 + 1.34, 0, chestZ + 0.1);
+    box(B.flat, panelP[0], panelP[1], panelP[2], 0.16, 1.5, 1.2, a, lin(o.shirt.map((v) => Math.min(255, v * 1.14 + 8))));
+  }
+  const beltP = P(lean * 0.35, 0, HIP_Z + 1.5);
+  box(B.flat, beltP[0], beltP[1], beltP[2], 1.3, 1.86, 0.3, a, lin([30, 28, 30]));
   // Modular tactical gear (player + crew only): olive vest slabs, khaki
   // pouches, shoulder pads in darkened shirt, slung long gun on the back
   // when not aiming.
@@ -1489,46 +1670,46 @@ function buildFigure(gl, game, B, o) {
       box(B.flat, sg[0], sg[1], sg[2], 0.42, 0.52, (SHO_Z - HIP_Z) / 2 + 0.5, a, lin([37, 39, 45]));
     }
   }
-  // Neck + SMALL SLAB HEAD (anime proportion): one clean box head with a
-  // slightly narrower jaw step, sharp nose, inset eyes — then the hair as
-  // its own spiky cap mesh above/behind it. Phase 3: the whole head/hair
-  // stack sits 0.3 lower — head spans ≈13.1 → 15.1 (head top), hair
-  // silhouette ≤15.45 (see the spike table below).
-  limb(B.flat, P(lean, 0, SHO_Z - 0.3), P(lean + 0.15, 0, SHO_Z + 0.5), 0.62, 0.62, skin, 6);
-  const headC = P(lean + 0.25, 0, 14.12);
-  box(B.flat, headC[0], headC[1], headC[2], 1.42, 1.34, 0.98, a, skin);
-  const jawP = P(lean + 0.28, 0, 13.32);
-  box(B.flat, jawP[0], jawP[1], jawP[2], 1.28, 1.2, 0.24, a, skin);
-  const noseP = P(lean + 0.25 + 1.48, 0, 14.0);
-  box(B.flat, noseP[0], noseP[1], noseP[2], 0.17, 0.17, 0.3, a, lin(o.skin.map((v) => v * 0.92)));
-  for (const sx of [1, -1]) { // inset eyes: small dark shapes on the face
-    const ep = P(lean + 0.25 + 1.44, sx * 0.62, 14.32);
-    box(B.flat, ep[0], ep[1], ep[2], 0.1, 0.3, 0.4, a, lin([30, 26, 30]));
+  // Neck + SHAPED HEAD (Phase 1 rebuild, D4): the slab head and the
+  // spiked hair are gone — the audit's mannequin read lived here. A
+  // short visible neck carries a SLIMMER multi-box head: a cranium box
+  // with a narrower crown step on top (the rounded read), a jaw step
+  // under it, a slightly lighter face plane flush on the cranium's
+  // front, a small nose, and hair as a CLOSE CAP — a low dome ball
+  // seated back on the crown plus back/side panels, no spikes. The
+  // stack keeps the Phase 3 heights exactly: head top 15.10, hair
+  // silhouette 15.44 ≤ 15.45.
+  limb(B.flat, P(lean, 0, SHO_Z - 0.2), P(lean + 0.12, 0, SHO_Z + 0.62), 0.55, 0.55, skin, 6);
+  const headC = P(lean + 0.25, 0, 14.28);
+  box(B.flat, headC[0], headC[1], headC[2], 1.18, 1.08, 0.82, a, skin);
+  const crownP = P(lean + 0.22, 0, 14.8);
+  box(B.flat, crownP[0], crownP[1], crownP[2], 0.94, 0.86, 0.3, a, skin);
+  const jawP = P(lean + 0.31, 0, 13.28);
+  box(B.flat, jawP[0], jawP[1], jawP[2], 0.98, 0.88, 0.28, a, skin);
+  const faceP = P(lean + 0.25 + 1.2, 0, 13.95);
+  box(B.flat, faceP[0], faceP[1], faceP[2], 0.14, 0.72, 0.52, a, lin(o.skin.map((v) => Math.min(255, v * 1.07 + 5))));
+  const noseP = P(lean + 0.25 + 1.42, 0, 13.9);
+  box(B.flat, noseP[0], noseP[1], noseP[2], 0.14, 0.16, 0.26, a, lin(o.skin.map((v) => v * 0.92)));
+  if (o.gear) {
+    // Geared / player variants wear a dark eyewear band across the face.
+    const bandP = P(lean + 0.25 + 1.27, 0, 14.3);
+    box(B.flat, bandP[0], bandP[1], bandP[2], 0.12, 0.95, 0.28, a, lin([24, 24, 28]));
+  } else {
+    for (const sx of [1, -1]) { // inset eyes: small dark shapes on the face
+      const ep = P(lean + 0.25 + 1.36, sx * 0.42, 14.28);
+      box(B.flat, ep[0], ep[1], ep[2], 0.08, 0.22, 0.3, a, lin([30, 26, 30]));
+    }
   }
-  // Hair: SEPARATE shaped cap — two stacked slabs stepping in toward the
-  // crown (a silhouette, not one brick), a back panel, side locks, SEVEN
-  // chunky 4-sided spikes swept up/forward/back, and a two-point fringe
-  // over the forehead. Spike stock is thick (r 0.52 → 0.06) so the points
-  // survive the contact-sheet thumbnail instead of vanishing.
-  const capP = P(lean + 0.18, 0, 14.68);
-  box(B.flat, capP[0], capP[1], capP[2], 1.54, 1.3, 0.32, a, hair);
-  const cap2P = P(lean + 0.14, 0, 15.04);
-  box(B.flat, cap2P[0], cap2P[1], cap2P[2], 1.30, 1.12, 0.22, a, hair);
-  const backP = P(lean + 0.25 - 1.44, 0, 14.4);
-  box(B.flat, backP[0], backP[1], backP[2], 0.3, 1.28, 0.85, a, hair);
+  // Hair cap: a low dome seated back on the crown (front reach stays
+  // behind the face, so a hairline reads), a back panel dropping
+  // toward the neck and side panels over the ears.
+  const capC = P(lean + 0.1, 0, 14.42);
+  ball(B.flat, capC[0], capC[1], capC[2], 1.02, hair, 1);
+  const backP = P(lean + 0.25 - 1.15, 0, 14.0);
+  box(B.flat, backP[0], backP[1], backP[2], 0.3, 1.0, 0.8, a, hair);
   for (const sx of [1, -1]) {
-    const lk = P(lean + 0.3, sx * 1.28, 14.05);
-    box(B.flat, lk[0], lk[1], lk[2], 1.05, 0.24, 0.8, a, hair);
-  }
-  // Phase 3: spike tips capped at 15.45 — head top (15.1) + 0.35, inside
-  // the +0.4 silhouette allowance (the Phase 2 tips reached ≈16.15).
-  // Phase 8: lateral spike reach 1.5 → 1.28 (bulk), tips' heights exact.
-  const spikeBase = [[0.75, 0, 15.0], [0.15, 0.8, 15.0], [0.15, -0.8, 15.0], [-0.55, 0.45, 15.0], [-0.55, -0.45, 15.0], [1.15, 0.55, 14.75], [1.15, -0.55, 14.75]];
-  const spikeTip = [[1.85, 0.1, 15.45], [0.75, 1.28, 15.28], [0.75, -1.28, 15.28], [-1.45, 0.75, 15.38], [-1.45, -0.75, 15.38], [2.05, 0.7, 14.95], [2.05, -0.7, 14.95]];
-  for (let i = 0; i < spikeBase.length; i++) {
-    const b0 = P(lean + 0.25 + spikeBase[i][0], spikeBase[i][1], spikeBase[i][2]);
-    const b1 = P(lean + 0.25 + spikeTip[i][0], spikeTip[i][1], spikeTip[i][2]);
-    limb(B.flat, b0, b1, 0.52, 0.06, hair, 4);
+    const lk = P(lean + 0.18, sx * 1.02, 14.15);
+    box(B.flat, lk[0], lk[1], lk[2], 0.95, 0.2, 0.6, a, hair);
   }
   // Arms: upper 3.5 + forearm 3.3, slim, elbow joint volume at the bend.
   for (const sideSign of [1, -1]) {
@@ -1545,6 +1726,15 @@ function buildFigure(gl, game, B, o) {
       elbow = P(lean + Math.sin(sw) * 3.5, sideSign * 2.2, SHO_Z - 0.2 - Math.cos(sw) * 3.5);
       const sw2 = sw * 0.7 - 0.32;
       hand = P(lean + Math.sin(sw) * 3.5 + Math.sin(sw2) * 3.3, sideSign * 2.2, SHO_Z - 0.2 - Math.cos(sw) * 3.5 - Math.cos(sw2) * 3.3);
+    } else if (pose === 'armsup') {
+      // Fleeing civilian (Phase 1 pose): both arms thrown up and out,
+      // hands open above the head — the universal hands-up read.
+      elbow = P(lean + 0.7, sideSign * 3.05, SHO_Z + 2.4);
+      hand = P(lean + 1.0, sideSign * 3.7, SHO_Z + 5.4);
+    } else if (pose === 'flee') {
+      // Arms pumped BACK against the stride (Phase 1 pose), elbows bent.
+      elbow = P(lean - 2.4, sideSign * 2.25, SHO_Z - 2.4);
+      hand = P(lean - 4.8, sideSign * 2.15, SHO_Z - 4.0);
     } else {
       elbow = P(lean + 0.5, sideSign * 2.2, SHO_Z - 3.7);
       hand = P(lean + 1.2, sideSign * 2.12, SHO_Z - 6.9);
@@ -1552,22 +1742,33 @@ function buildFigure(gl, game, B, o) {
     limb(B.flat, sho, elbow, 0.78, 0.64, shirt, 7);
     ball(B.flat, elbow[0], elbow[1], elbow[2], 0.66, shirt);
     limb(B.flat, elbow, hand, 0.62, 0.5, skin, 7);
-    box(B.flat, hand[0], hand[1], hand[2], 0.8, 0.8, 0.8, a, skin);
+    ball(B.flat, hand[0], hand[1], hand[2], 0.52, skin); // hand (Phase 1: a ball, not the old cube)
     if (pose === 'aim' && sideSign > 0) {
-      // TWO-HANDED LONG GUN SHOULDERED (aim-reference spec): stock tucked
-      // at the right shoulder, receiver forward along the facing at
-      // z ≈ SHO_Z + 0.35 so the sight sits near cheek/eye level, barrel
-      // to ≈ +15 forward — rifle scale (≈1.7 m of gun reads as a cannon
-      // at OTS distance; the Phase 1 gun ran +20.6 and crossed the frame).
+      // TWO-HANDED FIREARM, REBUILT (Phase 1, D4/D8): the old dark tube
+      // is now a readable weapon — stock at the shoulder, a boxy
+      // RECEIVER under the trigger hand, a handguard under the support
+      // hand, a slim barrel, a box magazine, and front + rear sights.
+      // INVARIANT (Phase 4 record): the muzzle tip stays EXACTLY at
+      // lean + 15.2 fwd / +0.28 lat / SHO_Z + 0.42, so MISSION-AIM
+      // keeps deltaLen 8.15 / muzzleLineDist 8.1 — parts were sized
+      // around the tip, never the other way round.
       const GUN = lin([37, 39, 45]), GUN_TIP = lin([52, 55, 63]);
       const stock = P(lean + 0.9, 0.5, SHO_Z + 0.2);
       box(B.flat, stock[0], stock[1], stock[2], 1.6, 0.52, 0.92, a, GUN);
-      limb(B.flat, P(lean + 2.4, 0.42, SHO_Z + 0.35), P(lean + 8.6, 0.3, SHO_Z + 0.35), 0.72, 0.6, GUN, 6);
-      limb(B.flat, P(lean + 8.6, 0.3, SHO_Z + 0.35), P(lean + 13.8, 0.28, SHO_Z + 0.4), 0.36, 0.3, GUN, 6);
-      limb(B.flat, P(lean + 13.8, 0.28, SHO_Z + 0.4), P(lean + 15.2, 0.28, SHO_Z + 0.42), 0.46, 0.4, GUN_TIP, 6);
-      limb(B.flat, P(lean + 5.4, 0.35, SHO_Z + 0.1), P(lean + 6.3, 0.35, SHO_Z - 2.0), 0.52, 0.42, GUN, 5);
-      const s1 = P(lean + 4.6, 0.32, SHO_Z + 1.25);
-      box(B.flat, s1[0], s1[1], s1[2], 0.85, 0.38, 0.42, a, GUN_TIP);
+      const recv = P(lean + 4.3, 0.38, SHO_Z + 0.35);
+      box(B.flat, recv[0], recv[1], recv[2], 2.1, 0.55, 0.62, a, GUN);
+      const grip = P(lean + 3.0, 0.45, SHO_Z - 0.72);
+      box(B.flat, grip[0], grip[1], grip[2], 0.42, 0.4, 0.68, a, GUN);
+      const mag = P(lean + 5.6, 0.36, SHO_Z - 1.12);
+      box(B.flat, mag[0], mag[1], mag[2], 0.55, 0.42, 1.02, a, GUN);
+      const fore = P(lean + 8.3, 0.32, SHO_Z + 0.35);
+      box(B.flat, fore[0], fore[1], fore[2], 1.9, 0.48, 0.5, a, GUN);
+      limb(B.flat, P(lean + 10.2, 0.3, SHO_Z + 0.38), P(lean + 14.6, 0.28, SHO_Z + 0.4), 0.3, 0.26, GUN, 6);
+      limb(B.flat, P(lean + 14.6, 0.28, SHO_Z + 0.4), P(lean + 15.2, 0.28, SHO_Z + 0.42), 0.42, 0.38, GUN_TIP, 6);
+      const rs = P(lean + 4.6, 0.34, SHO_Z + 1.12);
+      box(B.flat, rs[0], rs[1], rs[2], 0.8, 0.36, 0.38, a, GUN_TIP);
+      const fs = P(lean + 11.8, 0.3, SHO_Z + 0.95);
+      box(B.flat, fs[0], fs[1], fs[2], 0.3, 0.22, 0.32, a, GUN_TIP);
     }
   }
   curCat = null;
