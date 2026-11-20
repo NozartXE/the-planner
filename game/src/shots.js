@@ -175,16 +175,31 @@ export function applyShot(game, name, step) {
     // renderer has exactly one elevated camera — the planning orbit
     // (235 units out, 105 up, looking at planTarget) — so the staging
     // raises game.titleVista and main.js renders the title's world
-    // pass through that framing: the camera hangs 105 up WEST of the
-    // crossing at (1456, 986) and looks EAST down the avenue's road
-    // corridor, so lit streets run through the frame and the skyline
-    // closes it. The hero coupe + player figure stand on the avenue
-    // ~160 units from the camera (a ground point 95 out projected at
-    // the frame's bottom edge; at ~160 it sits fully inside the lower
-    // foreground), facing east into the city. The first staging —
-    // a diagonal orbit over the Gazette intersection — put a single
-    // building corner across the whole frame; the corridor framing
-    // is the fix. The drawTitle overlay owns the centre.
+    // pass through that framing. The drawTitle overlay owns the centre.
+    // FIX ROUND (rebuild panel, both seats' #1 defect): the Phase 4
+    // framing looked EAST down the Gazette avenue from the crossing
+    // at (1456, 986) — the hero coupe's rear spoiler struck through
+    // "Press ENTER to start" and the controls row sat on the
+    // intersection's bright zebra stripes. The vista is restaged
+    // MID-BLOCK on the St Sable avenue (x 1456), camera at
+    // (1456, 2274), 105 up, looking SOUTH at (1456, 2509): no
+    // intersection stands at the target, so no zebra arm projects
+    // into the text zone (the 2396 crossing's arms fall in the
+    // foreground below the save line, the 2866 arms above the
+    // logotype), the text zone's ground is the avenue's dark asphalt,
+    // and the hero coupe + player figure stand in the near
+    // foreground 135 / 128 units out — their silhouettes top out
+    // BELOW the save line. Far traffic rides the avenue at 600+
+    // units, projecting above the logotype as horizon silhouettes;
+    // nothing staged crosses any text line (native-res crop-verified
+    // line by line). Fix 1b (prove the coast) was attempted FIRST and
+    // is STILL OPEN, honestly: Ocean Drive's east-plot buildings
+    // stand across the drive itself at most block rows — a north
+    // framing from (3714, 2455) captured a single facade wall, hero
+    // and figure inside its footprint — and the one long clear
+    // stretch (y 2337–3119) is bracketed by that same building class
+    // at its north end and a median tree at (3714, 2690) whose canopy
+    // crosses the tagline at every viable camera depth on the stretch.
     game.screen = 'title';
     run(150);
     game.screen = 'title';
@@ -192,23 +207,26 @@ export function applyShot(game, name, step) {
     // moonlight, lit windows and streetlight pools behind the logo.
     game.timeGrade = 'night';
     game.titleVista = true;
-    game.planTarget = { x: 1456, y: 986 };
-    game.planOrbitAngle = Math.PI; // camera at (1221, 986), 105 up, looking east
+    game.planTarget = { x: 1456, y: 2509 };
+    game.planOrbitAngle = -Math.PI / 2; // camera at (1456, 2274), 105 up, looking south
     game.player.inCar = false; game.player.car = null;
-    game.player.x = 1382; game.player.y = 966; game.player.angle = 0.3;
+    game.player.x = 1472; game.player.y = 2402; game.player.angle = Math.PI / 2;
     game.player.walkPhase = 1.1; game.player.vx = 0; game.player.vy = 0; game.player.hp = 100;
-    setCar(game.traffic[0], 1395, 1000, 0, 0, { kind: 'coupe', color: '#b8523f' });
+    setCar(game.traffic[0], 1432, 2409, Math.PI / 2, 0, { kind: 'coupe', color: '#b8523f' });
     game.traffic[0].occupiedByPlayer = false;
-    // Lit streets below: traffic on the avenue and the crossing road.
-    setCar(game.traffic[1], 1700, 1009, 0, 45, { kind: 'sedan', color: '#5f7a6a' });
-    setCar(game.traffic[2], 1850, 963, Math.PI, 45, { kind: 'hatch', color: '#a8835a' });
-    setCar(game.traffic[3], 1477, 760, -Math.PI / 2, 40, { kind: 'sedan', color: '#7a8a99' });
-    setCar(game.traffic[4], 1435, 1230, Math.PI / 2, 40, { kind: 'coupe', color: '#8a4a5a' });
-    for (let i = 5; i < game.traffic.length; i++) setCar(game.traffic[i], 3300 + i * 10, 3300, 0, 0);
-    stagePed(game, 0, 1430, 925, 0.4, 1.2, 0);
-    stagePed(game, 1, 1490, 1048, -0.6, 3.0, 1);
-    stagePed(game, 2, 1330, 1040, 2.6, 5.0, 2);
-    stagePed(game, 3, 1560, 930, -2.2, 2.2, 3);
+    // Lit streets below: far traffic on the avenue itself, small at
+    // the horizon, all 600+ units from the camera.
+    setCar(game.traffic[1], 1476, 2874, Math.PI / 2, 40, { kind: 'sedan', color: '#5f7a6a' });
+    setCar(game.traffic[2], 1436, 2954, Math.PI / 2, 40, { kind: 'hatch', color: '#a8835a' });
+    setCar(game.traffic[3], 1476, 3034, Math.PI / 2, 40, { kind: 'sedan', color: '#7a8a99' });
+    for (let i = 4; i < game.traffic.length; i++) setCar(game.traffic[i], 3300 + i * 10, 3300, 0, 0);
+    // Foreground sidewalk life below the text zone (west + east
+    // sidewalks, 125–130 units out) and two horizon figures on the
+    // far sidewalks, above the logotype.
+    stagePed(game, 0, 1404, 2404, 0.4, 1.2, 0);
+    stagePed(game, 1, 1508, 2399, -0.6, 3.0, 1);
+    stagePed(game, 2, 1404, 2800, 2.6, 5.0, 2);
+    stagePed(game, 3, 1508, 2800, -2.2, 2.2, 3);
     game.police.cops = [];
     game.police.setStars(0, game.nowMs);
     game.bullets = []; game.fx.particles = []; game.fx.skids = []; game.toasts = [];
@@ -650,9 +668,24 @@ export function applyShot(game, name, step) {
     const muzX = game.player.x + Math.cos(a) * 16.7 - Math.sin(a) * 0.28;
     const muzY = game.player.y + Math.sin(a) * 16.7 + Math.cos(a) * 0.28;
     const segA = Math.atan2(bulletEnd.y - muzY, bulletEnd.x - muzX);
-    game.bullets = [0.27, 0.51, 0.75, 1].map((t) => ({
-      x: muzX + (bulletEnd.x - muzX) * t, y: muzY + (bulletEnd.y - muzY) * t, angle: segA, life: 0.5,
-    }));
+    // FIX ROUND (rebuild panel, D8 perception): the Phase 4 burst was
+    // FOUR rounds at t = 0.27 / 0.51 / 0.75 / 1.0 — at full frame the
+    // ~15-unit spacing read as segmented streaks, and the muzzle-side
+    // glow stood alone below the line, misread by both panel seats as
+    // a stray shot at road level. The burst is now TWELVE rounds at
+    // even t = k/12 steps along the SAME muzzle→bulletEnd segment
+    // (same angle, same end point on the cross, no world point moved):
+    // each tracer's bar is ~16 units long against a ~5.4-unit step,
+    // so the bars and their small uniform glows overlap into ONE
+    // continuous streak from muzzle to impact, and no single mid-path
+    // glow stands apart — the impact stack stays the brightest point
+    // on the line (native-crop verified).
+    game.bullets = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((k) => {
+      const t = k / 12;
+      return {
+        x: muzX + (bulletEnd.x - muzX) * t, y: muzY + (bulletEnd.y - muzY) * t, angle: segA, life: 0.5,
+      };
+    });
     // Hit feedback: muzzle flash at the gun, impact sparks + flash on the
     // struck sedan, damage smoke climbing off it, and the tank's muzzle
     // smoke at its barrel tip (turret traversed to 3.6).
