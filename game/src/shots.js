@@ -407,22 +407,64 @@ export function applyShot(game, name, step) {
     game.crewMate = { id: 'dex', name: 'DEX RUIZ', color: '#e8c832', x: 934, y: 1112, angle: -0.4, walkPhase: 0.6, pose: 'stand' };
     game.projectiles = [];
     game.zones = [{ kind: 'fire', x: 1012, y: 1058, r: 24, until: game.nowMs + 60000, dps: 26 }];
-    // Tracers in flight along the aim line and the muzzle flash, frozen at
-    // the capture tick (the pre-directive frame's proven combat read).
-    // Phase 3: the last tracer reaches 78 of the ≈88 units to the sedan,
-    // still exactly on the aim line.
-    game.bullets = [26, 52, 78].map((d) => ({
-      x: game.player.x + Math.cos(a) * d, y: game.player.y + Math.sin(a) * d, angle: a, life: 0.5,
+    // Phase 4 AIM COHERENCE (the Phase 3 lesson: projection passing was
+    // not perception passing). Two defects, both found by pixel
+    // inspection of the Phase 3 capture, not by the measure:
+    // (1) The Phase 3 train ran from the player's CENTRE along the
+    // facing angle: in screen space that line passes ~16 px below the
+    // muzzle→impact line, and its last tracer (78 of the ≈88 units to
+    // the sedan) projected ~58 px PAST the reticle as a separate bright
+    // bar — the eye took it, not the sparks, for the shot's end.
+    // (2) The Phase 3 impact point (992.3, 1070) sits on the sedan's FAR
+    // flank: the reticle ray reaches it only by passing through the
+    // cabin, so its spark glows are OCCLUDED by the glasshouse at the
+    // cross — three faint dots spread ±47 px, nothing on the centre.
+    // The fix stages the shot's actual first contact with the car: the
+    // point where the reticle ray strikes the cabin's rear glass. It is
+    // the Phase 3 impact slid TOWARD THE CAMERA along that same ray —
+    // 18 units for the sparks (renderer height z 10.5: they clear the
+    // cabin rear face, L −7.6, by ~1.4 units and project 8 px below the
+    // cross, their glow discs overlapping it) and 19.5 units for the
+    // final tracer (renderer height z 11.5, one unit higher, so the
+    // extra slide puts its glow exactly ON the cross, delta ≈0.1 px).
+    // The train flies the REAL shot line from the gun tip (figure build:
+    // lean 1.5 + 15.2 forward, +0.28 lateral — the point qa/measure.mjs
+    // mirrors as the muzzle) to that contact point in four burst steps
+    // (t = 0.27 / 0.51 / 0.75 / 1.0 of the 64.3-unit segment): one
+    // straight screen line, muzzle flash → tracers → impact on the cross.
+    const flank = { x: 992.3, y: 1070 };
+    const camX = game.player.x - Math.cos(a) * 40 - Math.sin(a) * 26;
+    const camY = game.player.y - Math.sin(a) * 40 + Math.cos(a) * 26;
+    const rayX = flank.x - camX, rayY = flank.y - camY;
+    const rayL = Math.hypot(rayX, rayY);
+    const slide = (k) => ({ x: flank.x - (rayX / rayL) * k, y: flank.y - (rayY / rayL) * k });
+    const impact = slide(18);
+    const bulletEnd = slide(19.5);
+    const muzX = game.player.x + Math.cos(a) * 16.7 - Math.sin(a) * 0.28;
+    const muzY = game.player.y + Math.sin(a) * 16.7 + Math.cos(a) * 0.28;
+    const segA = Math.atan2(bulletEnd.y - muzY, bulletEnd.x - muzX);
+    game.bullets = [0.27, 0.51, 0.75, 1].map((t) => ({
+      x: muzX + (bulletEnd.x - muzX) * t, y: muzY + (bulletEnd.y - muzY) * t, angle: segA, life: 0.5,
     }));
     // Hit feedback: muzzle flash at the gun, impact sparks + flash on the
-    // struck sedan's flank, damage smoke climbing off it, and the tank's
-    // muzzle smoke at its barrel tip (turret traversed to 3.6).
+    // struck sedan, damage smoke climbing off it, and the tank's muzzle
+    // smoke at its barrel tip (turret traversed to 3.6).
+    // Phase 4: the impact flash is a TIGHT stack of nine sparks within
+    // ±1.8 units of the contact point (offsets sum to zero, so the
+    // measure's centroid is the contact point itself) — their fixed-
+    // radius glows overlap into one bright core on the cross instead of
+    // three isolated dots. Palette unchanged.
+    const sparkOff = [[1.2, 0.6], [-1.2, -0.6], [0.6, -1.2], [-0.6, 1.2], [1.8, 1.4], [-1.8, -1.4], [0, 0], [-1.5, 1.0], [1.5, -1.0]];
+    const sparkCols = ['#f2c14e', '#ffd76a', '#fff3c4'];
+    const sparkLife = [0.4, 0.32, 0.45, 0.38, 0.42, 0.34, 0.44, 0.36, 0.41];
+    const sparks = sparkOff.map((o, i) => ({
+      x: impact.x + o[0], y: impact.y + o[1], vx: 0, vy: 0,
+      life: sparkLife[i], maxLife: sparkLife[i], color: sparkCols[i % 3], size: 2.8 + (i % 4) * 0.5, drag: 0,
+    }));
     const mx = game.player.x + Math.cos(a) * 16, my = game.player.y + Math.sin(a) * 16;
     game.fx.particles = [
       { x: mx, y: my, vx: 0, vy: 0, life: 0.07, maxLife: 0.07, color: '#ffd76a', size: 5.5, drag: 0 },
-      { x: 991, y: 1070, vx: 0, vy: 0, life: 0.4, maxLife: 0.4, color: '#f2c14e', size: 3.4, drag: 0 },
-      { x: 997, y: 1066, vx: 0, vy: 0, life: 0.32, maxLife: 0.32, color: '#ffd76a', size: 2.8, drag: 0 },
-      { x: 989, y: 1074, vx: 0, vy: 0, life: 0.45, maxLife: 0.45, color: '#fff3c4', size: 4.2, drag: 0 },
+      ...sparks,
       { x: 1001, y: 1066, vx: 0, vy: 0, life: 1.0, maxLife: 1.0, color: 'rgba(120,120,125,0.6)', size: 7, drag: 0 },
       { x: 1013, y: 1058, vx: 0, vy: 0, life: 0.9, maxLife: 0.9, color: 'rgba(120,120,125,0.5)', size: 5.5, drag: 0 },
       { x: 986, y: 834, vx: 0, vy: 0, life: 0.8, maxLife: 1.0, color: 'rgba(120,120,125,0.55)', size: 6.5, drag: 0 },
