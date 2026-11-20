@@ -12,9 +12,11 @@
 // byte-identical across runs.
 //
 // SCALE CONTRACT (kept from the previous renderer): the world is ~8.6 units
-// per metre (car length 38 ≈ 4.4 m). A standing figure is 15.4 units tall
-// (1.79 m) with Polygon War proportions (big angular slab head ≈ 25% of the
-// height, flat-shaded hard edges). Buildings render at b.height × 3.2.
+// per metre (car length 38 ≈ 4.4 m). A standing figure's head top is 15.1
+// units (1.76 m) with the hair silhouette reaching ≈15.45, against a sedan
+// roof of 12.6 (1.47 m) — a world silhouette ratio of ≈1.23, inside the
+// realistic 1.15–1.25 band (Phase 3 scale fix). Buildings render at
+// b.height × 3.2.
 // Cameras match the previous build's framing: LOW chase cam 84 behind / 30
 // up driving, 52 / 30 on foot, and the GTA over-the-shoulder RIGHT aim cam
 // (≈30 back / 21 up, lateral shift to the gun side) while the aim predicate
@@ -30,8 +32,8 @@ const FOV = 1.05; // ~60 degrees horizontal, as before
 const FOCAL = (VIEW_W / 2) / Math.tan(FOV / 2);
 const VFOV = (2 * Math.atan((VIEW_H / 2) / FOCAL) * 180) / Math.PI;
 const NEAR = 5;
-const FIG_H = 15.4;         // total standing figure height, world units
-const CAR_ROOF = 12.3;      // sedan/coupe cabin roof height
+const FIG_H = 15.1;         // standing figure HEAD-TOP height, world units (Phase 3 scale fix: was 15.4 with hair spikes to ≈16.15 — silhouette/roof 1.31, outside the realistic band; hair silhouette now ≤15.45, roof 12.6 → 1.23)
+const CAR_ROOF = 12.6;      // sedan/coupe cabin roof height (Phase 3: 12.3 → 12.6, 1.43 → 1.47 m)
 const BUILD_SCALE = 3.2;    // building render height = data height × this
 const SUNSET_TOP = [86, 62, 102];    // dusty plum
 const SUNSET_MID = [199, 108, 112];  // rose
@@ -577,14 +579,18 @@ function frameCamera(game) {
   const aiming = !isDrive && ((game.bullets && game.bullets.length > 0) || (game.lastShotAt && game.nowMs - game.lastShotAt < 700));
   // Phase 2 aim framing: OTS-right — the single shooter fills the
   // lower-left foreground (head + right shoulder large to camera, scene
-  // ahead still wide). Back 31 keeps the whole figure in frame (26
-  // cropped him at the shoulders); the lateral pair (cam +30 gun-side,
-  // look −17) swings the aim line onto the HUD reticle at 0.536W.
-  const back = isDrive ? 84 : aiming ? 31 : 52;
-  const camH = isDrive ? 30 : aiming ? 19 : 30;
+  // ahead still wide). Phase 3 aim coherence (Rect: "crosshair dimana
+  // dan nembaknya kemana"): the Phase 2 offsets projected the staged
+  // impact 240 px from the fixed HUD reticle — the camera now sits back
+  // 40 / height 18 / lateral +26 with the look swung 125 ahead / −27, a
+  // staging solved numerically (and re-measured in qa/measure.mjs) so
+  // the muzzle→impact line passes through the reticle centre at
+  // (0.536W, 0.5H) with the whole figure still in frame.
+  const back = isDrive ? 84 : aiming ? 40 : 52;
+  const camH = isDrive ? 30 : aiming ? 18 : 30;
   const fh = [Math.cos(yaw), Math.sin(yaw)];
   const sh = [-fh[1], fh[0]];
-  const camLat = aiming ? 30 : 0;
+  const camLat = aiming ? 26 : 0;
   let camX = anchor.x - fh[0] * back + sh[0] * camLat;
   let camY = anchor.y - fh[1] * back + sh[1] * camLat;
   if (!game.frozen) {
@@ -602,8 +608,8 @@ function frameCamera(game) {
       if (!pointInBuilding(game.city, tx, ty)) { camX = tx; camY = ty; break; }
     }
   }
-  const lookLat = aiming ? -17 : 0;
-  const lookFwd = aiming ? 55 : 40;
+  const lookLat = aiming ? -27 : 0;
+  const lookFwd = aiming ? 125 : 40;
   return {
     cam: [camX, camY, camH],
     look: [anchor.x + fh[0] * lookFwd + sh[0] * lookLat, anchor.y + fh[1] * lookFwd + sh[1] * lookLat, isDrive ? 9 : aiming ? 9 : 8],
@@ -1002,9 +1008,11 @@ function buildBuildings(gl, game, B) {
 }
 
 // --------------------------------------------------------------- vehicles
-const TYRE_G = new THREE.CylinderGeometry(3.3, 3.3, 3.8, 14).rotateX(Math.PI / 2);
-const HUB_G = new THREE.CylinderGeometry(2.05, 2.05, 4.0, 10).rotateX(Math.PI / 2);
-const CAP_G = new THREE.CylinderGeometry(0.85, 0.85, 4.15, 8).rotateX(Math.PI / 2);
+// Phase 3 wheel scale: radius 3.3 → 2.9 (Ø 6.6 u ≈ 0.77 m was oversized;
+// Ø 5.8 u ≈ 0.67 m is sedan-true); hub/cap radii scale proportionally.
+const TYRE_G = new THREE.CylinderGeometry(2.9, 2.9, 3.8, 14).rotateX(Math.PI / 2);
+const HUB_G = new THREE.CylinderGeometry(1.8, 1.8, 4.0, 10).rotateX(Math.PI / 2);
+const CAP_G = new THREE.CylinderGeometry(0.75, 0.75, 4.15, 8).rotateX(Math.PI / 2);
 function buildTank(gl, game, B, car) {
   curCat = 'tank';
   const yaw = car.angle, L = car.len, W = car.wid;
@@ -1057,7 +1065,13 @@ function buildCar(gl, game, B, car) {
   const isHero = car === F.heroCar;
   curCat = isHero ? 'car' : null;
   const yaw = car.angle;
-  const L = car.len || 38, W = car.wid || 19;
+  const L = car.len || 38;
+  // Phase 3: render-local width — sim car.wid (19 u ≈ 2.21 m) is too wide
+  // and made sedans read squat beside the figures; the renderer draws
+  // non-van bodies at 17.5 u (≈2.03 m) while car.wid stays sim data.
+  // Wheels, plates, lights and the cabin all derive from this W, so the
+  // rendered car stays internally consistent. Vans keep their own width.
+  const W = car.kind === 'van' ? (car.wid || 21) : 17.5;
   const body = car.dead ? lin([44, 44, 48]) : lin(rgb(car.color));
   const bodyTop = car.dead ? body : lin(rgb(car.color).map((v) => Math.min(255, v * 1.2)));
   const isVan = car.kind === 'van';
@@ -1098,11 +1112,11 @@ function buildCar(gl, game, B, car) {
   // value. Phase 2: wider tyres track proud of the body (offset W/2−0.35)
   // behind a dark arch flare, so tyre/hub/body separation survives the
   // 320 px thumbnail instead of melting into the slab.
-  const spin = ((car.speed || 0) * (game.time || 0)) / 3.3;
+  const spin = ((car.speed || 0) * (game.time || 0)) / 2.9;
   const steer = car.steer || 0;
   for (const [lx, lz, front] of [[L / 2 - 7.5, W / 2 - 0.35, 1], [L / 2 - 7.5, -W / 2 + 0.35, 1], [-L / 2 + 7.5, W / 2 - 0.35, 0], [-L / 2 + 7.5, -W / 2 + 0.35, 0]]) {
     part(UNIT_BOX, mat4(lx, 6.9, Math.sign(lz) * (W / 2 + 0.15), 0, 9.4, 2.6, 1.5), lin([15, 15, 18])); // fender lip over the wheel
-    const wm = new THREE.Matrix4().makeTranslation(lx, 3.3, lz)
+    const wm = new THREE.Matrix4().makeTranslation(lx, 2.9, lz)
       .multiply(new THREE.Matrix4().makeRotationY(front ? -steer : 0))
       .multiply(new THREE.Matrix4().makeRotationZ(spin));
     B.flat.push(TYRE_G, M.clone().multiply(wm), lin(TYRE));
@@ -1190,11 +1204,11 @@ function buildVehicles(gl, game, B) {
 // ---------------------------------------------------------------- figures
 // ONE figure builder for player, crew and peds. Proportions per Rect's
 // 2026-11-20 anime reference (superseding the Polygon War big-head card):
-// tall and slim, wide shoulders, SMALL head (≈2 units of the 15.4 total).
+// tall and slim, wide shoulders, SMALL head (≈2 units of the 15.1 total).
 // Phase 2 re-proportion (panel defects 2/4): legs carry real thickness
 // (thigh r 1.22, shin r 0.98 — no more stilts), the aim stance is a compact
 // athletic brace (foot spread ≈12 units fore-aft, lateral ≤1.35 — inside
-// the 2.62 shoulder line), feet land ON the ground plane, and the hair is
+// the 2.3 shoulder line), feet land ON the ground plane, and the hair is
 // a shaped spiky cap — two stacked slabs + seven chunky 4-sided spikes +
 // a forward fringe — whose silhouette separates from the head at chase
 // distance. Background peds get a contrast lift (shirt up, pants down in
@@ -1260,11 +1274,14 @@ function buildFigure(gl, game, B, o) {
   // Torso: box-modelled — slim pelvis box, wider chest box (shoulders),
   // a waist step between them; the pair leans with the pose.
   const hipC = P(0, 0, HIP_Z + 0.3);
-  box(B.flat, hipC[0], hipC[1], HIP_Z + 0.9, 1.55, 2.35, 1.35, a, pants);
+  // Phase 3 slimming: pelvis span 4.7 → 4.1, chest span 5.24 → 4.6 and
+  // chest depth 3.36 → 2.9 — the slab bulk that read giant beside the
+  // cars is gone; the tall/slim anime read stays.
+  box(B.flat, hipC[0], hipC[1], HIP_Z + 0.9, 1.35, 2.05, 1.35, a, pants);
   const chestZ = SHO_Z - 1.35, chestP = P(lean * 0.82, 0, chestZ);
-  box(B.flat, chestP[0], chestP[1], chestZ, 1.68, 2.62, 1.5, a, shirt);
+  box(B.flat, chestP[0], chestP[1], chestZ, 1.45, 2.3, 1.5, a, shirt);
   const waistP = P(lean * 0.4, 0, HIP_Z + 2.6);
-  box(B.flat, waistP[0], waistP[1], HIP_Z + 2.6, 1.5, 2.2, 1.15, a, shirt);
+  box(B.flat, waistP[0], waistP[1], HIP_Z + 2.6, 1.32, 1.95, 1.15, a, shirt);
   // Modular tactical gear (player + crew only): olive vest slabs, khaki
   // pouches, shoulder pads in darkened shirt, slung long gun on the back
   // when not aiming.
@@ -1272,8 +1289,8 @@ function buildFigure(gl, game, B, o) {
     const OLIVE = lin([86, 93, 63]), OLIVE_D = lin([57, 64, 45]), KHAKI = lin([139, 138, 103]);
     const midZ = (HIP_Z + SHO_Z) / 2, midLean = lean * 0.55;
     const vf = P(midLean + 1.78, 0, midZ), vb = P(midLean - 1.78, 0, midZ);
-    box(B.flat, vf[0], vf[1], vf[2], 0.30, 2.0, 1.85, a, OLIVE);
-    box(B.flat, vb[0], vb[1], vb[2], 0.30, 2.0, 1.85, a, OLIVE);
+    box(B.flat, vf[0], vf[1], vf[2], 0.30, 1.75, 1.85, a, OLIVE);
+    box(B.flat, vb[0], vb[1], vb[2], 0.30, 1.75, 1.85, a, OLIVE);
     for (const px of [-1.3, 0, 1.3]) {
       const pp = P(midLean + 2.16, px, HIP_Z + 1.6);
       box(B.flat, pp[0], pp[1], pp[2], 0.34, 0.5, 0.7, a, KHAKI);
@@ -1281,7 +1298,7 @@ function buildFigure(gl, game, B, o) {
     for (const sx of [1, -1]) {
       const st = P(lean * 0.85, sx * 1.35, SHO_Z - 0.3);
       box(B.flat, st[0], st[1], st[2], 1.7, 0.42, 0.28, a, OLIVE_D);
-      const pd = P(lean, sx * 2.85, SHO_Z - 0.1);
+      const pd = P(lean, sx * 2.55, SHO_Z - 0.1);
       box(B.flat, pd[0], pd[1], pd[2], 1.5, 0.95, 0.48, a, lin(o.shirt.map((v) => v * 0.62)));
     }
     if (pose !== 'aim') {
@@ -1291,16 +1308,18 @@ function buildFigure(gl, game, B, o) {
   }
   // Neck + SMALL SLAB HEAD (anime proportion): one clean box head with a
   // slightly narrower jaw step, sharp nose, inset eyes — then the hair as
-  // its own spiky cap mesh above/behind it. Head spans ≈13.4 → 15.4.
+  // its own spiky cap mesh above/behind it. Phase 3: the whole head/hair
+  // stack sits 0.3 lower — head spans ≈13.1 → 15.1 (head top), hair
+  // silhouette ≤15.45 (see the spike table below).
   limb(B.flat, P(lean, 0, SHO_Z - 0.3), P(lean + 0.15, 0, SHO_Z + 0.5), 0.62, 0.62, skin, 6);
-  const headC = P(lean + 0.25, 0, 14.42);
+  const headC = P(lean + 0.25, 0, 14.12);
   box(B.flat, headC[0], headC[1], headC[2], 1.42, 1.34, 0.98, a, skin);
-  const jawP = P(lean + 0.28, 0, 13.62);
+  const jawP = P(lean + 0.28, 0, 13.32);
   box(B.flat, jawP[0], jawP[1], jawP[2], 1.28, 1.2, 0.24, a, skin);
-  const noseP = P(lean + 0.25 + 1.48, 0, 14.3);
+  const noseP = P(lean + 0.25 + 1.48, 0, 14.0);
   box(B.flat, noseP[0], noseP[1], noseP[2], 0.17, 0.17, 0.3, a, lin(o.skin.map((v) => v * 0.92)));
   for (const sx of [1, -1]) { // inset eyes: small dark shapes on the face
-    const ep = P(lean + 0.25 + 1.44, sx * 0.62, 14.62);
+    const ep = P(lean + 0.25 + 1.44, sx * 0.62, 14.32);
     box(B.flat, ep[0], ep[1], ep[2], 0.1, 0.3, 0.4, a, lin([30, 26, 30]));
   }
   // Hair: SEPARATE shaped cap — two stacked slabs stepping in toward the
@@ -1308,18 +1327,20 @@ function buildFigure(gl, game, B, o) {
   // chunky 4-sided spikes swept up/forward/back, and a two-point fringe
   // over the forehead. Spike stock is thick (r 0.52 → 0.06) so the points
   // survive the contact-sheet thumbnail instead of vanishing.
-  const capP = P(lean + 0.18, 0, 14.98);
+  const capP = P(lean + 0.18, 0, 14.68);
   box(B.flat, capP[0], capP[1], capP[2], 1.54, 1.46, 0.32, a, hair);
-  const cap2P = P(lean + 0.14, 0, 15.34);
+  const cap2P = P(lean + 0.14, 0, 15.04);
   box(B.flat, cap2P[0], cap2P[1], cap2P[2], 1.30, 1.24, 0.22, a, hair);
-  const backP = P(lean + 0.25 - 1.44, 0, 14.7);
+  const backP = P(lean + 0.25 - 1.44, 0, 14.4);
   box(B.flat, backP[0], backP[1], backP[2], 0.3, 1.42, 0.85, a, hair);
   for (const sx of [1, -1]) {
-    const lk = P(lean + 0.3, sx * 1.42, 14.35);
+    const lk = P(lean + 0.3, sx * 1.42, 14.05);
     box(B.flat, lk[0], lk[1], lk[2], 1.05, 0.24, 0.8, a, hair);
   }
-  const spikeBase = [[0.75, 0, 15.3], [0.15, 0.8, 15.3], [0.15, -0.8, 15.3], [-0.55, 0.45, 15.3], [-0.55, -0.45, 15.3], [1.15, 0.55, 15.05], [1.15, -0.55, 15.05]];
-  const spikeTip = [[1.85, 0.1, 16.15], [0.75, 1.5, 15.95], [0.75, -1.5, 15.95], [-1.45, 0.75, 16.05], [-1.45, -0.75, 16.05], [2.05, 0.7, 15.35], [2.05, -0.7, 15.35]];
+  // Phase 3: spike tips capped at 15.45 — head top (15.1) + 0.35, inside
+  // the +0.4 silhouette allowance (the Phase 2 tips reached ≈16.15).
+  const spikeBase = [[0.75, 0, 15.0], [0.15, 0.8, 15.0], [0.15, -0.8, 15.0], [-0.55, 0.45, 15.0], [-0.55, -0.45, 15.0], [1.15, 0.55, 14.75], [1.15, -0.55, 14.75]];
+  const spikeTip = [[1.85, 0.1, 15.45], [0.75, 1.5, 15.28], [0.75, -1.5, 15.28], [-1.45, 0.75, 15.38], [-1.45, -0.75, 15.38], [2.05, 0.7, 14.95], [2.05, -0.7, 14.95]];
   for (let i = 0; i < spikeBase.length; i++) {
     const b0 = P(lean + 0.25 + spikeBase[i][0], spikeBase[i][1], spikeBase[i][2]);
     const b1 = P(lean + 0.25 + spikeTip[i][0], spikeTip[i][1], spikeTip[i][2]);
@@ -1327,7 +1348,7 @@ function buildFigure(gl, game, B, o) {
   }
   // Arms: upper 3.5 + forearm 3.3, slim, elbow joint volume at the bend.
   for (const sideSign of [1, -1]) {
-    const sho = P(lean, sideSign * 2.62, SHO_Z - 0.2);
+    const sho = P(lean, sideSign * 2.3, SHO_Z - 0.2);
     let elbow, hand;
     if (pose === 'aim') {
       // Both hands ON the gun: trigger hand at the stock (+4.4), support
@@ -1337,12 +1358,12 @@ function buildFigure(gl, game, B, o) {
     } else if (pose === 'walk' || pose === 'run') {
       const amp = pose === 'run' ? 0.78 : 0.44;
       const sw = Math.sin(ph + (sideSign > 0 ? Math.PI : 0)) * amp;
-      elbow = P(lean + Math.sin(sw) * 3.5, sideSign * 2.8, SHO_Z - 0.2 - Math.cos(sw) * 3.5);
+      elbow = P(lean + Math.sin(sw) * 3.5, sideSign * 2.48, SHO_Z - 0.2 - Math.cos(sw) * 3.5);
       const sw2 = sw * 0.7 - 0.32;
-      hand = P(lean + Math.sin(sw) * 3.5 + Math.sin(sw2) * 3.3, sideSign * 2.8, SHO_Z - 0.2 - Math.cos(sw) * 3.5 - Math.cos(sw2) * 3.3);
+      hand = P(lean + Math.sin(sw) * 3.5 + Math.sin(sw2) * 3.3, sideSign * 2.48, SHO_Z - 0.2 - Math.cos(sw) * 3.5 - Math.cos(sw2) * 3.3);
     } else {
-      elbow = P(lean + 0.5, sideSign * 2.8, SHO_Z - 3.7);
-      hand = P(lean + 1.2, sideSign * 2.7, SHO_Z - 6.9);
+      elbow = P(lean + 0.5, sideSign * 2.48, SHO_Z - 3.7);
+      hand = P(lean + 1.2, sideSign * 2.38, SHO_Z - 6.9);
     }
     limb(B.flat, sho, elbow, 0.78, 0.64, shirt, 7);
     ball(B.flat, elbow[0], elbow[1], elbow[2], 0.66, shirt);

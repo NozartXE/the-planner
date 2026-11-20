@@ -146,6 +146,68 @@ for (const shot of ['board', 'chase', 'mission', 'results']) {
     return { cops, blankPct: +(blankCells / (GW * GH) * 100).toFixed(1), largestBlankPct: +(best / (GW * GH) * 100).toFixed(1), largestFlatClusterPct: +(topCluster / tot * 100).toFixed(1), foregroundFlatPct: +(fgTop / fgTot * 100).toFixed(1) };
   })()`);
   console.log(shot.toUpperCase(), JSON.stringify(m));
+  // (b2) Phase 3 judged-frame checks, same manual camera-basis pattern as
+  // the chase-cops check above (projectPoint needs a live frame).
+  if (shot === 'chase' || shot === 'mission') {
+    const extra = await evaluate(`(() => {
+      const g = window.__MN.game;
+      const mkProj = (cam, look) => {
+        let f = [look[0]-cam[0], look[1]-cam[1], look[2]-cam[2]];
+        const fl = Math.hypot(f[0], f[1], f[2]); f = f.map((v) => v / fl);
+        let r = [-f[1], f[0], 0]; const rl = Math.hypot(r[0], r[1], r[2]); r = r.map((v) => v / rl);
+        const u = [f[1]*r[2]-f[2]*r[1], f[2]*r[0]-f[0]*r[2], f[0]*r[1]-f[1]*r[0]];
+        const FOCAL = 640 / Math.tan(1.05 / 2);
+        return (x, y, z) => {
+          const dx = x-cam[0], dy = y-cam[1], dz = z-cam[2];
+          const cxp = dx*r[0]+dy*r[1]+dz*r[2], cyp = dx*u[0]+dy*u[1]+dz*u[2], czp = dx*f[0]+dy*f[1]+dz*f[2];
+          if (czp < 5) return null;
+          return { x: 640 + (cxp/czp)*FOCAL, y: 400 - (cyp/czp)*FOCAL, dist: czp };
+        };
+      };
+      const hgt = (P, x, y, top) => { const b = P(x, y, 0), t = P(x, y, top); return (b && t) ? { h: Math.abs(b.y - t.y), dist: b.dist, bx: b.x } : null; };
+      if (${JSON.stringify(shot)} === 'chase') {
+        // Matched-depth ped/car pairing among the STAGED actors (the five
+        // sidewalk peds + the hero/civilian/cop vehicles): projected pixel
+        // heights, figure silhouette top 15.45 vs sedan roof 12.6.
+        const hero = g.player.car, yaw = hero.angle;
+        const fh = [Math.cos(yaw), Math.sin(yaw)];
+        const P = mkProj([hero.x - fh[0]*84, hero.y - fh[1]*84, 30], [hero.x + fh[0]*40, hero.y + fh[1]*40, 9]);
+        const peds = g.peds.slice(0, 5).filter((pd) => !pd.dead).map((pd) => ({ x: pd.x, y: pd.y, ...hgt(P, pd.x, pd.y, 15.45) })).filter((o) => o.h && o.bx > 0 && o.bx < 1280);
+        const cars = [];
+        for (const c of [...g.traffic.slice(0, 3), ...g.police.cops]) { const r = hgt(P, c.x, c.y, 12.6); if (r && r.bx > 0 && r.bx < 1280) cars.push({ x: c.x, y: c.y, cop: !!c.isCop, ...r }); }
+        let best = null;
+        for (const pd of peds) for (const cr of cars) { const dd = Math.abs(pd.dist - cr.dist); if (!best || dd < best.dd) best = { dd: +dd.toFixed(1), pedH: +pd.h.toFixed(1), carH: +cr.h.toFixed(1), ratio: +(pd.h / cr.h).toFixed(3), pedDist: +pd.dist.toFixed(1), carDist: +cr.dist.toFixed(1) }; }
+        return { peds: peds.map((o) => ({ x: o.x, y: o.y, h: +o.h.toFixed(1), dist: +o.dist.toFixed(1) })), cars: cars.map((o) => ({ x: o.x, y: o.y, h: +o.h.toFixed(1), dist: +o.dist.toFixed(1) })), bestPair: best };
+      }
+      // Mission aim coherence: the fixed HUD reticle (0.536W, 0.5H) vs the
+      // projected impact centroid (the staged hex-colour spark particles
+      // on the target sedan's flank, z 10.5) and the muzzle→impact line.
+      // Aim camera constants mirror view3d frameCamera's aim branch.
+      const p = g.player, a = p.angle;
+      const fh = [Math.cos(a), Math.sin(a)], sh = [-fh[1], fh[0]];
+      const P = mkProj([p.x - fh[0]*40 + sh[0]*26, p.y - fh[1]*40 + sh[1]*26, 18], [p.x + fh[0]*125 + sh[0]*-27, p.y + fh[1]*125 + sh[1]*-27, 9]);
+      const muzzleW = [p.x + fh[0]*16.7 + sh[0]*0.28, p.y + fh[1]*16.7 + sh[1]*0.28, 13.52];
+      const muzzle = P(muzzleW[0], muzzleW[1], muzzleW[2]);
+      const sparks = g.fx.particles.filter((q) => typeof q.color === 'string' && q.color[0] === '#' && Math.hypot(q.x-p.x, q.y-p.y) > 30);
+      const cen = sparks.reduce((acc, q) => [acc[0]+q.x/sparks.length, acc[1]+q.y/sparks.length], [0, 0]);
+      const imp = P(cen[0], cen[1], 10.5);
+      const ret = { x: 1280*0.536, y: 400 };
+      const vx = imp.x-muzzle.x, vy = imp.y-muzzle.y, wx = ret.x-muzzle.x, wy = ret.y-muzzle.y;
+      const sedan = g.traffic[1];
+      return {
+        reticle: [ret.x, ret.y],
+        impactWorld: [+cen[0].toFixed(1), +cen[1].toFixed(1), 10.5],
+        impactPx: [+imp.x.toFixed(1), +imp.y.toFixed(1)],
+        deltaPx: [+(imp.x-ret.x).toFixed(1), +(imp.y-ret.y).toFixed(1)],
+        deltaLen: +Math.hypot(imp.x-ret.x, imp.y-ret.y).toFixed(2),
+        muzzlePx: [+muzzle.x.toFixed(1), +muzzle.y.toFixed(1)],
+        muzzleLineDistPx: +(Math.abs(vx*wy - vy*wx) / Math.hypot(vx, vy)).toFixed(2),
+        shooterH: +hgt(P, p.x, p.y, 15.45).h.toFixed(1),
+        sedanH: +hgt(P, sedan.x, sedan.y, 12.6).h.toFixed(1),
+      };
+    })()`);
+    console.log((shot === 'chase' ? 'CHASE-SCALE' : 'MISSION-AIM'), JSON.stringify(extra));
+  }
   // (d) thumbnail
   await send('Emulation.setDeviceMetricsOverride', { width: 320, height: 200, deviceScaleFactor: 1, mobile: false });
   await new Promise((r) => setTimeout(r, 700));
