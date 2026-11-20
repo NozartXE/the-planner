@@ -1380,7 +1380,16 @@ function buildVehicles(gl, game, B) {
 // elbows/knees so bends read cleanly, hair as a SEPARATE cap mesh, eyes
 // as small inset shapes on the face. Poses: walk / run (walkPhase),
 // stand, aim (two-handed long gun at shoulder height, OTS presentation).
-const HIP_Z = 8.6, SHO_Z = 13.1;
+// Phase 11 (Rect's direct order, 2026-11-20): NORMAL HUMAN proportions.
+// The figure's legs ran 55.7% of height (HIP_Z 8.6 / silhouette 15.45) —
+// the tall/slim anime read Rect rejected on sight ("kakinya kepanjangan").
+// HIP_Z drops 8.6 → 7.6 and the leg segments scale with it (thigh 4.4 →
+// 3.89, shin 4.2 → 3.71; sum 7.60 = HIP_Z, as before), so the legs are
+// 49.2% of height and the hip→ankle inseam is 45.6%. SHO_Z, the whole
+// head/hair stack and the silhouette top (15.45) are UNCHANGED — the
+// torso (hip→shoulder) lengthens 4.5 → 5.5 by exactly what the legs lose,
+// and total height / the 1.226 figure:car ratio never move.
+const HIP_Z = 7.6, SHO_Z = 13.1;
 function buildFigure(gl, game, B, o) {
   const dx = o.x - F.cam[0], dy = o.y - F.cam[1];
   if (dx * dx + dy * dy > 820 * 820) return;
@@ -1406,9 +1415,11 @@ function buildFigure(gl, game, B, o) {
   }
   const pose = o.pose, ph = o.phase || 0;
   const lean = pose === 'run' ? 2.4 : pose === 'aim' ? 1.5 : pose === 'walk' ? 0.7 : 0;
-  // Legs: thigh 4.4 + shin 4.2 with believable thickness, knee joint volume
-  // at the bend, hip attachment at ±1.05 and feet grounded at z 0.55 (the
-  // shoe box spans z 0–1.1, so the sole sits ON the ground plane).
+  // Legs: thigh 3.89 + shin 3.71 (Phase 11: scaled by 7.6/8.6 with the
+  // hip drop — normal human proportion, see HIP_Z) with believable
+  // thickness, knee joint volume at the bend, hip attachment at ±1.05
+  // and feet grounded at z 0.55 (the shoe box spans z 0–1.1, so the
+  // sole sits ON the ground plane).
   for (const sideSign of [1, -1]) {
     const hip = P(0, sideSign * 1.05, HIP_Z);
     let knee, foot;
@@ -1416,16 +1427,18 @@ function buildFigure(gl, game, B, o) {
       const amp = pose === 'run' ? 0.82 : 0.52;
       const sw = Math.sin(ph + (sideSign > 0 ? 0 : Math.PI)) * amp;
       const sw2 = sw - (pose === 'run' ? 0.55 : 0.40);
-      knee = P(Math.sin(sw) * 4.4, sideSign * 1.05, HIP_Z - Math.cos(sw) * 4.4);
-      foot = P(Math.sin(sw) * 4.4 + Math.sin(sw2) * 4.2, sideSign * 1.12, Math.max(0.55, HIP_Z - Math.cos(sw) * 4.4 - Math.cos(sw2) * 4.2));
+      knee = P(Math.sin(sw) * 3.89, sideSign * 1.05, HIP_Z - Math.cos(sw) * 3.89);
+      foot = P(Math.sin(sw) * 3.89 + Math.sin(sw2) * 3.71, sideSign * 1.12, Math.max(0.55, HIP_Z - Math.cos(sw) * 3.89 - Math.cos(sw2) * 3.71));
     } else if (pose === 'aim') {
-      // Compact brace: front foot +6.4, back foot −5.6 (spread 12, was
-      // 16.6 — the split that read as splayed stilts), lateral inside the
-      // shoulder line, both soles flat on the ground.
-      if (sideSign > 0) { knee = P(3.4, 1.1, HIP_Z - 4.2); foot = P(6.4, 1.22, 0.55); }
-      else { knee = P(-2.6, -1.1, HIP_Z - 4.3); foot = P(-5.6, -1.22, 0.55); }
+      // Compact brace: front foot +5.66, back foot −4.95 (spread 10.6;
+      // Phase 11: the whole stance scaled by 7.6/8.6 with the leg
+      // segments — it was spread 12 on the old 8.6 legs, 16.6 before
+      // Phase 2 — the split that read as splayed stilts), lateral
+      // inside the shoulder line, both soles flat on the ground.
+      if (sideSign > 0) { knee = P(3.0, 1.1, HIP_Z - 3.71); foot = P(5.66, 1.22, 0.55); }
+      else { knee = P(-2.3, -1.1, HIP_Z - 3.8); foot = P(-4.95, -1.22, 0.55); }
     } else {
-      knee = P(0.3, sideSign * 1.08, HIP_Z - 4.4);
+      knee = P(0.3, sideSign * 1.08, HIP_Z - 3.89);
       foot = P(0.6, sideSign * 1.14, 0.55);
     }
     limb(B.flat, hip, knee, 1.22, 1.0, pants, 7);
@@ -1444,6 +1457,9 @@ function buildFigure(gl, game, B, o) {
   // 3.6; waist 3.9 → 3.5) while the silhouette HEIGHT (15.45, ratio
   // 1.226) and every z/forward coordinate stay exactly as they were,
   // so poses, gear assembly and the muzzle line are untouched.
+  // Phase 11: pelvis + waist are HIP_Z-relative and drop the full 1.0
+  // with the hip; the chest stays at SHO_Z — so the torso lengthens by
+  // exactly the leg shortening with no width change (Phase 8 spans hold).
   box(B.flat, hipC[0], hipC[1], HIP_Z + 0.9, 1.25, 1.8, 1.35, a, pants);
   const chestZ = SHO_Z - 1.35, chestP = P(lean * 0.82, 0, chestZ);
   box(B.flat, chestP[0], chestP[1], chestZ, 1.3, 2.0, 1.5, a, shirt);
