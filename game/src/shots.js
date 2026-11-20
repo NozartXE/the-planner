@@ -106,6 +106,15 @@ export function applyShot(game, name, step) {
     setCar(game.traffic[2], 700, 1009, 0, 35);
     setCar(game.traffic[3], 1090, 1009, 0, 30);
     setCar(game.traffic[4], 600, 963, Math.PI, 30);
+    // Phase 8 density: the Phase 7 board revealed a sparse centre (two
+    // small peds, one parked truck, no moving traffic in the corridor).
+    // One more westbound car ROLLING through the revealed centre (the
+    // eastbound lane's gap is hidden behind the foreground truck from
+    // this camera — measured in the first Phase 8 capture) and one car
+    // PARKED at the north curb — moving vs parked poses, both in lane
+    // discipline on the same road, neither under a panel.
+    setCar(game.traffic[5], 740, 963, Math.PI, 30);
+    setCar(game.traffic[6], 880, 924, 0, 0);
     stagePed(game, 0, 920, 928, 0.4, 1.2, 0);
     stagePed(game, 1, 1060, 928, -0.6, 3.0, 1);
     stagePed(game, 2, 930, 1044, 2.6, 5.0, 2);
@@ -114,6 +123,11 @@ export function applyShot(game, name, step) {
     // y≈932, south side y≈1040 — both clear of the road surface 940–1032).
     stagePed(game, 4, 780, 932, -0.6, 4.2, 1);
     stagePed(game, 5, 850, 1040, 2.6, 1.4, 2);
+    // Phase 8: three more sidewalk figures spaced down the revealed
+    // corridor, so the centre reads as a living street at board range.
+    stagePed(game, 6, 760, 932, -0.6, 2.8, 1);
+    stagePed(game, 7, 700, 1040, 2.6, 0.9, 3);
+    stagePed(game, 8, 640, 928, 0.4, 4.6, 2);
     game.police.cops = [];
     game.police.setStars(0, game.nowMs);
     game.bullets = []; game.fx.particles = []; game.fx.skids = []; game.toasts = [];
@@ -197,6 +211,15 @@ export function applyShot(game, name, step) {
     setCar(game.traffic[1], civ.x, civ.y, Math.PI, 0);
     const behind = at(hero, -380, 15);
     setCar(game.traffic[2], behind.x, behind.y, 0, 40);
+    // Phase 8 density (mid-field band): a second civilian rolling up
+    // the opposing lane BEHIND the roadblock (queued traffic at the
+    // cordon, clear of every cop silhouette) and one car PARKED at the
+    // south curb mid-block — the hunt flies past a street that was
+    // already alive, instead of an emptied stage road.
+    const civ2 = at(hero, 560, -21);
+    setCar(game.traffic[3], civ2.x, civ2.y, Math.PI, 55);
+    const curb = at(hero, 430, 37);
+    setCar(game.traffic[4], curb.x, curb.y, 0, 0);
     game.police.cops = [];
     // Formation-true hunt: EXACTLY five interceptors for the plan's
     // forecast five stars. The hero is the largest vehicle, centre-low,
@@ -239,6 +262,10 @@ export function applyShot(game, name, step) {
     stagePed(game, 2, 1600, 1512, Math.PI, 4.0, 2);
     stagePed(game, 3, 1850, 1512, 0, 1.5, 3);
     stagePed(game, 4, 1400, 1396, Math.PI, 5.3, 0);
+    // Phase 8: two far sidewalk figures toward the vanishing point, so
+    // the mid-field band carries life past the roadblock as well.
+    stagePed(game, 5, 1900, 1512, 0, 2.9, 1);
+    stagePed(game, 6, 1980, 1396, Math.PI, 1.7, 2);
     game.money = 1350;
     game.radio.stationIdx = 1; game.radio.trackIdx = 0;
     // The plan from the board, executed: its forecast IS the wanted level
@@ -359,9 +386,16 @@ export function applyShot(game, name, step) {
     // already struck (hp 18: the renderer climbs damage smoke off it)
     // with a molotov fire patch burning at its nose.
     setCar(game.traffic[1], 1008, 1076, -1.45, 0, { kind: 'sedan', color: '#54604f', hp: 18, maxHp: 100 });
+    // Phase 8 density (mid-field band): two civilian cars on the cross
+    // street, clear of the aim line, the roadblock and the tank — one
+    // HALTED on the west segment short of the cordon, one PARKED on the
+    // east segment. The intersection was sealed for a fight; the street
+    // beyond it still reads as a street.
+    setCar(game.traffic[2], 790, 965, Math.PI, 0, { kind: 'sedan', color: '#8a6a4a' });
+    setCar(game.traffic[3], 1180, 1007, 0, 0, { kind: 'hatch', color: '#5a7a8a' });
     // Every other traffic car parks far south-east, out of the frame.
     for (let i = 0; i < game.traffic.length; i++) {
-      if (i === 1) continue;
+      if (i === 1 || i === 2 || i === 3) continue;
       setCar(game.traffic[i], 3300 + i * 10, 3300, 0, 0);
     }
     game.police.cops = [];
@@ -385,6 +419,10 @@ export function applyShot(game, name, step) {
     stagePed(game, 1, 928, 1100, -2.2, 4.0, 1);
     stagePed(game, 2, 1120, 1004, Math.PI, 1.1, 2);
     stagePed(game, 3, 900, 986, 0.8, 3.1, 3);
+    // Phase 8: two more figures on the southern sidewalks, mid-field,
+    // clear of the aim corridor (x≈1000–1040) and of every unit.
+    stagePed(game, 4, 1150, 1085, -2.4, 3.3, 1);
+    stagePed(game, 5, 860, 1040, 0.9, 1.8, 2);
     for (const idx of [0, 1]) { const ped = game.peds[idx]; ped.fleeUntil = game.nowMs + 60000; ped.fleeX = 1008; ped.fleeY = 1076; }
     game.money = 2250;
     // Claim alignment (Phase 2 defect 8c): the board's forecast for this
