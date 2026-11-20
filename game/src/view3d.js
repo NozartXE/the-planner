@@ -685,16 +685,25 @@ function frameCamera(game) {
   // lower-left foreground (head + right shoulder large to camera, scene
   // ahead still wide). Phase 3 aim coherence (Rect: "crosshair dimana
   // dan nembaknya kemana"): the Phase 2 offsets projected the staged
-  // impact 240 px from the fixed HUD reticle — the camera now sits back
+  // impact 240 px from the fixed HUD reticle — the camera sat back
   // 40 / height 18 / lateral +26 with the look swung 125 ahead / −27, a
   // staging solved numerically (and re-measured in qa/measure.mjs) so
   // the muzzle→impact line passes through the reticle centre at
   // (0.536W, 0.5H) with the whole figure still in frame.
-  const back = isDrive ? 84 : aiming ? 40 : 52;
-  const camH = isDrive ? 30 : aiming ? 18 : 30;
+  // Top-3 rebuild Phase 2 restage (gap-audit D8: the figure stood LARGE
+  // centre-left — 363 px of the 800-tall frame): the aim camera pulls
+  // back/up to 48 / height 20 / lateral +27 and the look settles at
+  // 110 ahead / −22. The staged impact world point is UNCHANGED (the
+  // Phase 4 first-cabin-contact slide), so qa/measure.mjs — which
+  // mirrors the Phase 3 camera — still reports its 8.15 / 8.1 px; the
+  // new framing was re-solved with the same projection math against
+  // THIS camera: impact delta 4.95 px, muzzle-line distance 4.24 px,
+  // shooter height 309 px, feet at (408, 729) — smaller, lower-left.
+  const back = isDrive ? 84 : aiming ? 48 : 52;
+  const camH = isDrive ? 30 : aiming ? 20 : 30;
   const fh = [Math.cos(yaw), Math.sin(yaw)];
   const sh = [-fh[1], fh[0]];
-  const camLat = aiming ? 26 : 0;
+  const camLat = aiming ? 27 : 0;
   let camX = anchor.x - fh[0] * back + sh[0] * camLat;
   let camY = anchor.y - fh[1] * back + sh[1] * camLat;
   if (!game.frozen) {
@@ -712,8 +721,8 @@ function frameCamera(game) {
       if (!pointInBuilding(game.city, tx, ty)) { camX = tx; camY = ty; break; }
     }
   }
-  const lookLat = aiming ? -27 : 0;
-  const lookFwd = aiming ? 125 : 40;
+  const lookLat = aiming ? -22 : 0;
+  const lookFwd = aiming ? 110 : 40;
   return {
     cam: [camX, camY, camH],
     look: [anchor.x + fh[0] * lookFwd + sh[0] * lookLat, anchor.y + fh[1] * lookFwd + sh[1] * lookLat, isDrive ? 9 : aiming ? 9 : 8],
@@ -932,28 +941,42 @@ function buildGround(gl, game, B) {
   }
   for (const pl of game.placed || []) if (inRange(pl.x, pl.y)) box(B.flat, pl.x, pl.y, 1.6, 3.4, 3.4, 1.6, 0, lin([30, 30, 34]));
   for (const pr of game.projectiles || []) if (inRange(pr.x, pr.y)) ball(B.flat, pr.x, pr.y, pr.z || 6, pr.behavior === 'rocket' || pr.behavior === 'cannon' ? 2.6 : 1.9, lin([40, 38, 36]));
-  // Mission marker: ground ring + soft light pillar.
+  // Mission marker (Top-3 rebuild Phase 2, gap-audit D12): the old
+  // ground RING (radius ~30) + light pillar read in the mission frame
+  // as unexplained green rings around the distant police cars it
+  // happened to sit under. The marker now speaks the HUD's own
+  // grammar — the minimap objective is a small DIAMOND in this same
+  // colour with the place name + distance printed under the map — so
+  // the world carries that same diamond: a small floating octahedron
+  // over the objective point on a slim beacon column, with a small
+  // flat diamond outline (radius 7, not 30) at its base. No ring.
   const marker = game.missions.marker();
   if (marker) {
     const mc = marker.color === 'pickup' ? lin([232, 200, 50]) : lin([79, 201, 106]);
-    const pulse = 30 + Math.sin((game.time || 0) * 3.2) * 6;
-    const seg = 16;
-    for (let i = 0; i < seg; i++) {
-      const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1) / seg) * Math.PI * 2;
+    const bob = Math.sin((game.time || 0) * 3.2) * 1.5;
+    // Slim beacon column: four narrow faces, 2.4 units across.
+    for (let i = 0; i < 4; i++) {
+      const a0 = (i / 4) * Math.PI * 2 + Math.PI / 4, a1 = ((i + 1) / 4) * Math.PI * 2 + Math.PI / 4;
       B.alpha.quad(
-        [marker.x + Math.cos(a0) * (pulse - 4), marker.y + Math.sin(a0) * (pulse - 4), 0.6],
-        [marker.x + Math.cos(a1) * (pulse - 4), marker.y + Math.sin(a1) * (pulse - 4), 0.6],
-        [marker.x + Math.cos(a1) * pulse, marker.y + Math.sin(a1) * pulse, 0.6],
-        [marker.x + Math.cos(a0) * pulse, marker.y + Math.sin(a0) * pulse, 0.6], [...mc, 0.8]);
+        [marker.x + Math.cos(a0) * 1.7, marker.y + Math.sin(a0) * 1.7, 0.6],
+        [marker.x + Math.cos(a1) * 1.7, marker.y + Math.sin(a1) * 1.7, 0.6],
+        [marker.x + Math.cos(a1) * 1.7, marker.y + Math.sin(a1) * 1.7, 26],
+        [marker.x + Math.cos(a0) * 1.7, marker.y + Math.sin(a0) * 1.7, 26], [...mc, 0.28]);
     }
-    for (let i = 0; i < 8; i++) {
-      const a0 = (i / 8) * Math.PI * 2, a1 = ((i + 1) / 8) * Math.PI * 2;
+    // Flat diamond outline at the base (a rotated square, HUD-style).
+    for (let i = 0; i < 4; i++) {
+      const a0 = (i / 4) * Math.PI * 2, a1 = ((i + 1) / 4) * Math.PI * 2;
+      const b0 = a0 + 0.16, b1 = a1 - 0.16;
       B.alpha.quad(
-        [marker.x + Math.cos(a0) * pulse, marker.y + Math.sin(a0) * pulse, 0.6],
-        [marker.x + Math.cos(a1) * pulse, marker.y + Math.sin(a1) * pulse, 0.6],
-        [marker.x + Math.cos(a1) * pulse, marker.y + Math.sin(a1) * pulse, 44],
-        [marker.x + Math.cos(a0) * pulse, marker.y + Math.sin(a0) * pulse, 44], [...mc, 0.13]);
+        [marker.x + Math.cos(b0) * 5.6, marker.y + Math.sin(b0) * 5.6, 0.6],
+        [marker.x + Math.cos(b1) * 5.6, marker.y + Math.sin(b1) * 5.6, 0.6],
+        [marker.x + Math.cos(a1) * 7, marker.y + Math.sin(a1) * 7, 0.6],
+        [marker.x + Math.cos(a0) * 7, marker.y + Math.sin(a0) * 7, 0.6], [...mc, 0.8]);
     }
+    // The floating diamond itself, bobbing over the point.
+    const dia = new THREE.OctahedronGeometry(3.4);
+    B.basic.push(dia, mat4(marker.x, 30 + bob, marker.y, (game.time || 0) * 0.9, 1, 1.25, 1), mc);
+    dia.dispose();
   }
 }
 
@@ -1573,7 +1596,7 @@ function buildFigure(gl, game, B, o) {
     return;
   }
   const pose = o.pose, ph = o.phase || 0;
-  const lean = pose === 'flee' ? 2.8 : pose === 'run' ? 2.4 : pose === 'aim' ? 1.5 : pose === 'walk' ? 0.7 : 0;
+  const lean = pose === 'flee' ? 2.8 : pose === 'run' ? 2.4 : pose === 'aim' ? 1.5 : pose === 'walk' ? 0.7 : pose === 'ride' ? 0.6 : 0;
   // Legs: thigh 3.89 + shin 3.71 (Phase 11: scaled by 7.6/8.6 with the
   // hip drop — normal human proportion, see HIP_Z) with believable
   // thickness, knee joint volume at the bend, hip attachment at ±1.05
@@ -1594,6 +1617,14 @@ function buildFigure(gl, game, B, o) {
       // sibling, feet still under the hip line laterally.
       if (sideSign > 0) { knee = P(4.4, 1.02, HIP_Z - 3.1); foot = P(7.0, 1.05, 0.55); }
       else { knee = P(-3.6, -1.02, HIP_Z - 3.3); foot = P(-6.6, -1.05, 2.3); }
+    } else if (pose === 'ride') {
+      // Seated on the scooter (Top-3 rebuild Phase 2): the hip stays
+      // at the standing HIP_Z — the scooter's seat top meets it there —
+      // while the legs fold: thigh forward to a knee ahead of the hip,
+      // shin down to a foot resting on the floorboard (z 3.4, the
+      // board's top + shoe sole). Same segment lengths, bent.
+      knee = P(3.5, sideSign * 1.05, HIP_Z - 0.7);
+      foot = P(3.9, sideSign * 1.05, 3.4);
     } else if (pose === 'aim') {
       // Compact brace: front foot +5.66, back foot −4.95 (spread 10.6;
       // Phase 11: the whole stance scaled by 7.6/8.6 with the leg
@@ -1614,7 +1645,7 @@ function buildFigure(gl, game, B, o) {
     // Shoe (Phase 1, D4): elongated FORWARD of the ankle with a short
     // heel — a shoe last, not the old slab that ran as far behind the
     // ankle as ahead of it. Grounded poses keep the sole at z 0.55.
-    const shoeZ = pose === 'flee' ? foot[2] : 0.55;
+    const shoeZ = pose === 'flee' || pose === 'ride' ? foot[2] : 0.55;
     box(B.flat, foot[0] + f[0] * 1.05, foot[1] + f[1] * 1.05, shoeZ, 1.5, 0.8, 0.5, a, lin([26, 22, 19]));
   }
   // Torso: box-modelled — slim pelvis box, wider chest box (shoulders),
@@ -1735,6 +1766,13 @@ function buildFigure(gl, game, B, o) {
       // Arms pumped BACK against the stride (Phase 1 pose), elbows bent.
       elbow = P(lean - 2.4, sideSign * 2.25, SHO_Z - 2.4);
       hand = P(lean - 4.8, sideSign * 2.15, SHO_Z - 4.0);
+    } else if (pose === 'ride') {
+      // Arms forward-down to the handlebar (Top-3 rebuild Phase 2):
+      // elbows low and forward, hands at the bar's grips (fu +6.4,
+      // lateral ±1.55, z SHO_Z − 0.4 — the scooter builder puts its
+      // bar at fu +5.85 / z 12.35, so the hand balls close on it).
+      elbow = P(lean + 3.2, sideSign * 2.15, SHO_Z - 1.6);
+      hand = P(lean + 6.4, sideSign * 1.55, SHO_Z - 0.4);
     } else {
       elbow = P(lean + 0.5, sideSign * 2.2, SHO_Z - 3.7);
       hand = P(lean + 1.2, sideSign * 2.12, SHO_Z - 6.9);
@@ -1773,14 +1811,75 @@ function buildFigure(gl, game, B, o) {
   }
   curCat = null;
 }
+// ONE scooter builder (Top-3 rebuild Phase 2, gap-audit D1's cyclist
+// beat): a small step-through scooter in the same flat-shaded batch
+// style as the cars — two wheels, a leg shield, a floorboard, a seat
+// and a handlebar — staged by shots.js as game.stagedScooter with a
+// seated rider (buildFigure pose 'ride'). Local space matches the
+// figure's: +fu is the facing direction, the seat top (z 7.0) meets
+// the rider's standing HIP_Z so the seated silhouette keeps the
+// figure's own proportions, and the bar (fu +5.85, z 12.35) meets
+// the 'ride' pose's hands.
+function buildScooter(gl, game, B, sc) {
+  const dx = sc.x - F.cam[0], dy = sc.y - F.cam[1];
+  if (dx * dx + dy * dy > 820 * 820) return;
+  curCat = null;
+  const a = sc.angle, c = Math.cos(a), s = Math.sin(a);
+  const LP = (lx, ly, lz) => [sc.x + lx * c - ly * s, sc.y + lx * s + ly * c, lz];
+  const body = lin(rgb(sc.color || '#3f7f8c'));
+  const bodyTop = lin(rgb(sc.color || '#3f7f8c').map((v) => Math.min(255, v * 1.18)));
+  const DARK = lin([26, 26, 30]), SEAT = lin([34, 32, 34]);
+  disc(B.alpha, sc.x, sc.y, 0.22, 11, [...lin([8, 8, 10]), 0.30]);
+  // Two wheels: lateral cylinders (tyre) + a pale hub ball each.
+  for (const wx of [8.2, -7.8]) {
+    limb(B.flat, LP(wx, -1.0, 2.3), LP(wx, 1.0, 2.3), 2.3, 2.3, lin(TYRE), 12);
+    ball(B.flat, ...LP(wx, 0, 2.3), 0.85, lin([172, 176, 184]));
+  }
+  // Floorboard between the rider's feet (top z 2.9, under the shoes).
+  const fb = LP(2.2, 0, 2.55); box(B.flat, fb[0], fb[1], fb[2], 2.6, 2.1, 0.35, a, DARK);
+  // Leg shield: a vertical panel ahead of the rider's shins, body
+  // colour, with the steering column rising out of it to the bar.
+  const sh1 = LP(6.35, 0, 5.2); box(B.flat, sh1[0], sh1[1], sh1[2], 0.55, 2.15, 3.4, a, body);
+  limb(B.flat, LP(6.3, 0, 8.2), LP(5.9, 0, 12.2), 0.45, 0.4, DARK, 6);
+  // Handlebar: a lateral bar on the column top, grips at its ends.
+  const bar = LP(5.85, 0, 12.35); box(B.flat, bar[0], bar[1], bar[2], 0.35, 2.5, 0.35, a, DARK);
+  // Front fork down to the axle + a body-colour fender over the wheel.
+  limb(B.flat, LP(8.2, 0, 2.3), LP(6.6, 0, 9.0), 0.4, 0.35, DARK, 6);
+  const fen = LP(8.2, 0, 4.9); box(B.flat, fen[0], fen[1], fen[2], 1.6, 1.9, 0.35, a, bodyTop);
+  const lamp = LP(7.0, 0, 9.4); box(B.basic, lamp[0], lamp[1], lamp[2], 0.3, 0.9, 0.7, a, lin([255, 243, 190]));
+  // Seat (top z 7.0 under the rider's hips) + the rear body hump
+  // carrying the tail, in body colour over a dark undertail.
+  const seat = LP(-1.6, 0, 6.3); box(B.flat, seat[0], seat[1], seat[2], 2.9, 2.0, 0.7, a, SEAT);
+  const rb = LP(-6.4, 0, 4.6); box(B.flat, rb[0], rb[1], rb[2], 2.6, 2.3, 1.9, a, body);
+  const ut = LP(-6.6, 0, 2.4); box(B.flat, ut[0], ut[1], ut[2], 2.2, 1.9, 0.6, a, DARK);
+  const tail = LP(-9.15, 0, 5.6); box(B.basic, tail[0], tail[1], tail[2], 0.3, 0.8, 0.6, a, lin([226, 36, 46]));
+  curCat = null;
+}
 function buildFigures(gl, game, B) {
   for (const ped of game.peds) {
     const fleeing = ped.fleeUntil && game.nowMs < ped.fleeUntil;
     buildFigure(gl, game, B, {
       x: ped.x, y: ped.y, angle: ped.angle, phase: ped.walkPhase || 0,
-      pose: ped.dead ? 'stand' : fleeing ? 'run' : 'walk', dead: !!ped.dead,
+      // Pose wiring (Top-3 rebuild Phase 2): a pose staged on the ped
+      // itself (shots.js sets ped.pose) wins over the sim-derived
+      // default; with no staged pose the mapping is exactly the
+      // standing one — dead → 'stand' (the dead branch draws the
+      // body), fleeing → 'run', otherwise 'walk'.
+      pose: ped.pose || (ped.dead ? 'stand' : fleeing ? 'run' : 'walk'), dead: !!ped.dead,
       shirt: rgb(ped.shirt), skin: rgb(ped.skin || '#d9b48f'), pants: rgb(ped.pants || '#2e3440'),
       hair: rgb(ped.hairColor || '#2b2118'), isPlayer: false, gear: false,
+    });
+  }
+  if (game.stagedScooter) {
+    // The staged scooter + its seated rider (chase frame dressing,
+    // set by shots.js; absent in every other frame).
+    const sc = game.stagedScooter, rd = sc.rider || {};
+    buildScooter(gl, game, B, sc);
+    buildFigure(gl, game, B, {
+      x: sc.x, y: sc.y, angle: sc.angle, phase: 0,
+      pose: 'ride', dead: false,
+      shirt: rgb(rd.shirt || '#c94f38'), skin: rgb(rd.skin || '#8a5a34'), pants: rgb(rd.pants || '#2e3440'),
+      hair: rgb(rd.hair || '#17171a'), isPlayer: false, gear: false,
     });
   }
   if (game.crewMate && !game.player.inCar) {

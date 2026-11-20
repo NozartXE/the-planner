@@ -44,12 +44,23 @@ function addCop(game, x, y, angle) {
   return cop;
 }
 const STAGE_GAITS = ['bouncy', 'relaxed', 'upright', 'dragging'];
-function stagePed(game, idx, x, y, angle, phase, gaitIdx) {
+function stagePed(game, idx, x, y, angle, phase, gaitIdx, style) {
   const ped = game.peds[idx % game.peds.length];
   ped.x = x; ped.y = y; ped.angle = angle; ped.dead = false;
   ped.walkPhase = phase; ped.phase = phase;
   ped.fleeUntil = 0;
   if (typeof gaitIdx === 'number') ped.gait = STAGE_GAITS[gaitIdx % STAGE_GAITS.length];
+  // Top-3 rebuild Phase 2 staging fields: a staged POSE (routed by
+  // view3d's buildFigures ahead of the sim-derived default) and
+  // deterministic clothing colours. Calls without a style keep the
+  // standing behaviour exactly — pose cleared, colours untouched.
+  ped.pose = style && style.pose ? style.pose : null;
+  if (style) {
+    if (style.shirt) ped.shirt = style.shirt;
+    if (style.pants) ped.pants = style.pants;
+    if (style.skin) ped.skin = style.skin;
+    if (style.hair) ped.hairColor = style.hair;
+  }
   return ped;
 }
 function setMission(game, index, stage, timeLeft) {
@@ -150,6 +161,9 @@ export function applyShot(game, name, step) {
   }
   // Render-test hooks reset on every staging (used only by ?shot=scale captures).
   game.shotHeroCar = null; game.debugHidePlayer = false; game.debugHideHeroCar = false; game.idRender = false;
+  // Staged prop reset (Top-3 rebuild Phase 2): only the chase staging
+  // sets a scooter; every other shot renders without one.
+  game.stagedScooter = null;
   if (name === 'title') {
     // Hero cruising the beachfront at the east edge, heading NORTH in the chase cam:
     // art-deco facades front the sand on the left of the frame, the sand strip, teal
@@ -194,7 +208,12 @@ export function applyShot(game, name, step) {
     // at a mid-PIT angle, sparks and smoke at the contact,
     // skid arcs behind both cars, pursuit units in echelon and a roadblock ahead.
     // Jobs 1–2 are done ($1,350) and the current job is 3, "Front Page".
-    // Displayed speed: round(225 * 0.62) = 140 km/h.
+    // Displayed speed: round(150 * 0.62) = 93 km/h (Top-3 rebuild
+    // Phase 2, gap-audit D12: the staged hero speed was 225 → a
+    // 140 km/h readout over a formation that reads as queued traffic
+    // at a cordon. 150 matches the pursuit units' own staged speed
+    // and lands the readout at 93 km/h — fast traffic flow, no jam
+    // at a 140 readout).
     // 3D framing: the chase cam sits ~84 units behind the hero, so the alongside cop
     // (south side, level with the hero) and the cutter ahead carry the pursuit read;
     // two more interceptors trail behind for the minimap's cop cluster.
@@ -212,7 +231,7 @@ export function applyShot(game, name, step) {
     // action and the zebra waits at the intersection ahead. All
     // formation placements are hero-relative via at(), so the whole
     // hunt rotates with the heading.
-    putPlayerInCar(game, game.traffic[0], 1200, 1477, 0, 225, { kind: 'coupe', color: '#7a4a3a', hp: 31, maxHp: 90 });
+    putPlayerInCar(game, game.traffic[0], 1200, 1477, 0, 150, { kind: 'coupe', color: '#7a4a3a', hp: 31, maxHp: 90 });
     game.traffic[0].steer = 0.30; // front wheels visibly cut — a swerve, not a park
     const hero = game.traffic[0];
     const rot = (a, x, y) => ({ x: x * Math.cos(a) - y * Math.sin(a), y: x * Math.sin(a) + y * Math.cos(a) });
@@ -222,7 +241,13 @@ export function applyShot(game, name, step) {
     // beyond the roadblock pair in frame, clear of their silhouettes),
     // and the other traffic car staged behind the camera, out of the read.
     const civ = at(hero, 700, -8);
-    setCar(game.traffic[1], civ.x, civ.y, Math.PI, 0);
+    // Top-3 rebuild Phase 2 (D1 civilian variety): kinds set EXPLICITLY
+    // on the staged traffic so the chase frame shows at least three
+    // distinct civilian kinds — this halted coupe, the sedan rolling
+    // up the opposing lane below, plus the fleeing sedan + hatch of
+    // the Phase 8 Part 2 staging (hero coupe is the player's, not a
+    // civilian). Phase 1 routes the shaped profiles by kind.
+    setCar(game.traffic[1], civ.x, civ.y, Math.PI, 0, { kind: 'coupe', color: '#8a4a5a' });
     const behind = at(hero, -380, 15);
     setCar(game.traffic[2], behind.x, behind.y, 0, 40);
     // Phase 8 density (mid-field band): a second civilian rolling up
@@ -231,7 +256,7 @@ export function applyShot(game, name, step) {
     // south curb mid-block — the hunt flies past a street that was
     // already alive, instead of an emptied stage road.
     const civ2 = at(hero, 560, -21);
-    setCar(game.traffic[3], civ2.x, civ2.y, Math.PI, 55);
+    setCar(game.traffic[3], civ2.x, civ2.y, Math.PI, 55, { kind: 'sedan', color: '#5f7a6a' });
     const curb = at(hero, 430, 37);
     setCar(game.traffic[4], curb.x, curb.y, 0, 0);
     // Phase 8 Part 2 density remainder (Seat 1 defect 2): the pursuit
@@ -289,6 +314,46 @@ export function applyShot(game, name, step) {
     // the mid-field band carries life past the roadblock as well.
     stagePed(game, 5, 1900, 1512, 0, 2.9, 1);
     stagePed(game, 6, 1980, 1396, Math.PI, 1.7, 2);
+    // Top-3 rebuild Phase 2 (gap-audit D1): the boulevard CROWD — 14
+    // more staged pedestrians on top of the 7 above, spread over BOTH
+    // sidewalks (north y 1396, south y 1512), the planted median
+    // (y 1456, on the median strip runs, clear of every vehicle) and
+    // the zebra crossing at the intersection ahead (x ≈1518–1522, the
+    // east arm). None stands in a traffic lane, none blocks the hero
+    // or the pursuit formation (kept exactly as staged above), and
+    // every one wears deterministic varied clothing / skin / hair
+    // with its own gait and walk phase. [x, y, angle, phase, gait,
+    // shirt, pants, skin, hair]
+    const CROWD = [
+      [1280, 1396, Math.PI, 0.9, 1, '#b8452e', '#2e3440', '#8a5a34', '#17171a'],
+      [1320, 1396, 0, 3.4, 2, '#2e6f8e', '#3a332a', '#d9b48f', '#3d2c1c'],
+      [1560, 1396, Math.PI, 5.1, 0, '#d9a441', '#2c3a34', '#e8c39a', '#5a4632'],
+      [1720, 1396, 0, 1.8, 3, '#5f8a4a', '#40303a', '#b87f56', '#2b2118'],
+      [1880, 1396, Math.PI, 4.2, 1, '#7a4a8e', '#333338', '#6e4526', '#41303e'],
+      [1290, 1512, 0, 2.6, 2, '#3f7f8c', '#31404e', '#d9b48f', '#77716a'],
+      [1350, 1512, Math.PI, 0.4, 3, '#c9742e', '#2e3440', '#8a5a34', '#17171a'],
+      [1580, 1512, 0, 5.7, 0, '#8e2e4a', '#3a332a', '#e8c39a', '#3d2c1c'],
+      [1780, 1512, Math.PI, 2.1, 1, '#4a6fa5', '#2c3a34', '#b87f56', '#5a4632'],
+      [1950, 1512, 0, 3.9, 2, '#a5b83f', '#40303a', '#d9b48f', '#2b2118'],
+      [1370, 1456, 0, 1.3, 0, '#e0e0d8', '#333338', '#6e4526', '#17171a'],
+      [1650, 1456, Math.PI, 4.8, 3, '#2e8e6f', '#31404e', '#e8c39a', '#41303e'],
+      [1518, 1438, Math.PI / 2, 2.9, 1, '#b83f6f', '#2e3440', '#8a5a34', '#3d2c1c'],
+      [1522, 1472, -Math.PI / 2, 0.2, 2, '#416fa5', '#3a332a', '#d9b48f', '#5a4632'],
+    ];
+    CROWD.forEach((cd, i) => stagePed(game, 7 + i, cd[0], cd[1], cd[2], cd[3], cd[4],
+      { shirt: cd[5], pants: cd[6], skin: cd[7], hair: cd[8] }));
+    // The scooter beat (D1's cyclist): a step-through scooter PARKED
+    // at the NORTH kerb in the chase mid-field (1440, 1413 — just
+    // west of the roadblock pair, clear of the hero's lane and of
+    // every cop silhouette: the first placement, at the south kerb
+    // behind the pursuit unit, projected almost entirely behind
+    // that car's body — verified by projected-footprint overlap and
+    // by the capture crop), its rider still seated, hands on the
+    // bar, in the 'ride' pose. Built by view3d's buildScooter.
+    game.stagedScooter = {
+      x: 1440, y: 1413, angle: 0, color: '#3f7f8c',
+      rider: { shirt: '#c94f38', pants: '#2e3440', skin: '#8a5a34', hair: '#17171a' },
+    };
     game.money = 1350;
     game.radio.stationIdx = 1; game.radio.trackIdx = 0;
     // The plan from the board, executed: its forecast IS the wanted level
@@ -447,6 +512,39 @@ export function applyShot(game, name, step) {
     stagePed(game, 4, 1150, 1085, -2.4, 3.3, 1);
     stagePed(game, 5, 860, 1040, 0.9, 1.8, 2);
     for (const idx of [0, 1]) { const ped = game.peds[idx]; ped.fleeUntil = game.nowMs + 60000; ped.fleeX = 1008; ped.fleeY = 1076; }
+    // Top-3 rebuild Phase 2 (gap-audit D1): the shootout's human
+    // consequence — the staged crowd REACTS. Six civilians on BOTH
+    // sidewalks (east x ≈1045–1062, west x ≈924–934) in 'flee' /
+    // 'armsup' poses, every one oriented AWAY from the gunfire (its
+    // angle is the direction from the struck sedan at (1008, 1076)
+    // to the ped), with deterministic varied clothing. The aim
+    // corridor (the line from the player at (1040, 1158) to the
+    // sedan) stays clear of every one of them. [x, y, angle, phase,
+    // gait, pose, shirt, pants, skin, hair]
+    const REACT = [
+      [1050, 1110, 0.68, 2.0, 0, 'armsup', '#b8452e', '#2e3440', '#8a5a34', '#17171a'],
+      [1045, 1050, -0.61, 3.6, 1, 'armsup', '#2e6f8e', '#3a332a', '#d9b48f', '#3d2c1c'],
+      [1062, 1095, 0.34, 1.1, 2, 'flee', '#d9a441', '#2c3a34', '#e8c39a', '#5a4632'],
+      [930, 1120, 2.63, 4.4, 3, 'flee', '#5f8a4a', '#40303a', '#b87f56', '#2b2118'],
+      [934, 1020, -2.50, 0.6, 0, 'armsup', '#7a4a8e', '#333338', '#6e4526', '#41303e'],
+      [924, 1080, 3.09, 5.2, 1, 'flee', '#3f7f8c', '#31404e', '#d9b48f', '#77716a'],
+    ];
+    REACT.forEach((rd, i) => stagePed(game, 6 + i, rd[0], rd[1], rd[2], rd[3], rd[4],
+      { pose: rd[5], shirt: rd[6], pants: rd[7], skin: rd[8], hair: rd[9] }));
+    // One figure DOWN on the road's east edge (x 1031, the asphalt
+    // ends at 1032), just south-east of the struck sedan — near it,
+    // not under it, and east of the aim line.
+    stagePed(game, 12, 1031, 1114, Math.PI / 2, 0, 0,
+      { pose: 'down', shirt: '#8e2e4a', pants: '#3a332a', skin: '#e8c39a', hair: '#3d2c1c' });
+    // The target's own crew beside the sedan, hands up — the
+    // surrender that, with the impact flash, is the hit feedback the
+    // audit demanded: the driver on the sedan's east flank and the
+    // passenger on its west flank, both in 'armsup' facing the
+    // shooter (angles point from each figure toward the player).
+    stagePed(game, 13, 1022, 1082, 1.34, 0, 0,
+      { pose: 'armsup', shirt: '#54604f', pants: '#2e3440', skin: '#b87f56', hair: '#17171a' });
+    stagePed(game, 14, 993, 1062, 1.12, 0, 1,
+      { pose: 'armsup', shirt: '#c9742e', pants: '#31404e', skin: '#d9b48f', hair: '#5a4632' });
     game.money = 2250;
     // Claim alignment (Phase 2 defect 8c): the board's forecast for this
     // chain is 5 stars and the chase fields 5 — the mission fields the
