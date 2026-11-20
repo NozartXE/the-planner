@@ -115,6 +115,14 @@ export function applyShot(game, name, step) {
     // discipline on the same road, neither under a panel.
     setCar(game.traffic[5], 740, 963, Math.PI, 30);
     setCar(game.traffic[6], 880, 924, 0, 0);
+    // Phase 8 Part 2 density remainder (Seat 1 defect 3): the board's
+    // foreground — the lower-centre street the eye lands on — was an
+    // empty slab. One car CROSSING the foreground intersection
+    // northbound on the cross street's east lane, entering the
+    // crossing below the revealed corridor and clear of every panel
+    // (first placed at y 1180: the audit showed it below the frame's
+    // foreground cutoff — moved into the crossing itself, the tune).
+    setCar(game.traffic[7], 1009, 1040, -Math.PI / 2, 30, { kind: 'sedan', color: '#7a8a99' });
     stagePed(game, 0, 920, 928, 0.4, 1.2, 0);
     stagePed(game, 1, 1060, 928, -0.6, 3.0, 1);
     stagePed(game, 2, 930, 1044, 2.6, 5.0, 2);
@@ -128,6 +136,12 @@ export function applyShot(game, name, step) {
     stagePed(game, 6, 760, 932, -0.6, 2.8, 1);
     stagePed(game, 7, 700, 1040, 2.6, 0.9, 3);
     stagePed(game, 8, 640, 928, 0.4, 4.6, 2);
+    // Part 2: two figures mid-crosswalk in the intersection itself,
+    // crossing the main road in opposite directions — foreground life,
+    // no panel touched. (First placed on the south arm, where the
+    // audit showed them projected behind the CREW/GEAR panel.)
+    stagePed(game, 9, 968, 975, -Math.PI / 2, 2.0, 0);
+    stagePed(game, 10, 995, 1015, Math.PI / 2, 4.4, 1);
     game.police.cops = [];
     game.police.setStars(0, game.nowMs);
     game.bullets = []; game.fx.particles = []; game.fx.skids = []; game.toasts = [];
@@ -220,6 +234,15 @@ export function applyShot(game, name, step) {
     setCar(game.traffic[3], civ2.x, civ2.y, Math.PI, 55);
     const curb = at(hero, 430, 37);
     setCar(game.traffic[4], curb.x, curb.y, 0, 0);
+    // Phase 8 Part 2 density remainder (Seat 1 defect 2): the pursuit
+    // read as a police-only diorama — TWO civilian cars now run EAST
+    // in the hero's own lane direction at mid-distance, beyond the
+    // roadblock (traffic that was already fleeing the cordon), same
+    // car family, LEONIDA plates by construction. Cops stay 5.
+    const flee1 = at(hero, 470, 12);
+    setCar(game.traffic[5], flee1.x, flee1.y, 0, 45, { kind: 'sedan', color: '#6a7a8a' });
+    const flee2 = at(hero, 585, 16);
+    setCar(game.traffic[6], flee2.x, flee2.y, 0, 45, { kind: 'hatch', color: '#a8835a' });
     game.police.cops = [];
     // Formation-true hunt: EXACTLY five interceptors for the plan's
     // forecast five stars. The hero is the largest vehicle, centre-low,
@@ -544,6 +567,13 @@ export function applyShot(game, name, step) {
     stagePed(game, 3, 3662, 2480, Math.PI / 2, 2.0, 3);
     stagePed(game, 4, 3796, 2860, Math.PI, 4.4, 1);
     stagePed(game, 5, 3650, 2920, -Math.PI / 2, 0.8, 2);
+    // Phase 8 Part 2 density remainder (Seat 1 defect 5): the ledger
+    // panel occludes the road centre by design, so the backdrop's
+    // population lives where the frame can show it — the foreground
+    // promenade strips on both sides of the panel. The ledger itself
+    // and every car already staged stay exactly as they were.
+    stagePed(game, 6, 3796, 2620, Math.PI, 2.6, 3);
+    stagePed(game, 7, 3652, 2600, -Math.PI / 2, 5.1, 0);
     game.money = 5450;
     game.totalEarned = 5200;
     game.missionsCompleted = 5;

@@ -35,9 +35,9 @@ const NEAR = 5;
 const FIG_H = 15.1;         // standing figure HEAD-TOP height, world units (Phase 3 scale fix: was 15.4 with hair spikes to ≈16.15 — silhouette/roof 1.31, outside the realistic band; hair silhouette now ≤15.45, roof 12.6 → 1.23)
 const CAR_ROOF = 12.6;      // sedan/coupe cabin roof height (Phase 3: 12.3 → 12.6, 1.43 → 1.47 m)
 const BUILD_SCALE = 3.2;    // building render height = data height × this
-const SUNSET_TOP = [86, 62, 102];    // dusty plum
-const SUNSET_MID = [199, 108, 112];  // rose
-const SUNSET_HOR = [255, 178, 112];  // orange-pink horizon
+const SUNSET_TOP = [88, 102, 130];   // dusty pale blue (Phase 8: the plum top read as flat orange-pink in the judged frames; GTA V grade is pale blue over a warm horizon)
+const SUNSET_MID = [186, 124, 122];  // softened rose
+const SUNSET_HOR = [252, 184, 124];  // paler warm horizon
 const FOG = [214, 184, 166]; // pale warm GREY — distance haze, not a wash
 const SUN = [255, 196, 116];
 // Time-of-day grades — the plan's time choice made visible. GOLDEN is the
@@ -147,8 +147,15 @@ function paintConcrete(c, t, seed) {
     c.fillStyle = R() < 0.5 ? 'rgba(255,240,214,0.05)' : 'rgba(20,14,8,0.06)';
     c.beginPath(); c.ellipse(px, py, r, r * 0.6, R() * 3, 0, Math.PI * 2); c.fill();
   }
+  // Per-slab value alternation so individual pavement slabs read at
+  // distance instead of one flat sheet (Phase 8 sidewalk readability).
+  for (let sx = 0; sx < 4; sx++) for (let sy = 0; sy < 4; sy++) {
+    if ((sx + sy) % 2 === 0) continue;
+    c.fillStyle = 'rgba(52,44,36,0.07)';
+    c.fillRect(t.x + (t.w / 4) * sx, t.y + (t.h / 4) * sy, t.w / 4, t.h / 4);
+  }
   // Expansion-joint grid: dark lines every quarter tile in both axes.
-  c.strokeStyle = 'rgba(38,30,22,0.55)'; c.lineWidth = 3;
+  c.strokeStyle = 'rgba(38,30,22,0.72)'; c.lineWidth = 4;
   for (let i = 0; i <= 4; i++) {
     c.beginPath(); c.moveTo(t.x + (t.w / 4) * i, t.y); c.lineTo(t.x + (t.w / 4) * i, t.y + t.h); c.stroke();
     c.beginPath(); c.moveTo(t.x, t.y + (t.h / 4) * i); c.lineTo(t.x + t.w, t.y + (t.h / 4) * i); c.stroke();
@@ -338,6 +345,45 @@ function buildGL() {
   const roofTex = texOf(256, 256, (c, t) => paintRoof(c, t, 4417));
   const fw = facadePair([188, 168, 146], 5513, 0.45);
   const fc = facadePair([172, 164, 152], 6629, 0.40);
+  // Office facade (Phase 8): a third grid family — fewer, WIDER panes,
+  // thick spandrel bands, some floors blind-dark — so mid-rise slabs stop
+  // sharing one window grid with the residential towers.
+  const fo = (() => {
+    const [cv, c] = makeCanvas2d(256, 256);
+    const [ev, e] = makeCanvas2d(256, 256);
+    const R = lcg(9949);
+    c.fillStyle = 'rgb(176,158,138)'; c.fillRect(0, 0, 256, 256);
+    e.fillStyle = 'rgb(0,0,0)'; e.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 8; i++) {
+      const px = R() * 256, py = R() * 256, r = 26 + R() * 60;
+      c.fillStyle = R() < 0.5 ? 'rgba(255,240,214,0.05)' : 'rgba(10,6,4,0.05)';
+      c.beginPath(); c.ellipse(px, py, r, r * 0.7, 0, 0, Math.PI * 2); c.fill();
+    }
+    const cols = 4, rows = 3, cw = 256 / cols, rh = 256 / rows;
+    for (let row = 0; row < rows; row++) {
+      c.fillStyle = 'rgba(30,22,16,0.30)';
+      c.fillRect(0, row * rh + rh * 0.78, 256, rh * 0.22); // spandrel band
+      for (let col = 0; col < cols; col++) {
+        const wx = col * cw + cw * 0.14, wy = row * rh + rh * 0.12, ww = cw * 0.72, wh = rh * 0.56;
+        c.fillStyle = 'rgb(48,46,50)'; c.fillRect(wx - 2.5, wy - 2.5, ww + 5, wh + 5);
+        const r = R();
+        if (r < 0.38) {
+          const warm = 0.82 + R() * 0.18;
+          c.fillStyle = `rgb(${Math.round(255 * warm)},${Math.round(202 * warm)},${Math.round(128 * warm)})`;
+          c.fillRect(wx, wy, ww, wh);
+          e.fillStyle = `rgb(${Math.round(255 * warm)},${Math.round(190 * warm)},${Math.round(110 * warm)})`;
+          e.fillRect(wx, wy, ww, wh);
+        } else if (r < 0.48) { c.fillStyle = 'rgb(72,74,80)'; c.fillRect(wx, wy, ww, wh); } // blinds down
+        else { const v = 0.85 + R() * 0.3; c.fillStyle = `rgb(${Math.round(96 * v)},${Math.round(110 * v)},${Math.round(126 * v)})`; c.fillRect(wx, wy, ww, wh); }
+        c.fillStyle = 'rgba(255,255,255,0.10)'; c.fillRect(wx, wy, ww, 3);
+      }
+    }
+    const map = new THREE.CanvasTexture(cv);
+    map.wrapS = map.wrapT = THREE.RepeatWrapping; map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = 4;
+    const emissiveMap = new THREE.CanvasTexture(ev);
+    emissiveMap.wrapS = emissiveMap.wrapT = THREE.RepeatWrapping; emissiveMap.colorSpace = THREE.SRGBColorSpace;
+    return { map, emissiveMap };
+  })();
   // Glass-tower pair (Rect's 2026-11-20 city reference): dense blue-teal
   // pane grid — sky-bright panes against deep teal, few lit at dusk.
   const fg = (() => {
@@ -373,6 +419,15 @@ function buildGL() {
   paintSignAtlas(signC);
   const signTex = new THREE.CanvasTexture(signCv);
   signTex.colorSpace = THREE.SRGBColorSpace;
+  // Bus-stop sign face (Phase 8): invented transit branding, painted once.
+  const [busCv, busC] = makeCanvas2d(256, 128);
+  busC.fillStyle = 'rgb(36,90,100)'; busC.fillRect(0, 0, 256, 128);
+  busC.strokeStyle = '#f7efdd'; busC.lineWidth = 6; busC.strokeRect(5, 5, 246, 118);
+  busC.fillStyle = '#f7efdd'; busC.textAlign = 'center'; busC.textBaseline = 'middle';
+  busC.font = '700 58px system-ui, sans-serif'; busC.fillText('BUS', 128, 46);
+  busC.font = '700 25px system-ui, sans-serif'; busC.fillText('AMBER LINE', 128, 98);
+  const busTex = new THREE.CanvasTexture(busCv);
+  busTex.colorSpace = THREE.SRGBColorSpace;
   const [plateCv, plateC] = makeCanvas2d(160 * PLATE_COLS, 50 * PLATE_ROWS);
   plateC.fillStyle = '#edeade'; plateC.fillRect(0, 0, plateCv.width, plateCv.height);
   const plateTex = new THREE.CanvasTexture(plateCv);
@@ -391,9 +446,11 @@ function buildGL() {
     roof: new THREE.MeshLambertMaterial({ map: roofTex, vertexColors: true }),
     fwarm: new THREE.MeshLambertMaterial({ map: fw.map, emissiveMap: fw.emissiveMap, emissive: linColor([255, 196, 116]), emissiveIntensity: 0.38, vertexColors: true }),
     fcool: new THREE.MeshLambertMaterial({ map: fc.map, emissiveMap: fc.emissiveMap, emissive: linColor([255, 196, 116]), emissiveIntensity: 0.38, vertexColors: true }),
+    foffice: new THREE.MeshLambertMaterial({ map: fo.map, emissiveMap: fo.emissiveMap, emissive: linColor([255, 196, 116]), emissiveIntensity: 0.38, vertexColors: true }),
     glass: new THREE.MeshLambertMaterial({ map: fg.map, emissiveMap: fg.emissiveMap, emissive: linColor([255, 196, 116]), emissiveIntensity: 0.3, vertexColors: true }),
     shop: new THREE.MeshLambertMaterial({ map: shopTex, emissiveMap: shopEmissive, emissive: linColor([255, 190, 110]), emissiveIntensity: 0.3, vertexColors: true }),
     sign: new THREE.MeshBasicMaterial({ map: signTex }),
+    bus: new THREE.MeshBasicMaterial({ map: busTex, side: THREE.DoubleSide }),
     plate: new THREE.MeshBasicMaterial({ map: plateTex }),
     idFlat: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }),
     idBlack: new THREE.MeshBasicMaterial({ color: 0x000000 }),
@@ -405,14 +462,20 @@ function buildGL() {
     uniforms: {
       top: { value: linColor(SUNSET_TOP) }, mid: { value: linColor(SUNSET_MID) }, hor: { value: linColor(SUNSET_HOR) },
       sunDir: { value: new THREE.Vector3(SUN_DIR[0], SUN_DIR[2], SUN_DIR[1]) }, sunCol: { value: linColor(SUN) },
+      haze: { value: linColor(FOG) },
     },
     vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: [
-      'uniform vec3 top; uniform vec3 mid; uniform vec3 hor; uniform vec3 sunDir; uniform vec3 sunCol;',
+      'uniform vec3 top; uniform vec3 mid; uniform vec3 hor; uniform vec3 sunDir; uniform vec3 sunCol; uniform vec3 haze;',
       'varying vec3 vDir;',
       'void main(){',
       '  float h = clamp(vDir.y, -0.08, 1.0);',
       '  vec3 col = h > 0.32 ? mix(mid, top, smoothstep(0.32, 0.95, h)) : mix(hor, mid, smoothstep(-0.02, 0.32, h));',
+      // Phase 8 haze band: a warm thin haze sitting ON the skyline —
+      // full fog tone at the horizon line, gone by h=0.16 — so distant
+      // towers meet a hazed sky instead of a hard orange edge. This is
+      // inside the sky material only; scene surfaces are untouched.
+      '  col = mix(haze, col, smoothstep(-0.01, 0.16, h));',
       '  float s = max(dot(normalize(vDir), normalize(sunDir)), 0.0);',
       '  col += sunCol * (pow(s, 220.0) * 0.85 + pow(s, 18.0) * 0.30);',
       '  gl_FragColor = vec4(col, 1.0);',
@@ -762,6 +825,24 @@ function buildGround(gl, game, B) {
       }
     }
   }
+  // Curbs (Phase 8): a low light-grey kerb box along every road edge,
+  // segmented with the same intersection gaps as the medians, so the
+  // sidewalk band reads as a raised pavement with an edge — not as a
+  // texture change on a flat plane. Sun shading separates its faces.
+  const CURB = lin([172, 168, 160]);
+  for (const c of centers) {
+    for (const vert of [true, false]) {
+      for (let k = 0; k <= 8; k++) {
+        const a0 = k * BLOCK_PITCH + ROAD_W + 6, a1 = (k + 1) * BLOCK_PITCH - 6;
+        const mid = (a0 + a1) / 2, len = a1 - a0;
+        for (const off of [-47.2, 47.2]) {
+          const mx = vert ? c + off : mid, my = vert ? mid : c + off;
+          if (!inRange(mx, my, 1180)) continue;
+          box(B.flat, mx, my, 0.45, vert ? 1.3 : len / 2, vert ? len / 2 : 1.3, 0.45, 0, CURB);
+        }
+      }
+    }
+  }
   // Zebra crossings at intersections.
   const ZEBRA = [...lin([224, 216, 202]), 0.72];
   for (const cx of centers) for (const cy of centers) {
@@ -894,10 +975,11 @@ function buildBuildings(gl, game, B) {
     // Facade variant: tall buildings may be glass towers (some of them
     // cylinders); the rest split warm/cool by hash, as before.
     const isGlass = b.height > 46 && hash01(bid * 7.7) < 0.42;
-    const variant = isGlass ? 'glass' : hash01(bid * 13.7) < 0.5 ? 'fwarm' : 'fcool';
-    const baseRGB = variant === 'glass' ? [148, 168, 178] : variant === 'fwarm' ? [188, 168, 146] : [172, 164, 152];
+    const vh = hash01(bid * 13.7);
+    const variant = isGlass ? 'glass' : vh < 0.34 ? 'fwarm' : vh < 0.67 ? 'fcool' : 'foffice';
+    const baseRGB = variant === 'glass' ? [148, 168, 178] : variant === 'fwarm' ? [188, 168, 146] : variant === 'foffice' ? [176, 158, 138] : [172, 164, 152];
     const tintOf = (wall) => lin([0, 1, 2].map((i) => clamp(wall[i] / baseRGB[i] * 255, 40, 255)));
-    const FB = variant === 'glass' ? B.glass : variant === 'fwarm' ? B.fwarm : B.fcool;
+    const FB = variant === 'glass' ? B.glass : variant === 'fwarm' ? B.fwarm : variant === 'foffice' ? B.foffice : B.fcool;
     const walls = [
       { n: [0, 1], tint: tintOf(wallSouth), wid: b.w, fixed: b.y + b.h, mk: (z0, z1) => [[b.x, b.y + b.h, z0], [b.x + b.w, b.y + b.h, z0], [b.x + b.w, b.y + b.h, z1], [b.x, b.y + b.h, z1]] },
       { n: [0, -1], tint: tintOf(wallNorth), wid: b.w, fixed: b.y, mk: (z0, z1) => [[b.x + b.w, b.y, z0], [b.x, b.y, z0], [b.x, b.y, z1], [b.x + b.w, b.y, z1]] },
@@ -946,6 +1028,26 @@ function buildBuildings(gl, game, B) {
           const off = [w.n[0] * 0.35, w.n[1] * 0.35, 0];
           const sh = (p) => [p[0] + off[0], p[1] + off[1], p[2]];
           B.flat.quad(sh(bp[0]), sh(bp[1]), sh(bp[2]), sh(bp[3]), acc);
+        }
+      }
+      // Facade depth (Phase 8, near buildings only): a light cornice
+      // strip under the parapet, darker pilaster strips running from
+      // the shop band to the cornice — the slab faces gain a frame.
+      if (dist < 760 && H > 40) {
+        const corC = lin(rgb(b.wallLight || PALETTE.wallLight).map((v) => Math.min(255, v * 1.12)));
+        for (const w of walls) {
+          const cp = w.mk(H - 4.5, H - 1.5);
+          const off = [w.n[0] * 0.55, w.n[1] * 0.55, 0];
+          const sh = (p) => [p[0] + off[0], p[1] + off[1], p[2]];
+          B.flat.quad(sh(cp[0]), sh(cp[1]), sh(cp[2]), sh(cp[3]), corC);
+        }
+        const pz0 = 17, pz1 = H - 4.5;
+        if (pz1 - pz0 > 14) {
+          const pilC = lin(rgb(b.wallDark || PALETTE.wallDark).map((v) => v * 0.92));
+          for (const w of walls) for (const fr of [0.03, 0.5, 0.97]) {
+            if (w.n[1] !== 0) box(B.flat, b.x + w.wid * fr, w.fixed + w.n[1] * 0.35, (pz0 + pz1) / 2, 1.1, 0.35, (pz1 - pz0) / 2, 0, pilC);
+            else box(B.flat, w.fixed + w.n[0] * 0.35, b.y + w.wid * fr, (pz0 + pz1) / 2, 0.35, 1.1, (pz1 - pz0) / 2, 0, pilC);
+          }
         }
       }
       // Roof + parapet cap + stored rooftop props.
@@ -1002,6 +1104,16 @@ function buildBuildings(gl, game, B) {
         const a1 = [cenX + along[0] * len / 2, cenY + along[1] * len / 2];
         const v1 = 1 - sIdx / SIGNS.length, v0 = 1 - (sIdx + 1) / SIGNS.length;
         B.sign.quad([a0[0], a0[1], 11.4], [a1[0], a1[1], 11.4], [a1[0], a1[1], 16.6], [a0[0], a0[1], 16.6], WHITE, [0, v0, 1, v1]);
+      }
+      // Awning canopy (Phase 8): a flat muted canopy slab over the
+      // shopfront on the most camera-facing wall of near buildings —
+      // street-level depth the texture stripes alone could not give.
+      if (best && dist < 760 && hash01(bid * 31.7) < 0.6) {
+        const AWN = [[150, 70, 58], [52, 96, 104], [196, 150, 84]];
+        const awnC = lin(AWN[Math.floor(hash01(bid * 37.3) * 3) % 3]);
+        const alen = Math.min(56, best.wid * 0.66);
+        if (best.n[1] !== 0) box(B.flat, cx, best.fixed + best.n[1] * 2.9, 15.2, alen / 2, 2.9, 0.5, 0, awnC);
+        else box(B.flat, best.fixed + best.n[0] * 2.9, cy, 15.2, 2.9, alen / 2, 0.5, 0, awnC);
       }
     }
   }
@@ -1098,6 +1210,15 @@ function buildCar(gl, game, B, car) {
   part(UNIT_BOX, mat4(cabOff, (bodyTopZ + roofZ) / 2, 0, 0, cabLen, roofZ - bodyTopZ, cabWid), car.dead ? body : lin(rgb(car.color).map((v) => v * 0.85)));
   part(UNIT_BOX, mat4(cabOff, (bodyTopZ + roofZ) / 2 - 0.2, 0, 0, cabLen - 1.1, roofZ - bodyTopZ - 0.5, cabWid - 0.9), lin(GLASS));
   part(UNIT_BOX, mat4(cabOff, roofZ - 0.4, 0, 0, cabLen - 4.4, 1.1, cabWid - 3.8), bodyTop);
+  // Phase 8 car detail — all surface-hugging or inside the standing
+  // silhouette (no glass-colour change, no bbox growth): a body-colour
+  // B-pillar dividing the glasshouse into front/rear panes, a chrome
+  // side trim strip, a roof antenna fin (top exactly at roofZ) and an
+  // exhaust tip seated in the rear bumper.
+  part(UNIT_BOX, mat4(cabOff, (bodyTopZ + roofZ) / 2 - 0.2, 0, 0, 0.7, roofZ - bodyTopZ - 0.5, cabWid - 0.55), car.dead ? body : lin(rgb(car.color).map((v) => v * 0.85)));
+  for (const sy of [1, -1]) part(UNIT_BOX, mat4(-0.5, 4.6, sy * (W / 2 + 0.06), 0, L * 0.62, 0.55, 0.12), lin([198, 200, 205]));
+  if (!isVan) part(UNIT_BOX, mat4(cabOff - cabLen / 2 + 2.2, roofZ - 0.55, 0, 0, 2.6, 1.1, 0.5), lin([24, 25, 30]));
+  part(UNIT_BOX, mat4(-L / 2 - 1.6, 2.2, W / 2 - 3.4, 0, 1.8, 0.9, 0.9), lin([120, 122, 128]));
   // Mirrors + door seams.
   for (const sy of [1, -1]) {
     const mp = LP(L * 0.26, sy * (W / 2 + 1.1), bodyTopZ + 1.6);
@@ -1162,6 +1283,9 @@ function buildCar(gl, game, B, car) {
     const copShade = 0.90 + hash01((car.id || 1) * 3.7) * 0.10;
     part(UNIT_BOX, mat4(0, 5.4, 0, 0, L * 0.60, 6.8, W + 0.44), lin([236 * copShade, 239 * copShade, 243 * copShade]));
     const flash = Math.sin((game.time || 0) * 10 + (car.sirenPhase || 0)) > 0;
+    // Light-bar housing (Phase 8): a dark tray seating the two lamp
+    // boxes, so the bar reads as mounted hardware, not floating slabs.
+    part(UNIT_BOX, mat4(cabOff, roofZ + 0.28, 0, 0, 3.2, 0.55, cabWid - 0.6), lin([24, 25, 30]));
     if (!car.dead) {
       const lb1 = LP(cabOff, 4.4, roofZ + 0.9), lb2 = LP(cabOff, -4.4, roofZ + 0.9);
       box(B.basic, lb1[0], lb1[1], lb1[2], 2.8, 4.2, 1.5, yaw, lin(flash ? [255, 60, 90] : [130, 34, 48]));
@@ -1277,11 +1401,16 @@ function buildFigure(gl, game, B, o) {
   // Phase 3 slimming: pelvis span 4.7 → 4.1, chest span 5.24 → 4.6 and
   // chest depth 3.36 → 2.9 — the slab bulk that read giant beside the
   // cars is gone; the tall/slim anime read stays.
-  box(B.flat, hipC[0], hipC[1], HIP_Z + 0.9, 1.35, 2.05, 1.35, a, pants);
+  // Phase 8 (Rect's eye over the audit): the read is BULK, not height —
+  // spans slim again (chest 4.6 → 4.0, depth 2.9 → 2.6; pelvis 4.1 →
+  // 3.6; waist 3.9 → 3.5) while the silhouette HEIGHT (15.45, ratio
+  // 1.226) and every z/forward coordinate stay exactly as they were,
+  // so poses, gear assembly and the muzzle line are untouched.
+  box(B.flat, hipC[0], hipC[1], HIP_Z + 0.9, 1.25, 1.8, 1.35, a, pants);
   const chestZ = SHO_Z - 1.35, chestP = P(lean * 0.82, 0, chestZ);
-  box(B.flat, chestP[0], chestP[1], chestZ, 1.45, 2.3, 1.5, a, shirt);
+  box(B.flat, chestP[0], chestP[1], chestZ, 1.3, 2.0, 1.5, a, shirt);
   const waistP = P(lean * 0.4, 0, HIP_Z + 2.6);
-  box(B.flat, waistP[0], waistP[1], HIP_Z + 2.6, 1.32, 1.95, 1.15, a, shirt);
+  box(B.flat, waistP[0], waistP[1], HIP_Z + 2.6, 1.22, 1.75, 1.15, a, shirt);
   // Modular tactical gear (player + crew only): olive vest slabs, khaki
   // pouches, shoulder pads in darkened shirt, slung long gun on the back
   // when not aiming.
@@ -1289,17 +1418,17 @@ function buildFigure(gl, game, B, o) {
     const OLIVE = lin([86, 93, 63]), OLIVE_D = lin([57, 64, 45]), KHAKI = lin([139, 138, 103]);
     const midZ = (HIP_Z + SHO_Z) / 2, midLean = lean * 0.55;
     const vf = P(midLean + 1.78, 0, midZ), vb = P(midLean - 1.78, 0, midZ);
-    box(B.flat, vf[0], vf[1], vf[2], 0.30, 1.75, 1.85, a, OLIVE);
-    box(B.flat, vb[0], vb[1], vb[2], 0.30, 1.75, 1.85, a, OLIVE);
-    for (const px of [-1.3, 0, 1.3]) {
+    box(B.flat, vf[0], vf[1], vf[2], 0.30, 1.55, 1.85, a, OLIVE);
+    box(B.flat, vb[0], vb[1], vb[2], 0.30, 1.55, 1.85, a, OLIVE);
+    for (const px of [-1.05, 0, 1.05]) {
       const pp = P(midLean + 2.16, px, HIP_Z + 1.6);
       box(B.flat, pp[0], pp[1], pp[2], 0.34, 0.5, 0.7, a, KHAKI);
     }
     for (const sx of [1, -1]) {
       const st = P(lean * 0.85, sx * 1.35, SHO_Z - 0.3);
       box(B.flat, st[0], st[1], st[2], 1.7, 0.42, 0.28, a, OLIVE_D);
-      const pd = P(lean, sx * 2.55, SHO_Z - 0.1);
-      box(B.flat, pd[0], pd[1], pd[2], 1.5, 0.95, 0.48, a, lin(o.shirt.map((v) => v * 0.62)));
+      const pd = P(lean, sx * 2.22, SHO_Z - 0.1);
+      box(B.flat, pd[0], pd[1], pd[2], 1.5, 0.82, 0.48, a, lin(o.shirt.map((v) => v * 0.62)));
     }
     if (pose !== 'aim') {
       const sg = P(-2.3, 0, (HIP_Z + SHO_Z) / 2 + 0.5);
@@ -1328,19 +1457,20 @@ function buildFigure(gl, game, B, o) {
   // over the forehead. Spike stock is thick (r 0.52 → 0.06) so the points
   // survive the contact-sheet thumbnail instead of vanishing.
   const capP = P(lean + 0.18, 0, 14.68);
-  box(B.flat, capP[0], capP[1], capP[2], 1.54, 1.46, 0.32, a, hair);
+  box(B.flat, capP[0], capP[1], capP[2], 1.54, 1.3, 0.32, a, hair);
   const cap2P = P(lean + 0.14, 0, 15.04);
-  box(B.flat, cap2P[0], cap2P[1], cap2P[2], 1.30, 1.24, 0.22, a, hair);
+  box(B.flat, cap2P[0], cap2P[1], cap2P[2], 1.30, 1.12, 0.22, a, hair);
   const backP = P(lean + 0.25 - 1.44, 0, 14.4);
-  box(B.flat, backP[0], backP[1], backP[2], 0.3, 1.42, 0.85, a, hair);
+  box(B.flat, backP[0], backP[1], backP[2], 0.3, 1.28, 0.85, a, hair);
   for (const sx of [1, -1]) {
-    const lk = P(lean + 0.3, sx * 1.42, 14.05);
+    const lk = P(lean + 0.3, sx * 1.28, 14.05);
     box(B.flat, lk[0], lk[1], lk[2], 1.05, 0.24, 0.8, a, hair);
   }
   // Phase 3: spike tips capped at 15.45 — head top (15.1) + 0.35, inside
   // the +0.4 silhouette allowance (the Phase 2 tips reached ≈16.15).
+  // Phase 8: lateral spike reach 1.5 → 1.28 (bulk), tips' heights exact.
   const spikeBase = [[0.75, 0, 15.0], [0.15, 0.8, 15.0], [0.15, -0.8, 15.0], [-0.55, 0.45, 15.0], [-0.55, -0.45, 15.0], [1.15, 0.55, 14.75], [1.15, -0.55, 14.75]];
-  const spikeTip = [[1.85, 0.1, 15.45], [0.75, 1.5, 15.28], [0.75, -1.5, 15.28], [-1.45, 0.75, 15.38], [-1.45, -0.75, 15.38], [2.05, 0.7, 14.95], [2.05, -0.7, 14.95]];
+  const spikeTip = [[1.85, 0.1, 15.45], [0.75, 1.28, 15.28], [0.75, -1.28, 15.28], [-1.45, 0.75, 15.38], [-1.45, -0.75, 15.38], [2.05, 0.7, 14.95], [2.05, -0.7, 14.95]];
   for (let i = 0; i < spikeBase.length; i++) {
     const b0 = P(lean + 0.25 + spikeBase[i][0], spikeBase[i][1], spikeBase[i][2]);
     const b1 = P(lean + 0.25 + spikeTip[i][0], spikeTip[i][1], spikeTip[i][2]);
@@ -1348,7 +1478,7 @@ function buildFigure(gl, game, B, o) {
   }
   // Arms: upper 3.5 + forearm 3.3, slim, elbow joint volume at the bend.
   for (const sideSign of [1, -1]) {
-    const sho = P(lean, sideSign * 2.3, SHO_Z - 0.2);
+    const sho = P(lean, sideSign * 2.02, SHO_Z - 0.2);
     let elbow, hand;
     if (pose === 'aim') {
       // Both hands ON the gun: trigger hand at the stock (+4.4), support
@@ -1358,12 +1488,12 @@ function buildFigure(gl, game, B, o) {
     } else if (pose === 'walk' || pose === 'run') {
       const amp = pose === 'run' ? 0.78 : 0.44;
       const sw = Math.sin(ph + (sideSign > 0 ? Math.PI : 0)) * amp;
-      elbow = P(lean + Math.sin(sw) * 3.5, sideSign * 2.48, SHO_Z - 0.2 - Math.cos(sw) * 3.5);
+      elbow = P(lean + Math.sin(sw) * 3.5, sideSign * 2.2, SHO_Z - 0.2 - Math.cos(sw) * 3.5);
       const sw2 = sw * 0.7 - 0.32;
-      hand = P(lean + Math.sin(sw) * 3.5 + Math.sin(sw2) * 3.3, sideSign * 2.48, SHO_Z - 0.2 - Math.cos(sw) * 3.5 - Math.cos(sw2) * 3.3);
+      hand = P(lean + Math.sin(sw) * 3.5 + Math.sin(sw2) * 3.3, sideSign * 2.2, SHO_Z - 0.2 - Math.cos(sw) * 3.5 - Math.cos(sw2) * 3.3);
     } else {
-      elbow = P(lean + 0.5, sideSign * 2.48, SHO_Z - 3.7);
-      hand = P(lean + 1.2, sideSign * 2.38, SHO_Z - 6.9);
+      elbow = P(lean + 0.5, sideSign * 2.2, SHO_Z - 3.7);
+      hand = P(lean + 1.2, sideSign * 2.12, SHO_Z - 6.9);
     }
     limb(B.flat, sho, elbow, 0.78, 0.64, shirt, 7);
     ball(B.flat, elbow[0], elbow[1], elbow[2], 0.66, shirt);
@@ -1421,6 +1551,33 @@ function buildFigures(gl, game, B) {
 }
 
 // ------------------------------------------------- vegetation & street props
+// ONE bus-stop builder (Phase 8): shelter (4 posts, flat roof, glass
+// back, bench) + sign pole with a two-sided BUS / AMBER LINE panel.
+// face = unit vector toward the road; the shelter opens toward it.
+function buildBusStop(gl, B, x, y, face) {
+  const WOOD = lin([122, 94, 66]), IRON = lin([40, 42, 48]);
+  const s = [-face[1], face[0]];
+  const yaw = Math.atan2(s[1], s[0]);
+  const LP = (lat, dep, z) => [x + s[0] * lat + face[0] * dep, y + s[1] * lat + face[1] * dep, z];
+  for (const la of [-5.5, 5.5]) for (const de of [1.6, -2.0]) {
+    const p = LP(la, de, 0);
+    box(B.flat, p[0], p[1], 4.4, 0.5, 0.5, 4.4, yaw, IRON);
+  }
+  const rc = LP(0, -0.2, 0);
+  box(B.flat, rc[0], rc[1], 9.2, 7.6, 2.8, 0.45, yaw, lin([70, 74, 82]));
+  B.alpha.quad(LP(-6.8, -2.2, 1.2), LP(6.8, -2.2, 1.2), LP(6.8, -2.2, 8.6), LP(-6.8, -2.2, 8.6), [...lin([180, 200, 210]), 0.32]);
+  const bc = LP(0, -0.8, 0);
+  box(B.flat, bc[0], bc[1], 2.3, 5.6, 1.5, 0.5, yaw, WOOD);
+  for (const la of [-4.2, 4.2]) { const lp2 = LP(la, -0.8, 0); box(B.flat, lp2[0], lp2[1], 1.0, 0.45, 0.45, 1.0, yaw, IRON); }
+  const poleBase = LP(7.6, 2.2, 0), poleTop = LP(7.6, 2.2, 11.5);
+  limb(B.flat, poleBase, poleTop, 0.35, 0.35, IRON, 5);
+  // Sign panel PERPENDICULAR to the kerb (spanning the face axis, normal
+  // along the street) — real stop signs face along-street traffic; a
+  // road-facing panel is edge-on to every chase/board camera. Two quads
+  // back-to-back across the pole, each unmirrored from its own side.
+  B.bus.quad(LP(7.48, -1.3, 7.3), LP(7.48, 5.7, 7.3), LP(7.48, 5.7, 12.3), LP(7.48, -1.3, 12.3), WHITE, [1, 0, 0, 1]);
+  B.bus.quad(LP(7.72, 5.7, 7.3), LP(7.72, -1.3, 7.3), LP(7.72, -1.3, 12.3), LP(7.72, 5.7, 12.3), WHITE, [1, 0, 0, 1]);
+}
 function buildVegetation(gl, game, B) {
   const camX = F.cam[0], camY = F.cam[1];
   const inR = (x, y, r) => { const dx = x - camX, dy = y - camY; return dx * dx + dy * dy < r * r; };
@@ -1509,6 +1666,13 @@ function buildVegetation(gl, game, B) {
   // and the occasional bus shelter — deterministic per road/block, kept
   // clear of intersections and of any actor.
   const WOOD = lin([122, 94, 66]), IRON = lin([40, 42, 48]);
+  // Fixed named stops (Phase 8, world dressing like the radio tower —
+  // the same in live play and every frame): Gazette Ave south sidewalk,
+  // Gazette Plaza south sidewalk, Ocean Drive west promenade. Each was
+  // checked clear of the staged actors in the judged frames.
+  if (inR(1330, 1512, 1080)) buildBusStop(gl, B, 1330, 1512, [0, -1]);
+  if (inR(800, 1044, 1080)) buildBusStop(gl, B, 800, 1044, [0, -1]);
+  if (inR(3650, 2620, 1080)) buildBusStop(gl, B, 3650, 2620, [1, 0]);
   const centers = roadCenters();
   const actorNear = (x, y, r) => {
     const all = [...game.traffic, ...(game.specials || []), ...game.police.cops, game.player];
@@ -1524,16 +1688,8 @@ function buildVegetation(gl, game, B) {
           if (!inR(bx, by, 820) || actorNear(bx, by, 26)) continue;
           const h = hash01(c * 1.3 + k * 7.7 + sideSign * 31 + (vert ? 0 : 500));
           if (h < 0.34) {
-            // Bus shelter: two posts, a flat roof, a glass back panel, bench.
-            for (const e of [-6, 6]) {
-              const px = vert ? bx : bx + e, py = vert ? by + e : by;
-              box(B.flat, px, py, 4.4, 0.5, 0.5, 4.4, 0, IRON);
-            }
-            box(B.flat, bx, by, 9.2, vert ? 2.6 : 7.6, vert ? 7.6 : 2.6, 0.45, 0, lin([70, 74, 82]));
-            const gx = vert ? bx + (off > 0 ? 2.4 : -2.4) : bx, gy = vert ? by : by + (off > 0 ? 2.4 : -2.4);
-            if (vert) B.alpha.quad([gx, gy - 6.8, 1.2], [gx, gy + 6.8, 1.2], [gx, gy + 6.8, 8.6], [gx, gy - 6.8, 8.6], [...lin([180, 200, 210]), 0.32]);
-            else B.alpha.quad([gx - 6.8, gy, 1.2], [gx + 6.8, gy, 1.2], [gx + 6.8, gy, 8.6], [gx - 6.8, gy, 8.6], [...lin([180, 200, 210]), 0.32]);
-            box(B.flat, bx, by, 2.3, vert ? 1.5 : 5.6, vert ? 5.6 : 1.5, 0.5, 0, WOOD);
+            // Bus shelter — the ONE canonical builder, facing the road.
+            buildBusStop(gl, B, bx, by, vert ? [-Math.sign(off), 0] : [0, -Math.sign(off)]);
           } else if (h < 0.78) {
             // Bench facing the road.
             box(B.flat, bx, by, 2.3, vert ? 1.6 : 4.6, vert ? 4.6 : 1.6, 0.5, 0, WOOD);
@@ -1660,11 +1816,13 @@ function renderGL(gl, ctx, game) {
   gl.skyMat.uniforms.mid.value.copy(linColor(grade.mid));
   gl.skyMat.uniforms.hor.value.copy(linColor(grade.hor));
   gl.skyMat.uniforms.sunCol.value.copy(linColor(grade.sun));
+  gl.skyMat.uniforms.haze.value.copy(linColor(grade.fog));
   gl.hemi.intensity = 1.02 * grade.light;
   gl.sun.intensity = 1.85 * grade.light;
   gl.sun.color.copy(linColor(grade.sun));
   gl.mats.fwarm.emissiveIntensity = grade.emissive;
   gl.mats.fcool.emissiveIntensity = grade.emissive;
+  gl.mats.foffice.emissiveIntensity = grade.emissive;
   gl.mats.glass.emissiveIntensity = grade.emissive * 0.8;
   gl.mats.shop.emissiveIntensity = grade.emissive * 0.75;
   // Sun: low in the west, shadow frustum fitted to the camera focus.
@@ -1678,7 +1836,7 @@ function renderGL(gl, ctx, game) {
     flat: new Batch(), basic: new Batch(), alpha: new Batch(true, true),
     asphalt: new Batch(true), concrete: new Batch(true), sandgrass: new Batch(true),
     roof: new Batch(true), fwarm: new Batch(true), fcool: new Batch(true),
-    glass: new Batch(true), shop: new Batch(true), sign: new Batch(true), plate: new Batch(true),
+    glass: new Batch(true), shop: new Batch(true), sign: new Batch(true), plate: new Batch(true), bus: new Batch(true), foffice: new Batch(true),
   };
   buildGround(gl, game, B);
   buildSkyline(gl, game, B);
@@ -1707,11 +1865,13 @@ function renderGL(gl, ctx, game) {
   addMesh(B.roof, M.roof, M.idBlack, true, true);
   addMesh(B.fwarm, M.fwarm, M.idBlack, true, true);
   addMesh(B.fcool, M.fcool, M.idBlack, true, true);
+  addMesh(B.foffice, M.foffice, M.idBlack, true, true);
   addMesh(B.glass, M.glass, M.idBlack, true, true);
   addMesh(B.shop, M.shop, M.idBlack, true, true);
   addMesh(B.basic, M.basic, M.idFlat, false, false);
   addMesh(B.sign, M.sign, M.idBlack, false, false);
   addMesh(B.plate, M.plate, M.idBlack, false, false);
+  addMesh(B.bus, M.bus, M.idBlack, false, false);
   if (!IDMODE) addMesh(B.alpha, M.alpha, M.idBlack, false, false);
   gl.renderer.render(gl.scene, cam);
   composite(ctx, gl, grade, IDMODE);
