@@ -14,7 +14,7 @@ import { makeCar, makeTank, makePlane } from './cars.js';
 import { weaponById, buildWeapon, WEAPON_CLASSES, weaponsByClass } from './arsenal.js';
 import { makeCamera, updateCamera, renderGame } from './render.js';
 import { projectPoint } from './view3d.js';
-import { drawHud, drawTitle, drawWasted, drawPause, drawSummary, drawPlanning, drawWeaponWheel } from './hud.js';
+import { drawHud, drawTitle, drawWasted, drawPause, drawSummary, drawPlanning, drawWeaponWheel, drawMapScreen } from './hud.js';
 import { applyShot } from './shots.js';
 import { Radio } from './radio.js';
 import { defaultPlan, planStats, settlePlan, weaponForPlan, decayIntervalForPlan, entrySpawn, cycleEntry, cycleGetaway, cycleTime, toggleCrew, toggleGear, crewById, getawayById, GEAR_POOL, cycleWeapon } from './planning.js';
@@ -664,8 +664,16 @@ export function updateGame(game, dt) {
     input.endFrame();
     return;
   }
+  if (game.screen === 'map') {
+    // Pause map/stats: the street holds (no systems advance, like the
+    // pause screen) and M returns to the exact moment it was opened.
+    if (input.wasPressed('KeyM')) { game.screen = 'play'; }
+    input.endFrame();
+    return;
+  }
   // Play.
   game.playTime += dt;
+  if (input.wasPressed('KeyM')) { game.screen = 'map'; input.endFrame(); return; }
   if (input.wasPressed('KeyP')) { game.screen = 'paused'; game.help = false; input.endFrame(); return; }
   if (input.wasPressed('KeyH')) { game.screen = 'paused'; game.help = true; input.endFrame(); return; }
   if (input.wasPressed('KeyE')) tryEnterExit(game);
@@ -733,11 +741,21 @@ function boot() {
       let elapsed = Math.min(0.12, (ts - last) / 1000); last = ts; acc += elapsed;
       while (acc >= 1 / 60) { updateGame(game, 1 / 60); acc -= 1 / 60; }
       ctx.clearRect(0, 0, VIEW_W, VIEW_H);
-      renderGame(ctx, game);
+      // Title vista (shots.js stages game.titleVista + planTarget): the
+      // renderer's only elevated camera is its planning orbit, so the
+      // title's world pass is rendered through that framing and the
+      // screen state is restored before any overlay draws — game logic,
+      // the frozen-frame cache and drawTitle all still see 'title'.
+      if (game.screen === 'title' && game.titleVista && game.planTarget) {
+        game.screen = 'planning';
+        renderGame(ctx, game);
+        game.screen = 'title';
+      } else renderGame(ctx, game);
       if (game.screen === 'play' || game.screen === 'paused') drawHud(ctx, game);
       if (game.wheelOpen && game.screen === 'play') drawWeaponWheel(ctx, game);
       if (game.screen === 'planning') drawPlanning(ctx, game);
       if (game.screen === 'summary') drawSummary(ctx, game);
+      if (game.screen === 'map') drawMapScreen(ctx, game);
       if (game.screen === 'title') { drawHudTitleSafe(ctx, game); }
       if (game.screen === 'wasted') drawWasted(ctx, game);
       if (game.screen === 'paused') drawPause(ctx, game, game.help);

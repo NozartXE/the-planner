@@ -1,4 +1,4 @@
-// shots.js — deterministic staging for screenshots: ?shot=title|chase|mission|results runs the real
+// shots.js — deterministic staging for screenshots: ?shot=title|chase|mission|results|map runs the real
 // simulation first, then sets one explicit, coherent mid-chain state per shot and freezes it.
 // Everything that appears on screen (money, stars, mission, speeds, crowds, cops, effects) is set
 // AFTER the run steps, so a re-capture is byte-identical and nothing drifts between frames.
@@ -164,47 +164,54 @@ export function applyShot(game, name, step) {
   // Staged prop reset (Top-3 rebuild Phase 2): only the chase staging
   // sets a scooter; every other shot renders without one.
   game.stagedScooter = null;
+  // Phase 4: only the title staging raises the vista flag (main.js
+  // renders that one world pass through the elevated orbit framing).
+  game.titleVista = false;
   // Phase 3: only the mission staging sets a helicopter; every other
   // shot renders without one.
   game.stagedHeli = null;
   if (name === 'title') {
-    // Hero cruising the beachfront at the east edge, heading NORTH in the chase cam:
-    // art-deco facades front the sand on the left of the frame, the sand strip, teal
-    // water and an anchored boat fill the right, palms line the promenade.
-    // Staging note (measured from the generated city): Ocean Drive's east lane is
-    // built over by the eastern column's east plots (their east edges reach
-    // x ≈ 3742–3750 of the 3668–3760 road), so a car ON the asphalt there sits
-    // inside a building footprint and the chase cam frames a wall. The hero is
-    // therefore staged on the sand strip immediately east of Ocean Drive — the
-    // only framing that holds deco facades one side and open ocean the other.
-    // The drawTitle overlay owns the centre; the coast streams past behind it.
+    // Phase 4 restage (D5): a TITLE VISTA, not a street frame. The
+    // renderer has exactly one elevated camera — the planning orbit
+    // (235 units out, 105 up, looking at planTarget) — so the staging
+    // raises game.titleVista and main.js renders the title's world
+    // pass through that framing: the camera hangs 105 up WEST of the
+    // crossing at (1456, 986) and looks EAST down the avenue's road
+    // corridor, so lit streets run through the frame and the skyline
+    // closes it. The hero coupe + player figure stand on the avenue
+    // ~160 units from the camera (a ground point 95 out projected at
+    // the frame's bottom edge; at ~160 it sits fully inside the lower
+    // foreground), facing east into the city. The first staging —
+    // a diagonal orbit over the Gazette intersection — put a single
+    // building corner across the whole frame; the corridor framing
+    // is the fix. The drawTitle overlay owns the centre.
     game.screen = 'title';
     run(150);
     game.screen = 'title';
-    // Phase 3 grade (D6): the title cruises at NIGHT — deep blue sky,
+    // Phase 3 grade (D6): the title renders at NIGHT — deep blue sky,
     // moonlight, lit windows and streetlight pools behind the logo.
     game.timeGrade = 'night';
-    // Re-staged ON Ocean Drive itself at the park block (bx 7, by 5 — the same
-    // verified stretch the results shot uses): the hero drives the road, deco
-    // facades and park trees to the west, sand, water and boats to the east,
-    // traffic in both lanes and peds on both sidewalks in one lived-in frame.
-    // Hero at the park's south edge: the camera (84 behind, in the open
-    // block south of the park) looks down the whole clear park stretch —
-    // trees sit 250+ units ahead at mid-ground size instead of filling the
-    // foreground, and deco facades close the vanishing point.
-    putPlayerInCar(game, game.traffic[0], 3714, 2791, -Math.PI / 2, 55, { kind: 'coupe', color: '#b8523f' });
-    setCar(game.traffic[1], 3693, 2400, Math.PI / 2, 40);
-    setCar(game.traffic[2], 3714, 2330, -Math.PI / 2, 50);
-    setCar(game.traffic[3], 3693, 2050, Math.PI / 2, 0);
-    setCar(game.traffic[4], 3222, 1007, 0, 80);
-    stagePed(game, 0, 3660, 2650, -Math.PI / 2, 1.1, 0);
-    stagePed(game, 1, 3786, 2600, Math.PI, 3.4, 1);
-    stagePed(game, 2, 3662, 2500, -Math.PI / 2, 5.2, 2);
-    stagePed(game, 3, 3792, 2450, Math.PI / 2, 2.2, 3);
-    stagePed(game, 4, 3658, 2720, -Math.PI / 2, 4.1, 1);
+    game.titleVista = true;
+    game.planTarget = { x: 1456, y: 986 };
+    game.planOrbitAngle = Math.PI; // camera at (1221, 986), 105 up, looking east
+    game.player.inCar = false; game.player.car = null;
+    game.player.x = 1382; game.player.y = 966; game.player.angle = 0.3;
+    game.player.walkPhase = 1.1; game.player.vx = 0; game.player.vy = 0; game.player.hp = 100;
+    setCar(game.traffic[0], 1395, 1000, 0, 0, { kind: 'coupe', color: '#b8523f' });
+    game.traffic[0].occupiedByPlayer = false;
+    // Lit streets below: traffic on the avenue and the crossing road.
+    setCar(game.traffic[1], 1700, 1009, 0, 45, { kind: 'sedan', color: '#5f7a6a' });
+    setCar(game.traffic[2], 1850, 963, Math.PI, 45, { kind: 'hatch', color: '#a8835a' });
+    setCar(game.traffic[3], 1477, 760, -Math.PI / 2, 40, { kind: 'sedan', color: '#7a8a99' });
+    setCar(game.traffic[4], 1435, 1230, Math.PI / 2, 40, { kind: 'coupe', color: '#8a4a5a' });
+    for (let i = 5; i < game.traffic.length; i++) setCar(game.traffic[i], 3300 + i * 10, 3300, 0, 0);
+    stagePed(game, 0, 1430, 925, 0.4, 1.2, 0);
+    stagePed(game, 1, 1490, 1048, -0.6, 3.0, 1);
+    stagePed(game, 2, 1330, 1040, 2.6, 5.0, 2);
+    stagePed(game, 3, 1560, 930, -2.2, 2.2, 3);
     game.police.cops = [];
     game.police.setStars(0, game.nowMs);
-    game.bullets = []; game.fx.particles = []; game.toasts = [];
+    game.bullets = []; game.fx.particles = []; game.fx.skids = []; game.toasts = [];
     finish(game);
     return true;
   }
@@ -673,6 +680,64 @@ export function applyShot(game, name, step) {
     // The wheel is CLOSED on this frame — its proof lives on the board.
     game.wheelOpen = false; game.wheelClass = 5; game.wheelIndex = 0;
     game.toasts = [];
+    finish(game);
+    return true;
+  }
+  if (name === 'map') {
+    // Phase 4 (D5): the pause Map screen over a staged mid-chain DUSK
+    // scene — the same chain story the other frames tell, one job
+    // later than the mission frame's street moment: jobs 1-3 are
+    // banked (their established nets 400 + 700 + 900 = $2,000 on top
+    // of the $250 start = $2,250 cash), job 4 (Two Drops) is under
+    // way at dropA with its plan executed — the grab is done, Dex is
+    // on the street, and the wanted level IS that plan's forecast
+    // (planStats heat 2.8 -> 3 stars, 3 units staged). Every number
+    // the Map screen prints is this state's own field: money,
+    // totalEarned, missionsCompleted, the first three settlements'
+    // REP, and planStats(3, STAGED_PLAN_J4) recomputed live by hud.js.
+    game.screen = 'play';
+    run(150);
+    game.screen = 'play';
+    game.timeGrade = 'dusk';
+    game.plan = { ...STAGED_PLAN_J4, crew: [...STAGED_PLAN_J4.crew], gear: [...STAGED_PLAN_J4.gear] };
+    game.planStatsCache = planStats(3, game.plan, 0);
+    putPlayerInCar(game, game.traffic[0], 1200, 1477, 0, 120, { kind: 'sedan', color: '#7a4a3a' });
+    game.traffic[0].name = 'VANTARO SEDAN'; // the plan's getaway, by name
+    setCar(game.traffic[1], 1650, 1468, 0, 40, { kind: 'sedan', color: '#5f7a6a' });
+    setCar(game.traffic[2], 1850, 1490, Math.PI, 0, { kind: 'hatch', color: '#a8835a' });
+    for (let i = 3; i < game.traffic.length; i++) setCar(game.traffic[i], 3300 + i * 10, 3300, 0, 0);
+    game.police.cops = [];
+    const mc1 = addCop(game, 1080, 1460, 0); mc1.speed = 120;
+    const mc2 = addCop(game, 1112, 1505, 0.1); mc2.speed = 120;
+    const mc3 = addCop(game, 1018, 1477, -0.05); mc3.speed = 120;
+    game.police.assignTactics(game.player);
+    game.police.lastSeenX = game.player.x; game.police.lastSeenY = game.player.y;
+    game.police.setStars(game.planStatsCache.heatStars, game.nowMs);
+    stagePed(game, 0, 1500, 1512, Math.PI, 2.4, 1);
+    stagePed(game, 1, 1600, 1396, 0, 1.5, 3);
+    stagePed(game, 2, 1350, 1512, 0, 4.0, 2);
+    game.money = 2250;
+    game.totalEarned = 2000;
+    game.missionsCompleted = 3;
+    game.chainsFinished = 0;
+    game.jobsThisChain = 3;
+    game.chainEarned = 2000;
+    game.carsStolen = 3;
+    game.timesWasted = 0;
+    game.bestEscapeMs = 52000;
+    game.jobEarnings = [
+      { title: 'First Run', pay: 400 }, { title: 'Borrowed Wheels', pay: 700 },
+      { title: 'Front Page', pay: 900 },
+    ];
+    game.chainLedger = [0, 1, 2].map((i) => settlePlan(i, { entry: 0, crew: ['dex', 'milo'], gear: ['duffels'], getaway: 'armored', timeOfDay: 'golden' }, jobPlanData(i).gross));
+    game.rep = game.chainLedger.reduce((s, l) => s + l.repGain, 0);
+    setMission(game, 3, 'dropA', 96);
+    game.missions.lootGrabbed = game.planStatsCache.loot;
+    game.weapon = weaponForPlan(game.plan);
+    game.crewMate = { id: 'dex', name: 'DEX RUIZ', color: '#e8c832', x: 1150, y: 1512, angle: 0.4, walkPhase: 0.6, pose: 'stand' };
+    game.player.hp = 100;
+    game.bullets = []; game.fx.particles = []; game.toasts = [];
+    game.screen = 'map';
     finish(game);
     return true;
   }

@@ -1,6 +1,6 @@
 // hud.js — money, wanted stars, health, mission line and timer, rectangular
 // GTA-style minimap stack, toasts and the menu screens.
-import { VIEW_W, VIEW_H, WORLD_SIZE, PALETTE, BLOCK_PITCH, ROAD_W } from './config.js';
+import { VIEW_W, VIEW_H, WORLD_SIZE, PALETTE, BLOCK_PITCH, ROAD_W, PLACES } from './config.js';
 import { roadCenters, nearestRoadCenter } from './city.js';
 import { clamp } from './rng.js';
 import { CHAIN } from './missions.js';
@@ -237,25 +237,56 @@ export function drawMinimap(ctx, game) {
   ];
   ctx.save();
   ctx.beginPath(); ctx.rect(mapX, mapY, mapW, mapH); ctx.clip();
-  ctx.fillStyle = '#7e8287'; ctx.fillRect(mapX, mapY, mapW, mapH); // grey land
-  ctx.fillStyle = 'rgba(96,128,78,0.55)'; // parks, muted green
+  // Street network (D9): the SAME cartography data path drawDistrictMap
+  // uses — the pale road base is the street surface, and every city
+  // block is filled over it at its true pitch, so the gaps between the
+  // block fills ARE the roads, at true road width. Block tints cycle
+  // exactly as the district map's do; parks, the two sites and the
+  // individual building footprints (the buildMinimapBase density) sit
+  // on top, then a thin centre line down each road centre sharpens the
+  // network. The grey-block schematic is gone.
+  ctx.fillStyle = '#e9e9e4'; ctx.fillRect(mapX, mapY, mapW, mapH); // road surface
+  const blockTints = ['#cbb894', '#c2ad87', '#d2bf9c', '#c9bb9e'];
+  for (let by = 0; by < 8; by++) for (let bx = 0; bx < 8; bx++) {
+    const bx0 = cx + (bx * BLOCK_PITCH + ROAD_W - px) * scale, by0 = cy + (by * BLOCK_PITCH + ROAD_W - py) * scale;
+    const bw = (BLOCK_PITCH - ROAD_W) * scale;
+    if (bx0 + bw < mapX || bx0 > mapX + mapW || by0 + bw < mapY || by0 > mapY + mapH) continue;
+    ctx.fillStyle = blockTints[(bx + by * 3) % 4];
+    ctx.fillRect(bx0, by0, bw, bw);
+  }
+  ctx.fillStyle = 'rgba(96,128,78,0.65)'; // parks, muted green
   for (const pk of game.city.parks) {
     const [x0, y0] = [cx + (pk.x - px) * scale, cy + (pk.y - py) * scale];
     ctx.fillRect(x0, y0, pk.w * scale, pk.h * scale);
   }
-  // The sea at the world's east edge, when the window reaches it.
+  if (game.city.sites) for (const st of game.city.sites) {
+    ctx.fillStyle = st.kind === 'airport' ? '#a9a294' : '#98987f';
+    ctx.fillRect(cx + (st.x - px) * scale, cy + (st.y - py) * scale, st.w * scale, st.h * scale);
+  }
+  ctx.fillStyle = 'rgba(110,84,58,0.55)'; // building footprints
+  for (const b of game.city.buildings) {
+    const bx0 = cx + (b.x - px) * scale, by0 = cy + (b.y - py) * scale;
+    if (bx0 + b.w * scale < mapX || bx0 > mapX + mapW || by0 + b.h * scale < mapY || by0 > mapY + mapH) continue;
+    ctx.fillRect(bx0, by0, Math.max(1.5, b.w * scale), Math.max(1.5, b.h * scale));
+  }
+  // The sea at the world's east edge, when the window reaches it, with
+  // its pale beach band on the shoreline itself.
   const seaX = cx + (WORLD_SIZE - px) * scale;
-  if (seaX < mapX + mapW) { ctx.fillStyle = 'rgba(61,143,163,0.75)'; ctx.fillRect(Math.max(mapX, seaX), mapY, mapW, mapH); }
-  // White road lines from the same street-grid data the old map drew:
-  // every road centre in the window, at true road width.
-  ctx.fillStyle = '#e9e9e4';
-  const rw = Math.max(3, ROAD_W * scale);
+  if (seaX < mapX + mapW) {
+    ctx.fillStyle = '#f4e3ae'; ctx.fillRect(Math.max(mapX, seaX - 2), mapY, 2, mapH);
+    ctx.fillStyle = 'rgba(61,143,163,0.85)'; ctx.fillRect(Math.max(mapX, seaX), mapY, mapW, mapH);
+  }
+  // Street centre lines: one thin line down every road centre in the
+  // window, from the same roadCenters() grid the route is drawn on.
+  ctx.strokeStyle = 'rgba(96,88,72,0.6)'; ctx.lineWidth = 1;
+  ctx.beginPath();
   for (const rc of roadCenters()) {
     const vx = cx + (rc - px) * scale;
-    if (vx + rw / 2 > mapX && vx - rw / 2 < mapX + mapW) ctx.fillRect(vx - rw / 2, mapY, rw, mapH);
+    if (vx > mapX && vx < mapX + mapW) { ctx.moveTo(vx, mapY); ctx.lineTo(vx, mapY + mapH); }
     const hy = cy + (rc - py) * scale;
-    if (hy + rw / 2 > mapY && hy - rw / 2 < mapY + mapH) ctx.fillRect(mapX, hy - rw / 2, mapW, rw);
+    if (hy > mapY && hy < mapY + mapH) { ctx.moveTo(mapX, hy); ctx.lineTo(mapX + mapW, hy); }
   }
+  ctx.stroke();
   const marker = game.missions.marker ? game.missions.marker() : null;
   // GPS route: a yellow polyline along the road grid from the player to
   // the objective — out to the nearest road, across to the objective's
@@ -288,6 +319,21 @@ export function drawMinimap(ctx, game) {
     ctx.beginPath(); ctx.moveTo(ox, oy - 5.5); ctx.lineTo(ox + 5.5, oy); ctx.lineTo(ox, oy + 5.5); ctx.lineTo(ox - 5.5, oy); ctx.closePath();
     ctx.fillStyle = marker.color === 'pickup' ? '#e8c832' : '#4fc96a'; ctx.fill();
     ctx.strokeStyle = 'rgba(20,18,14,0.8)'; ctx.lineWidth = 1; ctx.stroke();
+  }
+  // Safehouse marker: St. Sable Hospital is where the player wakes and
+  // respawns (main.js respawn + the save's spawn point) — a small white
+  // house glyph, drawn only while it is truly inside the window (never
+  // edge-pinned, so it cannot claim a direction it does not have).
+  {
+    const hx = cx + (PLACES.hospital.x - px) * scale, hy = cy + (PLACES.hospital.y - py) * scale;
+    if (hx > mapX + 8 && hx < mapX + mapW - 8 && hy > mapY + 8 && hy < mapY + mapH - 8) {
+      ctx.beginPath();
+      ctx.moveTo(hx, hy - 6); ctx.lineTo(hx + 5.5, hy - 1); ctx.lineTo(hx + 3.6, hy - 1);
+      ctx.lineTo(hx + 3.6, hy + 5); ctx.lineTo(hx - 3.6, hy + 5); ctx.lineTo(hx - 3.6, hy - 1);
+      ctx.lineTo(hx - 5.5, hy - 1); ctx.closePath();
+      ctx.fillStyle = '#ffffff'; ctx.fill();
+      ctx.strokeStyle = 'rgba(20,18,14,0.85)'; ctx.lineWidth = 1.1; ctx.stroke();
+    }
   }
   // Player arrow at the centre, white with a dark edge so it reads on the
   // pale roads.
@@ -353,7 +399,7 @@ export function drawMinimap(ctx, game) {
 // teal ocean, pale beach band, light road network) drawn over OUR OWN city
 // geography — the real road grid, the job's target, and the escape route
 // from target to delivery as a dashed amber line. Airport + base marked.
-export function drawDistrictMap(ctx, game, x, y, w, h) {
+export function drawDistrictMap(ctx, game, x, y, w, h, opts) {
   ctx.save();
   ctx.beginPath(); ctx.roundRect(x, y, w, h, 6); ctx.clip();
   ctx.fillStyle = '#3d8fa3'; ctx.fillRect(x, y, w, h); // teal ocean field
@@ -379,20 +425,35 @@ export function drawDistrictMap(ctx, game, x, y, w, h) {
     ctx.beginPath(); ctx.moveTo(x, ryp); ctx.lineTo(x + w, ryp); ctx.stroke();
   }
   ctx.fillStyle = '#f4e3ae'; ctx.fillRect(x + w * 0.985 - 3, y, 3, h); // beach band
-  // Escape route: target (pickup) -> delivery, dashed amber over the grid.
+  // Escape route: the job's real waypoint chain — pickup, then each
+  // drop in order, then the delivery — dashed amber over the grid.
+  // (Two Drops has drops and no single deliver field; the old two-point
+  // version degenerated to a dot for it.)
   const def = CHAIN[game.missions.index % CHAIN.length];
-  const from = def.pickup || def.deliver, to = def.deliver || def.pickup;
-  if (from && to) {
+  const routePts = [];
+  if (def.pickup) routePts.push(def.pickup);
+  if (def.drops) for (const d of def.drops) routePts.push(d);
+  if (def.deliver && !def.drops) routePts.push(def.deliver);
+  if (!def.pickup && def.deliver) routePts.push(def.deliver);
+  if (routePts.length > 1) {
+    const from = routePts[0], to = routePts[routePts.length - 1];
     ctx.strokeStyle = '#e8930c'; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
-    ctx.beginPath(); ctx.moveTo(sx(from.x), sy(from.y)); ctx.lineTo(sx(to.x), sy(to.y)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(sx(from.x), sy(from.y));
+    for (let i = 1; i < routePts.length; i++) ctx.lineTo(sx(routePts[i].x), sy(routePts[i].y));
+    ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = '#e8c832'; ctx.beginPath(); ctx.arc(sx(from.x), sy(from.y), 4.4, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = '#7a5c10'; ctx.lineWidth = 1.4; ctx.stroke();
     ctx.fillStyle = '#4fc96a'; ctx.beginPath(); ctx.arc(sx(to.x), sy(to.y), 4.4, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = '#1d5c2e'; ctx.stroke();
   }
-  ctx.fillStyle = 'rgba(38,30,18,0.85)'; ctx.font = '700 8.5px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-  ctx.fillText('AMBER FIELD', sx(2912) + 2, sy(2912) + 2);
-  ctx.fillText('FORT SABLE', sx(562) + 2, sy(2912) + 2);
+  // Site labels: the board's small map keeps its standing 8.5 px pair;
+  // the pause Map screen passes bigLabels and draws its own 12 px bold
+  // labels over the same points instead (D10 legibility floor).
+  if (!(opts && opts.bigLabels)) {
+    ctx.fillStyle = 'rgba(38,30,18,0.85)'; ctx.font = '700 8.5px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('AMBER FIELD', sx(2912) + 2, sy(2912) + 2);
+    ctx.fillText('FORT SABLE', sx(562) + 2, sy(2912) + 2);
+  }
   ctx.restore();
   ctx.strokeStyle = 'rgba(255,214,170,0.25)'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.roundRect(x, y, w, h, 6); ctx.stroke();
@@ -447,24 +508,28 @@ export function drawWeaponWheel(ctx, game, cx = VIEW_W / 2, cy = VIEW_H / 2, R =
 }
 
 export function drawTitle(ctx, game) {
-  ctx.fillStyle = 'rgba(30,12,10,0.26)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  // Night grade (Phase 3 staged the title at night; Phase 4 copy fix):
+  // a deep blue dim over the vista instead of the old warm wash, and the
+  // logotype re-graded for it — the same AMBER COAST lettering, softer
+  // amber + muted rose with a restrained glow, no extra saturation.
+  ctx.fillStyle = 'rgba(8,10,26,0.30)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#ffb37a'; ctx.font = '700 58px system-ui, sans-serif';
-  ctx.shadowColor = '#ff8a5c'; ctx.shadowBlur = 18;
+  ctx.fillStyle = '#ffc38a'; ctx.font = '700 58px system-ui, sans-serif';
+  ctx.shadowColor = 'rgba(255,150,80,0.85)'; ctx.shadowBlur = 16;
   ctx.fillText('A M B E R', VIEW_W / 2, 238);
-  ctx.fillStyle = '#f28bb4'; ctx.shadowColor = '#f28bb4';
+  ctx.fillStyle = '#e8a0bf'; ctx.shadowColor = 'rgba(232,160,191,0.8)';
   ctx.fillText('C O A S T', VIEW_W / 2, 302);
   ctx.shadowBlur = 0;
   ctx.fillStyle = PALETTE.hudText; ctx.font = '16px system-ui, sans-serif';
-  ctx.fillText('A palm-lined coastal city at golden hour: steal cars, run jobs for fixer Dario Venn, outrun the law.', VIEW_W / 2, 344);
+  ctx.fillText('A palm-lined coastal city after dark: steal cars, run jobs for fixer Dario Venn, outrun the law.', VIEW_W / 2, 344);
   ctx.font = '15px system-ui, sans-serif'; ctx.fillStyle = '#e8d9c4';
   ctx.fillText('WASD / arrows — move & drive      E — enter / exit car      Space — shoot / handbrake', VIEW_W / 2, 402);
-  ctx.fillText('Shift — sprint      P — pause      H — help      R — radio', VIEW_W / 2, 428);
+  ctx.fillText('Shift — sprint      P — pause      M — map & career      H — help      R — radio', VIEW_W / 2, 428);
   ctx.fillStyle = '#f2c14e'; ctx.font = '700 19px system-ui, sans-serif';
   ctx.fillText('Press ENTER to start', VIEW_W / 2, 486);
   ctx.fillStyle = PALETTE.hudMuted; ctx.font = '14px system-ui, sans-serif';
   const s = game.saveData;
-  ctx.fillText(s.missionsCompleted > 0 ? `Saved progress: $${Math.floor(s.money)} · ${s.missionsCompleted} jobs done · $${Math.floor(s.totalEarned)} earned` : 'No saved progress yet — your first sunset on the Amber Coast.', VIEW_W / 2, 524);
+  ctx.fillText(s.missionsCompleted > 0 ? `Saved progress: $${Math.floor(s.money)} · ${s.missionsCompleted} jobs done · $${Math.floor(s.totalEarned)} earned` : 'No saved progress yet — your first night on the Amber Coast.', VIEW_W / 2, 524);
 }
 // ---------------------------------------------------------------- planning
 // The Planning Board: a layer over the live 3D street (the renderer orbits
@@ -788,6 +853,172 @@ export function drawSummary(ctx, game) {
   ctx.fillText('The chain restarts at +25% pay per loop — press ENTER to keep driving', VIEW_W / 2, py + PH - 30);
   ctx.restore();
 }
+// ------------------------------------------------------------ pause map
+// The Map screen (D5 shell): a REAL game screen, reached with M from
+// play — the world renders dimmed behind it and the street is paused.
+// Everything on it is live sim state, nothing staged for the camera:
+// the big map is drawDistrictMap itself (the board's own rendering
+// path — pastel blocks, road grid, the current job's dashed route)
+// with place labels, the player and the live objective over it; the
+// CAREER column reads game/save fields the sim actually maintains;
+// the STORY list derives DONE / NEXT / LOCKED from missions.index
+// inside the current chain loop; and the NEXT JOB panel recomputes
+// planStats() for the current plan — the same live numbers the
+// Planning Board shows. Type floor (D10): body text >= 13 px, map
+// place labels 12 px bold, stat values 16-20 px.
+export function drawMapScreen(ctx, game) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(14,8,10,0.78)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.textBaseline = 'top';
+  // Header strip.
+  panelSolid(ctx, 24, 20, VIEW_W - 48, 52);
+  ctx.textAlign = 'left'; ctx.fillStyle = '#f2c14e'; ctx.font = '700 21px system-ui, sans-serif';
+  ctx.fillText('AMBER COAST — DISTRICT MAP', 38, 35);
+  ctx.textAlign = 'right'; ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 13px system-ui, sans-serif';
+  ctx.fillText('PAUSED · PRESS M TO RETURN TO THE STREET', VIEW_W - 38, 39);
+  // ---- left: the full district map, large
+  const lx = 24, lw = 664;
+  panelSolid(ctx, lx, 84, lw, 692);
+  ctx.textAlign = 'left'; ctx.fillStyle = '#f0d9a0'; ctx.font = '700 14px system-ui, sans-serif';
+  ctx.fillText('DISTRICT MAP — THE WHOLE CITY, THE LIVE ROUTE', lx + 16, 98);
+  const mx = lx + 16, my = 122, mw = lw - 32, mh = 548;
+  drawDistrictMap(ctx, game, mx, my, mw, mh, { bigLabels: true });
+  const sx = (wx) => mx + (wx / WORLD_SIZE) * mw, sy = (wy) => my + (wy / WORLD_SIZE) * mh;
+  // Place labels over the map's own geography (12 px bold — the map
+  // label floor), each with its point. East-edge places right-align
+  // so no label leaves the map.
+  const place = (p, text, alignRight) => {
+    const X = sx(p.x), Y = sy(p.y);
+    ctx.fillStyle = '#e8930c'; ctx.beginPath(); ctx.arc(X, Y, 3.4, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(38,30,18,0.9)'; ctx.lineWidth = 1.2; ctx.stroke();
+    ctx.font = '700 12px system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(38,30,18,0.92)'; ctx.textAlign = alignRight ? 'right' : 'left';
+    ctx.fillText(text, X + (alignRight ? -8 : 8), Y - 6);
+    ctx.textAlign = 'left';
+  };
+  place(PLACES.gazette, 'GAZETTE PLAZA');
+  place(PLACES.neonTower, 'SOLANA TOWER', true);
+  place(PLACES.market, 'PALM MARKET');
+  place(PLACES.hotel, 'HOTEL AURELIA');
+  place(PLACES.garage, "VENN'S GARAGE");
+  place(PLACES.hospital, 'ST SABLE — RESPAWN');
+  place(PLACES.port, 'MARINA DEL SOL');
+  place(PLACES.airport, 'AMBER FIELD', true);
+  place(PLACES.base, 'FORT SABLE');
+  // The live objective: the sim's own marker, as a diamond in its colour.
+  const marker = game.missions.marker ? game.missions.marker() : null;
+  if (marker) {
+    const X = sx(marker.x), Y = sy(marker.y);
+    ctx.beginPath(); ctx.moveTo(X, Y - 7); ctx.lineTo(X + 7, Y); ctx.lineTo(X, Y + 7); ctx.lineTo(X - 7, Y); ctx.closePath();
+    ctx.fillStyle = marker.color === 'pickup' ? '#e8c832' : '#4fc96a'; ctx.fill();
+    ctx.strokeStyle = 'rgba(20,18,14,0.9)'; ctx.lineWidth = 1.4; ctx.stroke();
+  }
+  // You: a white arrow at the player's true position, on its heading.
+  {
+    const X = sx(game.player.x), Y = sy(game.player.y);
+    const ang = game.player.inCar && game.player.car ? game.player.car.angle : game.player.angle;
+    ctx.save(); ctx.translate(X, Y); ctx.rotate(ang);
+    ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-6, -5.5); ctx.lineTo(-6, 5.5); ctx.closePath();
+    ctx.fillStyle = '#ffffff'; ctx.fill();
+    ctx.strokeStyle = 'rgba(20,20,22,0.85)'; ctx.lineWidth = 1.4; ctx.stroke();
+    ctx.restore();
+    ctx.font = '700 12px system-ui, sans-serif'; ctx.fillStyle = 'rgba(38,30,18,0.92)';
+    ctx.fillText('YOU', X + 12, Y - 6);
+  }
+  // Legend + the live route, in words.
+  ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 13px system-ui, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('WHITE ARROW — YOU · DIAMOND — LIVE OBJECTIVE · HOUSE AT ST SABLE — RESPAWN', mx, my + mh + 14);
+  const def = CHAIN[game.missions.index % CHAIN.length];
+  const routeNames = [];
+  if (def.pickup) routeNames.push(def.pickup.name.toUpperCase());
+  if (def.drops) for (const d of def.drops) routeNames.push(d.name.toUpperCase());
+  if (def.deliver && !def.drops) routeNames.push(def.deliver.name.toUpperCase());
+  ctx.fillText('JOB ROUTE (DASHED) — ' + (routeNames.length ? routeNames.join(' → ') : def.title.toUpperCase()), mx, my + mh + 38);
+  ctx.fillText('NW OLD QUARTER · NE SOLANA UPTOWN · SW MARINA DOCKS · SE PALMA SUBURBS', mx, my + mh + 62);
+  // ---- right column: career, story, next job
+  const rx = 704, rw = VIEW_W - 24 - rx;
+  // CAREER — only values the game tracks (game state + its save fields).
+  panelSolid(ctx, rx, 84, rw, 218);
+  ctx.fillStyle = '#f0d9a0'; ctx.font = '700 14px system-ui, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('CAREER — THE RECORD SO FAR', rx + 16, 98);
+  let stars = '';
+  for (let i = 0; i < 5; i++) stars += i < game.police.stars ? '★' : '☆';
+  const esc = game.bestEscapeMs > 0
+    ? `${Math.floor(game.bestEscapeMs / 60000)}:${String(Math.floor((game.bestEscapeMs % 60000) / 1000)).padStart(2, '0')}`
+    : '—';
+  const career = [
+    ['CASH', formatMoney(game.money)], ['TOTAL EARNED', formatMoney(game.totalEarned)],
+    ['JOBS DONE', String(game.missionsCompleted)], ['CHAINS DONE', String(game.chainsFinished || 0)],
+    ['CHAIN LOOP', String(game.missions.loop + 1)], ['REP', '+' + (game.rep || 0)],
+    ['CARS STOLEN', String(game.carsStolen || 0)], ['TIMES WASTED', String(game.timesWasted || 0)],
+    ['BEST ESCAPE', esc], ['WANTED', stars],
+  ];
+  career.forEach(([k, v], i) => {
+    const colX = rx + 16 + Math.floor(i / 5) * 268, colW = 244;
+    const ry = 128 + (i % 5) * 34;
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 13px system-ui, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(k, colX, ry + 2);
+    ctx.fillStyle = k === 'WANTED' ? '#f2c14e' : PALETTE.hudText;
+    ctx.font = k === 'WANTED' ? '15px sans-serif' : '700 16px system-ui, sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(v, colX + colW, ry);
+  });
+  ctx.textAlign = 'left';
+  // STORY — the five real jobs, state from the chain position.
+  panelSolid(ctx, rx, 314, rw, 218);
+  ctx.fillStyle = '#f0d9a0'; ctx.font = '700 14px system-ui, sans-serif';
+  ctx.fillText("STORY — VENN'S FIVE JOBS", rx + 16, 328);
+  ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 13px system-ui, sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText('CHAIN ' + (game.missions.loop + 1), rx + rw - 16, 329);
+  ctx.textAlign = 'left';
+  const curIdx = ((game.missions.index % CHAIN.length) + CHAIN.length) % CHAIN.length;
+  CHAIN.forEach((job, i) => {
+    const ry = 356 + i * 34;
+    const state = i < curIdx ? 'DONE' : i === curIdx ? 'NEXT' : 'LOCKED';
+    ctx.fillStyle = state === 'LOCKED' ? PALETTE.hudMuted : PALETTE.hudText;
+    ctx.font = '600 15px system-ui, sans-serif';
+    ctx.fillText((i + 1) + '. ' + job.title, rx + 16, ry);
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 13px system-ui, sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText('PAY ' + formatMoney(game.missions.payFor(job)), rx + rw - 86, ry + 1);
+    ctx.fillStyle = state === 'DONE' ? '#8fc97f' : state === 'NEXT' ? '#f2c14e' : PALETTE.hudMuted;
+    ctx.font = '700 13px system-ui, sans-serif';
+    ctx.fillText(state, rx + rw - 16, ry + 1);
+    ctx.textAlign = 'left';
+  });
+  // NEXT JOB — the current plan's own summary, planStats recomputed live.
+  panelSolid(ctx, rx, 544, rw, 232);
+  ctx.fillStyle = '#f0d9a0'; ctx.font = '700 14px system-ui, sans-serif';
+  ctx.fillText('NEXT JOB — ' + def.title.toUpperCase(), rx + 16, 558);
+  const plan = game.plan;
+  if (plan) {
+    const data = jobPlanData(curIdx);
+    const st = planStats(curIdx, plan, game.missions.loop);
+    const gw = GETAWAYS.find((g) => g.id === plan.getaway) || GETAWAYS[0];
+    const crewNames = CREW_POOL.filter((c) => plan.crew.includes(c.id)).map((c) => c.name);
+    ctx.fillStyle = PALETTE.hudText; ctx.font = '600 14px system-ui, sans-serif';
+    ctx.fillText('ENTRY — ' + (data.entries[plan.entry] || data.entries[0]), rx + 16, 584);
+    ctx.fillText('GETAWAY — ' + gw.name + ' · CREW ' + plan.crew.length + '/3 — ' + (crewNames.join(' + ') || 'SOLO'), rx + 16, 608);
+    const statCols = [['LOOT ESTIMATE', formatMoney(st.loot)], ['ALARM', st.alarm + ' S'], ['ESCAPE WINDOW', st.escape + ' S']];
+    statCols.forEach(([k, v], i) => {
+      const colX = rx + 16 + i * 176;
+      ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 13px system-ui, sans-serif';
+      ctx.fillText(k, colX, 642);
+      ctx.fillStyle = i === 0 ? PALETTE.money : PALETTE.hudText; ctx.font = '700 20px system-ui, sans-serif';
+      ctx.fillText(v, colX, 662);
+    });
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '13px system-ui, sans-serif';
+    wrapText(ctx, def.brief.replace(/^Dario Venn:\s*/, ''), 74).slice(0, 3)
+      .forEach((line, i) => ctx.fillText(line, rx + 16, 700 + i * 19));
+  } else {
+    ctx.fillStyle = PALETTE.hudText; ctx.font = '600 14px system-ui, sans-serif';
+    ctx.fillText('ROUTE — ' + (routeNames.length ? routeNames.join(' → ') : def.title.toUpperCase()), rx + 16, 584);
+    ctx.fillText('PAY ' + formatMoney(game.missions.payFor(def)) + ' · TIME LIMIT ' + def.time + ' S', rx + 16, 608);
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '13px system-ui, sans-serif';
+    ctx.fillText('PLAN NOT SET — THE PLANNING BOARD OPENS WHEN VENN OFFERS THE JOB.', rx + 16, 642);
+    wrapText(ctx, def.brief.replace(/^Dario Venn:\s*/, ''), 74).slice(0, 3)
+      .forEach((line, i) => ctx.fillText(line, rx + 16, 676 + i * 19));
+  }
+  ctx.restore();
+}
 export function drawWasted(ctx, game) {
   ctx.fillStyle = 'rgba(20,4,6,0.55)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.textAlign = 'center'; ctx.fillStyle = '#e5484d';
@@ -805,6 +1036,7 @@ export function drawPause(ctx, game, help) {
     'E — enter or exit the nearest car (stealing brings heat)',
     'Space — shoot on foot · handbrake in a car',
     'Shift — sprint · P — pause · H — help · R — radio station/track',
+    'M — district map, career and the next job (from play, M again to return)',
     'Yellow marker: pickup · Green marker: deliver',
     'Stars fade when you break line of sight and stay clean.',
   ];
