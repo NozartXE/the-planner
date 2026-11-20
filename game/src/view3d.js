@@ -40,16 +40,28 @@ const SUNSET_MID = [186, 124, 122];  // softened rose
 const SUNSET_HOR = [252, 184, 124];  // paler warm horizon
 const FOG = [214, 184, 166]; // pale warm GREY — distance haze, not a wash
 const SUN = [255, 196, 116];
+function norm3(x, y, z) { const l = Math.hypot(x, y, z); return [x / l, y / l, z / l]; }
 // Time-of-day grades — the plan's time choice made visible. GOLDEN is the
 // game's established sunset; DUSK is the same sun an hour later: deeper
 // plum sky, redder horizon, heavier fog, dimmer sun, stronger lit windows.
+// Top-3 rebuild Phase 3 (gap-audit D6 — one amber grade in every frame):
+// DAY and NIGHT extend the range to the two ends the top 3 span. DAY is a
+// bright neutral midday — pale blue sky, high sun (its own sunDir), light
+// haze fog, windows barely lit. NIGHT is deep blue under a low eastern
+// moon: dim ambient, dark close fog, and the window/sign emissive turned
+// all the way up so the city lights itself. fogNear/fogFar now ride on
+// the grade (golden/dusk keep their standing values exactly); a grade's
+// sunDir, when present, replaces the shared sun direction for that grade
+// only — golden/dusk keep SUN_DIR, so their frames are untouched.
 const GRADES = {
-  golden: { top: SUNSET_TOP, mid: SUNSET_MID, hor: SUNSET_HOR, fog: FOG, sun: SUN, light: 1.0, wash: 1.0, emissive: 0.38 },
-  dusk: { top: [38, 26, 64], mid: [120, 52, 92], hor: [214, 102, 84], fog: [150, 88, 96], sun: [240, 150, 90], light: 0.72, wash: 1.6, emissive: 0.85 },
+  golden: { top: SUNSET_TOP, mid: SUNSET_MID, hor: SUNSET_HOR, fog: FOG, sun: SUN, light: 1.0, wash: 1.0, emissive: 0.38, fogNear: 240, fogFar: 1550 },
+  dusk: { top: [38, 26, 64], mid: [120, 52, 92], hor: [214, 102, 84], fog: [150, 88, 96], sun: [240, 150, 90], light: 0.72, wash: 1.6, emissive: 0.85, fogNear: 190, fogFar: 1250 },
+  day: { top: [97, 141, 190], mid: [154, 183, 208], hor: [219, 228, 224], fog: [200, 215, 224], sun: [255, 246, 228], light: 1.16, wash: 0.35, emissive: 0.10, fogNear: 300, fogFar: 1750, sunDir: norm3(-0.42, -0.26, 0.87) },
+  night: { top: [9, 15, 37], mid: [23, 33, 66], hor: [54, 64, 98], fog: [24, 32, 52], sun: [170, 190, 232], light: 0.34, wash: 0.45, emissive: 1.15, fogNear: 150, fogFar: 1000, sunDir: norm3(0.52, 0.30, 0.30) },
 };
 // Sun low in the WEST (world -x), slightly north: shadows stretch EAST.
 // (World-space direction TOWARD the sun, z up.)
-const SUN_DIR = (() => { const v = [-0.90, -0.24, 0.34]; const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; })();
+const SUN_DIR = norm3(-0.90, -0.24, 0.34);
 
 function hash01(n) { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); }
 const rgbCache = new Map();
@@ -267,6 +279,14 @@ const SIGNS = [
   { name: 'AMBER RIMS', bg: [56, 102, 110] },
   { name: 'SALTY BAIT CO', bg: [96, 124, 84] },
   { name: 'PALM LIQUOR', bg: [128, 84, 110] },
+  // Phase 3 (D11): five more Amber Coast originals — hotels and beach
+  // trade the first five lacked — so neighbouring storefronts stop
+  // repeating the same handful of names down a skyline. Muted grounds.
+  { name: 'HOTEL CORALINA', bg: [64, 96, 116] },
+  { name: 'VELA SUITES', bg: [110, 84, 96] },
+  { name: 'SURF & SAND', bg: [84, 116, 108] },
+  { name: 'CASA DEL FARO', bg: [150, 110, 62] },
+  { name: 'PELICAN DINER', bg: [96, 110, 64] },
 ];
 function paintSignAtlas(c) {
   SIGNS.forEach((s, i) => {
@@ -1053,7 +1073,11 @@ function buildBuildings(gl, game, B) {
     const vh = hash01(bid * 13.7);
     const variant = isGlass ? 'glass' : vh < 0.34 ? 'fwarm' : vh < 0.67 ? 'fcool' : 'foffice';
     const baseRGB = variant === 'glass' ? [148, 168, 178] : variant === 'fwarm' ? [188, 168, 146] : variant === 'foffice' ? [176, 158, 138] : [172, 164, 152];
-    const tintOf = (wall) => lin([0, 1, 2].map((i) => clamp(wall[i] / baseRGB[i] * 255, 40, 255)));
+    // Phase 3 (D11): a subtle per-building tint step (±8% by hash) over
+    // walls and roof alike, so a run of same-district slabs stops reading
+    // as one repeated extrusion — value only, never a hue swing.
+    const tintVar = 0.92 + hash01(bid * 41.3) * 0.16;
+    const tintOf = (wall) => lin([0, 1, 2].map((i) => clamp(wall[i] / baseRGB[i] * 255, 40, 255))).map((v) => Math.min(1, v * tintVar));
     const FB = variant === 'glass' ? B.glass : variant === 'fwarm' ? B.fwarm : variant === 'foffice' ? B.foffice : B.fcool;
     const walls = [
       { n: [0, 1], tint: tintOf(wallSouth), wid: b.w, fixed: b.y + b.h, mk: (z0, z1) => [[b.x, b.y + b.h, z0], [b.x + b.w, b.y + b.h, z0], [b.x + b.w, b.y + b.h, z1], [b.x, b.y + b.h, z1]] },
@@ -1126,13 +1150,44 @@ function buildBuildings(gl, game, B) {
         }
       }
       // Roof + parapet cap + stored rooftop props.
-      B.roof.quad([b.x, b.y + b.h, H], [b.x + b.w, b.y + b.h, H], [b.x + b.w, b.y, H], [b.x, b.y, H], lin(roofC), [0, 0, Math.max(1, Math.round(b.w / 70)), Math.max(1, Math.round(b.h / 70))]);
+      B.roof.quad([b.x, b.y + b.h, H], [b.x + b.w, b.y + b.h, H], [b.x + b.w, b.y, H], [b.x, b.y, H], lin(roofC).map((v) => Math.min(1, v * tintVar)), [0, 0, Math.max(1, Math.round(b.w / 70)), Math.max(1, Math.round(b.h / 70))]);
       box(B.flat, cx, cy, H + 1.6, b.w / 2 + 2.2, b.h / 2 + 2.2, 1.8, 0, lin(roofC.map((v) => v * 0.92)));
       if (b.props) for (const pr of b.props) {
         const px = b.x + pr.dx, py = b.y + pr.dy;
         if (pr.kind === 'tower') box(B.flat, px, py, H + 6, pr.w / 2, pr.h / 2, 6, 0, lin([80, 72, 64]));
         else if (pr.kind === 'vent') box(B.flat, px, py, H + 2.2, pr.w / 2, pr.h / 2, 2.2, 0, lin([96, 98, 104]));
         else box(B.flat, px, py, H + 3, pr.w / 2, pr.h / 2, 3, 0, lin([113, 115, 121]));
+      }
+      // Phase 3 rooftop variety (D11): on top of the city's own stored
+      // props, a hash subset of roofs carries ONE larger silhouette
+      // piece — a water tank, a paired AC plant or a slim antenna — at
+      // a hash corner inset from the parapet, so the skyline's top edge
+      // varies tower to tower instead of ending in identical slabs.
+      // Deterministic in bid only; footprints too small are skipped.
+      if (b.w > 52 && b.h > 52 && H > 44) {
+        const rp = hash01(bid * 53.7);
+        if (rp < 0.58) {
+          const qx = b.x + b.w * (hash01(bid * 59.3) < 0.5 ? 0.28 : 0.72);
+          const qy = b.y + b.h * (hash01(bid * 61.7) < 0.5 ? 0.28 : 0.72);
+          if (rp < 0.20) {
+            // Water tank: stave cylinder on short legs + a cap disc.
+            for (const [lx, ly] of [[-3, -3], [3, -3], [-3, 3], [3, 3]]) box(B.flat, qx + lx, qy + ly, H + 1.8, 0.7, 0.7, 1.8, 0, lin([80, 72, 64]));
+            const tankG = new THREE.CylinderGeometry(4.6, 4.9, 7.5, 10);
+            B.flat.push(tankG, mat4(qx, H + 7.3, qy, 0), lin([122, 102, 82]));
+            tankG.dispose();
+            disc(B.roof, qx, qy, H + 11.3, 5.1, lin(roofC.map((v) => v * 0.85)), 10);
+          } else if (rp < 0.40) {
+            // AC plant: two plant boxes of different heights + a duct.
+            box(B.flat, qx, qy, H + 2.4, 5.5, 4.2, 2.4, 0, lin([108, 110, 116]));
+            box(B.flat, qx + 8.5, qy + 2, H + 1.7, 3.6, 3.0, 1.7, 0, lin([96, 98, 104]));
+            box(B.flat, qx + 4, qy + 1, H + 0.9, 2.2, 1.1, 0.9, 0, lin([88, 90, 96]));
+          } else {
+            // Antenna: a slim mast, two crossarms, a tip light point.
+            limb(B.flat, [qx, qy, H], [qx, qy, H + 13], 0.55, 0.3, lin([52, 54, 60]), 5);
+            box(B.flat, qx, qy, H + 10.6, 3.4, 0.4, 0.4, 0, lin([52, 54, 60]));
+            box(B.flat, qx, qy, H + 8.2, 2.4, 0.4, 0.4, 0, lin([52, 54, 60]));
+          }
+        }
       }
       // Art-deco beachfront stripes under the parapet.
       if (b.deco && H > 60) {
@@ -1436,6 +1491,19 @@ function buildCar(gl, game, B, car) {
     const glowR = car.isCop ? 3.5 : 5.5, glowA = car.isCop ? 0.05 : 0.15;
     addGlow(gl, hg1[0], hg1[1], 5.8, glowR, lin([255, 243, 190]), glowA);
     addGlow(gl, hg2[0], hg2[1], 5.8, glowR, lin([255, 243, 190]), glowA);
+    // Phase 3 (D7): HEADLIGHT POOLS in dark grades — each lamp spills a
+    // small bright disc on the asphalt ahead of the car and the pair
+    // merges into one fainter wash further out. Grade-gated on the
+    // emissive exactly like the streetlight pools (dusk/night only), so
+    // day and golden frames render no pools. Batch discs, no sprites.
+    if ((F.gradeEmissive || 0) > 0.5) {
+      for (const sy of [1, -1]) {
+        const hp = LP(L / 2 + 10, sy * (W / 2 - 3.4), 0);
+        disc(B.alpha, hp[0], hp[1], 0.56, 7.5, [...lin([255, 226, 170]), 0.16]);
+      }
+      const pool = LP(L / 2 + 12, 0, 0);
+      disc(B.alpha, pool[0], pool[1], 0.54, 11.5, [...lin([255, 226, 170]), 0.10]);
+    }
   }
   // Rear LEONIDA plate in a dark recess (registration derived from the
   // car's own id): the recess box sits proud of the bumper, the plate
@@ -1496,12 +1564,55 @@ function buildCar(gl, game, B, car) {
     quadAt(-L / 2 - 0.5, 0, 7.6, W / 2 - 4.6, 0.8, lin([168, 30, 40]));
     if (!car.dead) { const tb = LP(-L / 2 - 0.5, 0, 7.6); addGlow(gl, tb[0], tb[1], 7.6, 8, lin([200, 36, 46]), 0.09); }
   }
-  // Damage smoke: soft sprites climbing off the hood.
-  if (!car.dead && car.hp < car.maxHp * 0.35) {
+  // Damage states (Phase 3, D7 — the effects layer the audit found
+  // missing: nothing in the world ever dented, smoked or burned). All
+  // read from the car's own hp ratio, all deterministic:
+  //  below 70% — a CRUMPLED panel on the struck side (an id-hash side
+  //    for traffic/cops; the hero wears it on the REAR quarter, the
+  //    PIT-contact side, on the PIT unit's own side of the hit);
+  //  below 40% — engine SMOKE off the hood (the hero, still running
+  //    mid-chase, rates only a slight wisp);
+  //  at/below 22% — the engine BURNS: layered orange glow at the hood
+  //    under a taller, darker smoke column, so the fire reads as the
+  //    CAR burning, not a pool on the ground.
+  const maxHp = car.maxHp || 100;
+  const ratio = car.dead ? 1 : (typeof car.hp === 'number' ? car.hp : maxHp) / maxHp;
+  if (!car.dead && ratio < 0.70) {
+    const dmgC = lin(rgb(car.color).map((v) => v * 0.52));
+    const creaseC = lin([18, 18, 22]);
+    if (isHero) {
+      // Dented rear quarter on the PIT side (north flank, lateral −1):
+      // a darkened panel riding slightly proud and low, a crease above.
+      part(UNIT_BOX, mat4(-L * 0.31, 5.0, -(W / 2 + 0.30), 0, 8.5, 4.4, 0.9), dmgC);
+      part(UNIT_BOX, mat4(-L * 0.31, 6.6, -(W / 2 + 0.42), 0, 7.0, 0.7, 0.5), creaseC);
+    } else {
+      const side = hash01((car.id || 1) * 7.7) < 0.5 ? 1 : -1;
+      part(UNIT_BOX, mat4(L * 0.30, 5.0, side * (W / 2 + 0.30), 0, 8.5, 4.4, 0.9), dmgC);
+      part(UNIT_BOX, mat4(L * 0.30, 6.6, side * (W / 2 + 0.42), 0, 7.0, 0.7, 0.5), creaseC);
+      if (ratio < 0.40) part(UNIT_BOX, mat4(-L * 0.02, 4.6, side * (W / 2 + 0.26), 0, 7.5, 3.6, 0.7), lin(rgb(car.color).map((v) => v * 0.62)));
+    }
+  }
+  if (!car.dead && ratio <= 0.22) {
+    // Burning engine: flame glows layered at the hood + smoke column.
+    const bp = LP(L * 0.30, 0, 0);
+    addGlow(gl, bp[0], bp[1], 9.5, 9, lin([255, 110, 30]), 0.30);
+    addGlow(gl, bp[0], bp[1], 10.5, 6, lin([255, 140, 40]), 0.55);
+    addGlow(gl, bp[0], bp[1], 11, 3.4, lin([255, 205, 95]), 0.80);
+    addGlow(gl, bp[0] + 1.5, bp[1] - 1, 13.5, 4.2, lin([255, 150, 50]), 0.42);
+    addSmoke(gl, bp[0], bp[1], 16, 6.5, 0.32, 0.32);
+    addSmoke(gl, bp[0] + 3, bp[1] - 2, 21.5, 9.5, 0.24, 0.32);
+    addSmoke(gl, bp[0] + 5, bp[1] - 3, 28, 13, 0.15, 0.32);
+  } else if (!car.dead && ratio < 0.40) {
     const hp0 = LP(L * 0.26, 0, 0);
-    addSmoke(gl, hp0[0], hp0[1], 14.5, 7.5, 0.26, 0.45);
-    addSmoke(gl, hp0[0] + 3, hp0[1] - 2, 19, 10.5, 0.18, 0.45);
-    addSmoke(gl, hp0[0] + 5, hp0[1] - 3, 24, 13.5, 0.11, 0.45);
+    if (isHero) {
+      // Slight wisp only — the hero is damaged, not dying.
+      addSmoke(gl, hp0[0], hp0[1], 13.5, 5.5, 0.15, 0.45);
+      addSmoke(gl, hp0[0] + 2, hp0[1] - 1, 17.5, 8, 0.08, 0.45);
+    } else {
+      addSmoke(gl, hp0[0], hp0[1], 14.5, 7.5, 0.26, 0.45);
+      addSmoke(gl, hp0[0] + 3, hp0[1] - 2, 19, 10.5, 0.18, 0.45);
+      addSmoke(gl, hp0[0] + 5, hp0[1] - 3, 24, 13.5, 0.11, 0.45);
+    }
   }
   curCat = null;
 }
@@ -1515,6 +1626,88 @@ function buildVehicles(gl, game, B) {
     if (game.debugHideHeroCar && car === F.heroCar) continue;
     buildCar(gl, game, B, car);
   }
+}
+// ONE helicopter builder (Phase 3, D7 — the air unit the top 3 field and
+// this world never did): a flat-shaded police airframe in the same batch
+// style as the cars — fuselage + glass nose, tail boom + fin, main and
+// tail rotors, skid gear — staged ONLY by shots.js as game.stagedHeli
+// (mission frame atmosphere; it is NOT a police.cops unit and never
+// enters the dispatch roster or the scale audit's vehicle pairing). Its
+// searchlight throws a deterministic SPOTLIGHT: two nested translucent
+// cones in the alpha batch from the belly lamp to the staged ground
+// point, a bright disc + glow where the beam lands. Fixed geometry —
+// the rotor angle is a constant offset, never time-driven — so frozen
+// captures stay byte-identical.
+function buildHeli(gl, game, B, heli) {
+  const dx = heli.x - F.cam[0], dy = heli.y - F.cam[1];
+  if (dx * dx + dy * dy > 1250 * 1250) return;
+  curCat = null; // aircraft dressing: no ID colour, no audit pairing
+  const yaw = heli.angle || 0, alt = heli.z || 120;
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  const LP = (lx, ly, lz) => [heli.x + lx * c - ly * s, heli.y + lx * s + ly * c, (lz || 0) + alt];
+  const BODY = lin([44, 54, 72]), BODY_D = lin([30, 38, 52]), GLASS_C = lin([24, 33, 48]);
+  const BAND = lin([214, 216, 220]), DARK = lin([20, 21, 26]);
+  // Soft ground shadow far below, like the plane's.
+  disc(B.alpha, heli.x, heli.y, 0.25, 27, [...lin([8, 8, 10]), 0.20]);
+  const fb = LP(0, 0, 0);
+  box(B.flat, fb[0], fb[1], fb[2], 12.5, 4.6, 3.8, yaw, BODY);
+  const nose = LP(11.5, 0, -0.3);
+  box(B.flat, nose[0], nose[1], nose[2], 4.2, 4.0, 3.3, yaw, BODY);
+  const gl1 = LP(14.8, 0, 0.7);
+  box(B.flat, gl1[0], gl1[1], gl1[2], 2.0, 3.3, 2.3, yaw, GLASS_C);
+  const band = LP(1.5, 0, 1.1);
+  box(B.flat, band[0], band[1], band[2], 9.5, 4.75, 1.1, yaw, BAND);
+  const deck = LP(-2, 0, 4.6);
+  box(B.flat, deck[0], deck[1], deck[2], 6, 3.4, 1.2, yaw, BODY_D);
+  // Tail boom, fin and tail rotor.
+  const boom = LP(-19, 0, 1.1);
+  box(B.flat, boom[0], boom[1], boom[2], 8.5, 1.6, 1.6, yaw, BODY);
+  const fin = LP(-27.5, 0, 3.2);
+  box(B.flat, fin[0], fin[1], fin[2], 1.3, 0.45, 3.4, yaw, BODY_D);
+  const tr = LP(-27.5, 1.4, 3.2);
+  box(B.flat, tr[0], tr[1], tr[2], 0.35, 0.5, 3.1, yaw, DARK);
+  box(B.flat, tr[0], tr[1], tr[2], 3.1, 0.5, 0.35, yaw, DARK);
+  const stab = LP(-24, 0, 0.6);
+  box(B.flat, stab[0], stab[1], stab[2], 1.6, 5.2, 0.5, yaw, BODY_D);
+  // Main rotor: mast, two crossed blade boxes at a fixed angle, and a
+  // faint translucent disc so the rotor reads as a disc at distance.
+  const mast = LP(-2, 0, 6.0);
+  box(B.flat, mast[0], mast[1], mast[2], 1.0, 1.0, 1.5, yaw, DARK);
+  const hub = LP(-2, 0, 7.3);
+  box(B.flat, hub[0], hub[1], hub[2], 23, 1.05, 0.32, yaw + 0.7, DARK);
+  box(B.flat, hub[0], hub[1], hub[2], 1.05, 23, 0.32, yaw + 0.7, DARK);
+  disc(B.alpha, hub[0], hub[1], hub[2], 23.5, [...lin([196, 206, 216]), 0.13]);
+  // Skid gear: two tubes on four struts under the belly.
+  for (const sy of [1, -1]) {
+    limb(B.flat, LP(9.5, sy * 5.6, -6.4), LP(-9.5, sy * 5.6, -6.4), 0.55, 0.55, DARK, 6);
+    limb(B.flat, LP(6.5, sy * 3.4, -3.6), LP(6.5, sy * 5.6, -6.4), 0.45, 0.45, DARK, 5);
+    limb(B.flat, LP(-6.5, sy * 3.4, -3.6), LP(-6.5, sy * 5.6, -6.4), 0.45, 0.45, DARK, 5);
+  }
+  // Belly searchlight housing + its lamp glow.
+  const lamp = LP(4.5, 0, -4.3);
+  box(B.basic, lamp[0], lamp[1], lamp[2], 1.5, 1.5, 1.0, yaw, lin([255, 240, 200]));
+  addGlow(gl, lamp[0], lamp[1], lamp[2], 6, lin([255, 240, 200]), 0.5);
+  // Spotlight cone to the staged ground point: outer + inner nested
+  // cones (apex at the lamp, base at the ground), a landing disc and a
+  // glow at the foot. Deterministic geometry in the alpha batch.
+  if (typeof heli.spotX === 'number') {
+    const from = new THREE.Vector3(lamp[0], lamp[2], lamp[1]);
+    const to = new THREE.Vector3(heli.spotX, 0.8, heli.spotY);
+    const dir = from.clone().sub(to);
+    const len = dir.length() || 1;
+    dir.normalize();
+    const mid = from.clone().add(to).multiplyScalar(0.5);
+    const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    for (const [rad, al] of [[15, 0.10], [8, 0.09]]) {
+      const cone = new THREE.ConeGeometry(rad, 1, 18, 1, true);
+      B.alpha.push(cone, new THREE.Matrix4().compose(mid, quat, new THREE.Vector3(1, len, 1)), [...lin([255, 238, 196]), al]);
+      cone.dispose();
+    }
+    disc(B.alpha, heli.spotX, heli.spotY, 0.58, 16, [...lin([255, 238, 196]), 0.30]);
+    disc(B.alpha, heli.spotX, heli.spotY, 0.60, 8, [...lin([255, 246, 214]), 0.38]);
+    addGlow(gl, heli.spotX, heli.spotY, 5, 17, lin([255, 238, 196]), 0.45);
+  }
+  curCat = null;
 }
 
 // ---------------------------------------------------------------- figures
@@ -2007,7 +2200,17 @@ function buildVegetation(gl, game, B) {
     if (!inR(l.x, l.y, 700) || inR(l.x, l.y, 80)) continue;
     limb(B.flat, [l.x, l.y, 0], [l.x, l.y, 25], 0.8, 0.8, lin([34, 36, 42]), 5);
     box(B.basic, l.x, l.y, 26, 2.4, 2.4, 1.7, 0, lin([238, 198, 138]));
-    addGlow(gl, l.x, l.y, 27, 11, lin([255, 190, 110]), F.gradeName === 'dusk' ? 0.30 : 0.22);
+    // Phase 3 (D6/D7): the lamp's halo now scales with the grade's
+    // emissive, and in dark grades (dusk / night — emissive > 0.5) each
+    // lamp throws a warm POOL on the street under it: a wide faint disc
+    // and a brighter core. Day (emissive 0.10) and golden (0.38) frames
+    // get no pools at all, so daylight streets stay clean.
+    const em = F.gradeEmissive || 0;
+    addGlow(gl, l.x, l.y, 27, 11, lin([255, 190, 110]), 0.08 + em * 0.26);
+    if (em > 0.5) {
+      disc(B.alpha, l.x, l.y, 0.52, 12, [...lin([255, 190, 110]), 0.13]);
+      disc(B.alpha, l.x, l.y, 0.54, 6, [...lin([255, 205, 130]), 0.16]);
+    }
   }
   for (const bt of game.city.boats || []) {
     if (!inR(bt.x, bt.y, 1250)) continue;
@@ -2150,7 +2353,7 @@ function renderGL(gl, ctx, game) {
   const isDrive = fr.isDrive;
   const anchor = isDrive ? p.car : p;
   F = {
-    cam: fr.cam, right: [1, 0], gradeName: game.timeGrade || 'golden',
+    cam: fr.cam, right: [1, 0], gradeName: game.timeGrade || 'golden', gradeEmissive: grade.emissive,
     time: game.time || 0, screen: game.screen || 'play',
     heroCar: isDrive ? p.car : (game.shotHeroCar || null),
   };
@@ -2163,13 +2366,18 @@ function renderGL(gl, ctx, game) {
   F.right = [el[0], el[2]];
   gl.sky.position.copy(cam.position);
   // Grade: fog, sky, sun and window glow all follow game.timeGrade.
+  // Phase 3: fog range and the sun direction itself now ride on the
+  // grade (a grade without sunDir keeps the shared western SUN_DIR, so
+  // golden/dusk lighting is exactly the standing one).
+  const sDir = grade.sunDir || SUN_DIR;
   gl.scene.fog.color.copy(linColor(grade.fog));
-  gl.scene.fog.near = grade === GRADES.dusk ? 190 : 240;
-  gl.scene.fog.far = grade === GRADES.dusk ? 1250 : 1550;
+  gl.scene.fog.near = grade.fogNear;
+  gl.scene.fog.far = grade.fogFar;
   gl.skyMat.uniforms.top.value.copy(linColor(grade.top));
   gl.skyMat.uniforms.mid.value.copy(linColor(grade.mid));
   gl.skyMat.uniforms.hor.value.copy(linColor(grade.hor));
   gl.skyMat.uniforms.sunCol.value.copy(linColor(grade.sun));
+  gl.skyMat.uniforms.sunDir.value.set(sDir[0], sDir[2], sDir[1]);
   gl.skyMat.uniforms.haze.value.copy(linColor(grade.fog));
   gl.hemi.intensity = 1.02 * grade.light;
   gl.sun.intensity = 1.85 * grade.light;
@@ -2180,7 +2388,7 @@ function renderGL(gl, ctx, game) {
   gl.mats.glass.emissiveIntensity = grade.emissive * 0.8;
   gl.mats.shop.emissiveIntensity = grade.emissive * 0.75;
   // Sun: low in the west, shadow frustum fitted to the camera focus.
-  gl.sun.position.set(anchor.x + SUN_DIR[0] * 950, SUN_DIR[2] * 950, anchor.y + SUN_DIR[1] * 950);
+  gl.sun.position.set(anchor.x + sDir[0] * 950, sDir[2] * 950, anchor.y + sDir[1] * 950);
   gl.sun.target.position.set(anchor.x, 0, anchor.y);
   gl.sun.target.updateMatrixWorld();
   // Rebuild the world batches from state.
@@ -2198,6 +2406,7 @@ function renderGL(gl, ctx, game) {
   buildBuildings(gl, game, B);
   buildVegetation(gl, game, B);
   buildVehicles(gl, game, B);
+  if (game.stagedHeli) buildHeli(gl, game, B, game.stagedHeli);
   buildFigures(gl, game, B);
   buildParticles(gl, game, B);
   // Assemble: one mesh per batch, disposed after the render.

@@ -164,6 +164,9 @@ export function applyShot(game, name, step) {
   // Staged prop reset (Top-3 rebuild Phase 2): only the chase staging
   // sets a scooter; every other shot renders without one.
   game.stagedScooter = null;
+  // Phase 3: only the mission staging sets a helicopter; every other
+  // shot renders without one.
+  game.stagedHeli = null;
   if (name === 'title') {
     // Hero cruising the beachfront at the east edge, heading NORTH in the chase cam:
     // art-deco facades front the sand on the left of the frame, the sand strip, teal
@@ -178,6 +181,9 @@ export function applyShot(game, name, step) {
     game.screen = 'title';
     run(150);
     game.screen = 'title';
+    // Phase 3 grade (D6): the title cruises at NIGHT — deep blue sky,
+    // moonlight, lit windows and streetlight pools behind the logo.
+    game.timeGrade = 'night';
     // Re-staged ON Ocean Drive itself at the park block (bx 7, by 5 — the same
     // verified stretch the results shot uses): the hero drives the road, deco
     // facades and park trees to the west, sand, water and boats to the east,
@@ -364,7 +370,12 @@ export function applyShot(game, name, step) {
     game.police.setStars(game.planStatsCache.heatStars, game.nowMs);
     hero.name = 'VELOZ COMET';
     game.weapon = weaponForPlan(game.plan);
-    game.timeGrade = game.plan.timeOfDay;
+    // Phase 3 grade (D6): the chase renders in bright DAY light. The
+    // plan object itself keeps its golden timeOfDay — its heat forecast
+    // (5 stars) is computed from it and must not move — only the FRAME's
+    // grade changes, the way the board (golden) and this job's dusk
+    // sequel already differ per frame.
+    game.timeGrade = 'day';
     setMission(game, 2, 'pickup', 78);
     game.player.hp = 100;
     game.bullets = []; game.toasts = [];
@@ -559,13 +570,43 @@ export function applyShot(game, name, step) {
     // west sidewalk, backgrounded — this frame has ONE shooter.
     game.plan = { ...STAGED_PLAN_J4, crew: [...STAGED_PLAN_J4.crew], gear: [...STAGED_PLAN_J4.gear] };
     game.planStatsCache = planStats(3, game.plan, 0);
-    game.timeGrade = 'golden';
+    // Phase 3 grade (D6): the mission renders at DUSK — job 4's plan
+    // timeOfDay has always been 'dusk' (STAGED_PLAN_J4); the frame's
+    // grade now follows the plan instead of overriding it to golden,
+    // so streetlight pools, headlight pools and lit windows carry the
+    // shootout's low light.
+    game.timeGrade = game.plan.timeOfDay;
     game.weapon = weaponForPlan(game.plan);
     game.weapon.mag = 15;
     game.missions.lootGrabbed = game.planStatsCache.loot;
     game.crewMate = { id: 'dex', name: 'DEX RUIZ', color: '#e8c832', x: 934, y: 1112, angle: -0.4, walkPhase: 0.6, pose: 'stand' };
     game.projectiles = [];
-    game.zones = [{ kind: 'fire', x: 1012, y: 1058, r: 24, until: game.nowMs + 60000, dps: 26 }];
+    // Phase 3 (D7): the molotov patch tightens onto the sedan's hood
+    // point (1010, 1057 — its nose at angle −1.45) and shrinks r 24→15,
+    // so together with the renderer's new burning-engine state for the
+    // sedan's staged hp 18 (≤22%: layered hood glow + smoke column)
+    // the fire reads as the CAR burning at its engine, not a ground
+    // pool burning beside it.
+    game.zones = [{ kind: 'fire', x: 1010, y: 1057, r: 15, until: game.nowMs + 60000, dps: 26 }];
+    // Phase 3 (D7): ONE police helicopter hovers over the intersection
+    // just north of the roadblock at altitude 65, sweeping its
+    // spotlight onto the road at the struck sedan's south-east flank
+    // (1026, 1092) — beside the car, ~29 units from the hood, so the
+    // white pool and the sedan's own orange engine fire (hood point
+    // ≈ (1009, 1065)) read as two separate lights, not one blob.
+    // Placement solved with the aim camera's own projection (the
+    // qa/measure mirror math): the airframe lands in the UPPER frame
+    // (centre ≈ (798, 115) of 1280×800, rotor tips y ≤ 91) — visible
+    // in full, and clear of the reticle area (686, 400) by ~285 px
+    // vertically; the beam falls west of the sedan, never across the
+    // reticle ticks. (The first placement, (905, 905, 135), projected
+    // ~460 px ABOVE the frame — only its cone was visible — so the
+    // unit now hovers lower over the open intersection, clear of
+    // every roofline and of the roadblock pair below it.) It is
+    // staged ATMOSPHERE only: it is not a police.cops unit, so the
+    // frame's dispatch claim stays exactly cops 5 == stars 5 ==
+    // roster 5 ground units.
+    game.stagedHeli = { x: 960, y: 985, z: 65, angle: 2.25, spotX: 1026, spotY: 1092 };
     // Phase 4 AIM COHERENCE (the Phase 3 lesson: projection passing was
     // not perception passing). Two defects, both found by pixel
     // inspection of the Phase 3 capture, not by the measure:
@@ -692,7 +733,11 @@ export function applyShot(game, name, step) {
     // Dex + Milo, fence 18%) — gross to net per job, REP per job, and the
     // chain history above is these same settlements' nets.
     game.plan = { jobIndex: 4, entry: 0, crew: ['dex', 'milo'], gear: ['duffels'], getaway: 'armored', timeOfDay: 'golden' };
-    game.timeGrade = 'golden';
+    // Phase 3 grade (D6): the results ledger settles at DUSK — the
+    // chain's last light, streetlight pools on Ocean Drive behind the
+    // panel. The plan record keeps its own timeOfDay; only the frame
+    // grade changes.
+    game.timeGrade = 'dusk';
     game.chainLedger = [0, 1, 2, 3, 4].map((i) => settlePlan(i, { entry: 0, crew: ['dex', 'milo'], gear: ['duffels'], getaway: 'armored', timeOfDay: 'golden' }, jobPlanData(i).gross));
     game.lastLedger = game.chainLedger[4];
     game.rep = game.chainLedger.reduce((s, l) => s + l.repGain, 0);
