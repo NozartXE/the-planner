@@ -509,9 +509,11 @@ export function drawPlanning(ctx, game) {
     ctx.fillStyle = i === idx ? '#f2c14e' : i < idx ? '#8fc97f' : PALETTE.hudMuted;
     ctx.fillText(label, tabX, 28); tabX -= w + 18;
   }
-  // Left column: briefing, entry, getaway, time.
+  // Left column: briefing, entry, getaway, time — and, folded into the
+  // dead space this panel used to waste (Phase 7 focal hierarchy), the
+  // district map that used to be its own right-column panel.
   const lx = 14, lw = 330;
-  panelSolid(ctx, lx, 66, lw, 436);
+  panelSolid(ctx, lx, 66, lw, 466);
   let y = 80;
   ctx.textAlign = 'left'; ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif';
   ctx.fillText('BRIEFING — DARIO VENN', lx + 14, y); y += 18;
@@ -544,8 +546,18 @@ export function drawPlanning(ctx, game) {
     ctx.fillStyle = t.id === plan.timeOfDay ? PALETTE.hudText : PALETTE.hudMuted; ctx.font = '600 12px system-ui, sans-serif';
     ctx.fillText((t.id === plan.timeOfDay ? '▸ ' : '  ') + t.label, lx + 14, y); y += 26;
   });
-  // Right column: the live plan stats.
-  const rx = VIEW_W - 284, rw = 270;
+  // District map folded into the briefing panel (Phase 7): same drawn
+  // cartography, wider and shorter — the right column is freed for the
+  // compact stats stack and the street opens up on that side.
+  y += 10;
+  ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif';
+  ctx.fillText('DISTRICT MAP — TARGET + ESCAPE ROUTE', lx + 14, y); y += 18;
+  drawDistrictMap(ctx, game, lx + 12, y, lw - 24, 106);
+  // Right column: the live plan stats. Phase 7: wider + compact — the
+  // eight stat lines run in TWO columns of four, and ARSENAL + EXECUTE
+  // stack directly underneath, so the whole right instrument column ends
+  // at y=356 and the street below it is open.
+  const rx = VIEW_W - 350, rw = 336;
   let stars = '';
   for (let i = 0; i < 5; i++) stars += i < st.heatStars ? '★' : '☆';
   if (staged) {
@@ -565,10 +577,12 @@ export function drawPlanning(ctx, game) {
     ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10.5px system-ui, sans-serif';
     ctx.fillText(def.pickup ? def.pickup.name.toUpperCase() + ' → ' + (def.deliver ? def.deliver.name.toUpperCase() : '') : 'TARGET ROUTE QUEUED', rx + 14, 160);
   } else {
-  panelSolid(ctx, rx, 66, rw, 296);
+  panelSolid(ctx, rx, 66, rw, 142);
   y = 80;
   ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
   ctx.fillText('PLAN STATS — LIVE', rx + 14, y); y += 24;
+  // ALL eight stat lines, unchanged values, in two columns of four:
+  // LOOT/ALARM/ESCAPE/GRAB left, CUT/SKILL/FENCE/HEAT right.
   const statRows = [
     ['LOOT ESTIMATE', formatMoney(st.loot)],
     ['ALARM', st.alarm + ' s'],
@@ -577,27 +591,24 @@ export function drawPlanning(ctx, game) {
     ['CREW CUT', st.totalCut + '%'],
     ['CREW SKILL', String(st.avgSkill)],
     ['FENCE FEE', st.fencePct + '%'],
+    ['HEAT FORECAST', stars],
   ];
-  for (const [k, v] of statRows) {
+  statRows.forEach(([k, v], i) => {
+    const colX = rx + 14 + Math.floor(i / 4) * 160, colW = 148;
+    const ry = y + (i % 4) * 25;
+    const isHeat = k === 'HEAT FORECAST';
     ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText(k, rx + 14, y + 2);
-    ctx.fillStyle = PALETTE.hudText; ctx.font = '700 14px system-ui, sans-serif'; ctx.textAlign = 'right';
-    ctx.fillText(v, rx + rw - 14, y); y += 25;
-  }
-  ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left';
-  ctx.fillText('HEAT FORECAST', rx + 14, y + 2);
-  ctx.font = '16px sans-serif'; ctx.textAlign = 'right';
-  ctx.fillStyle = '#f2c14e'; ctx.fillText(stars, rx + rw - 14, y);
-  // District map (VC-style cartography, our geography) under the stats.
-  panelSolid(ctx, rx, 374, rw, 180);
-  ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
-  ctx.fillText('DISTRICT MAP — TARGET + ESCAPE ROUTE', rx + 14, 386);
-  drawDistrictMap(ctx, game, rx + 12, 406, rw - 24, 136);
+    ctx.fillText(k, colX, ry + 2);
+    ctx.fillStyle = isHeat ? '#f2c14e' : PALETTE.hudText; ctx.font = isHeat ? '15px sans-serif' : '700 13px system-ui, sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(v, colX + colW, ry);
+  });
+  ctx.textAlign = 'left';
   }
   // Arsenal strip: the mission weapon picked from the full 56-weapon table.
-  panelSolid(ctx, rx, staged ? 188 : 566, rw, 62);
+  // Phase 7: stacked in the right instrument column under the stats.
+  panelSolid(ctx, rx, staged ? 188 : 220, rw, 62);
   const wdef = weaponById(plan.weaponId || 'venn-9mm');
-  const ay = staged ? 198 : 576;
+  const ay = staged ? 198 : 230;
   ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'left';
   ctx.fillText('ARSENAL — J / K · 56 WEAPONS', rx + 14, ay);
   ctx.fillStyle = PALETTE.hudText; ctx.font = '700 13.5px system-ui, sans-serif';
@@ -605,8 +616,9 @@ export function drawPlanning(ctx, game) {
   ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10.5px system-ui, sans-serif'; ctx.textAlign = 'right';
   ctx.fillText('DMG ' + wdef.damage + ' · MAG ' + (plan.gear.includes('extmag') && wdef.cls !== 'EXP' && wdef.cls !== 'RL' ? Math.round(wdef.mag * 1.5) : wdef.mag), rx + rw - 14, ay + 20);
   ctx.textAlign = 'left';
-  // Bottom centre: crew and gear over their slots.
-  const bx = 356, bw = 568;
+  // Bottom-left dock: crew and gear over their slots (Phase 7 — was
+  // bottom-centre, where it cut the street's foreground in two).
+  const bx = 14, bw = 568;
   if (staged) {
     // Collapsed crew+gear bar: the hired names and packed gear, one line
     // each — the full slot grids stay one keypress away in live play.
@@ -620,8 +632,8 @@ export function drawPlanning(ctx, game) {
     ctx.fillStyle = PALETTE.hudText; ctx.font = '600 10.5px system-ui, sans-serif';
     ctx.fillText(GEAR_POOL.filter((g) => plan.gear.includes(g.id)).map((g) => g.name).join(' · ') + '  (+' + (GEAR_POOL.length - plan.gear.length) + ' IN LOCKER)', bx + 190, 758);
   } else {
-  panelSolid(ctx, bx, 640, bw, 146);
-  y = 652;
+  panelSolid(ctx, bx, 634, bw, 152);
+  y = 646;
   ctx.textAlign = 'left'; ctx.fillStyle = '#f0d9a0'; ctx.font = '700 11px system-ui, sans-serif';
   ctx.fillText('CREW — 1-6 · ' + plan.crew.length + '/3', bx + 14, y); y += 18;
   CREW_POOL.forEach((c, i) => {
@@ -647,20 +659,23 @@ export function drawPlanning(ctx, game) {
     ctx.fillText(g.name, cxp, cyp + 1);
   });
   }
-  // Execute corner.
-  panelSolid(ctx, VIEW_W - 284, 640, 270, 62);
+  // Execute: bottom of the right instrument column (Phase 7 — was its
+  // own bottom-right corner panel over the street's foreground).
+  panelSolid(ctx, rx, 294, rw, 62);
   ctx.fillStyle = '#f2c14e'; ctx.font = '700 15px system-ui, sans-serif'; ctx.textAlign = 'left';
-  ctx.fillText('ENTER — EXECUTE PLAN', VIEW_W - 270, 652);
+  ctx.fillText('ENTER — EXECUTE PLAN', rx + 14, 306);
   ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 10.5px system-ui, sans-serif';
   const entryName = data.entries[plan.entry];
-  ctx.fillText(entryName + ' · ' + gw.name + ' · ' + (TIMES.find((t) => t.id === plan.timeOfDay) || TIMES[0]).label, VIEW_W - 270, 674);
+  ctx.fillText(entryName + ' · ' + gw.name + ' · ' + (TIMES.find((t) => t.id === plan.timeOfDay) || TIMES[0]).label, rx + 14, 328);
   ctx.restore();
   // The wheel as the board's inset (staged captures open it here): the full
   // 7-segment arsenal proof — counts 10/10/5/7/8/6/10, the plan's launcher
-  // highlighted, hub stats — over the street corridor, clear of every panel,
-  // so the mission frame never has to spend itself on a menu again. Staged
-  // mode docks it smaller (R 118) as part of the ≤40% overlay budget.
-  if (game.wheelOpen) drawWeaponWheel(ctx, game, 676, 338, staged ? 118 : 158);
+  // highlighted, hub stats. Phase 7 focal hierarchy: the wheel no longer
+  // sits at the centre of the street (R158 at 676,338 covered the focal
+  // corridor) — it is docked smaller (R122) over the bottom-right
+  // sidewalk/building edge, clear of every panel, so the street and its
+  // cars run through the middle of the frame as one scene.
+  if (game.wheelOpen) drawWeaponWheel(ctx, game, 1070, 555, staged ? 118 : 122);
 }
 export function drawSummary(ctx, game) {
   const s = game.lastSummary || {
