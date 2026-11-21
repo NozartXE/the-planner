@@ -31,6 +31,7 @@ import {
 } from './render3d.js';
 import { buildMaterials, paintPlateCell } from './materials3d.js';
 import { buildWorld } from './world3d.js';
+import { createPost } from './post3d.js';
 import { buildVehicles, buildHeli } from './vehicles3d.js';
 import { buildFigures } from './figures3d.js';
 
@@ -47,7 +48,12 @@ let GL_DEAD = false;
 function buildGL() {
   const core = createCore(VIEW_W, VIEW_H, VFOV);
   const matSet = buildMaterials();
-  return { ...core, ...matSet, lastKey: null };
+  // Phase 2 post pass (post3d.js): selective bloom + vignette over an
+  // HDR target. If the chain cannot be built on this GL stack the
+  // renderer simply keeps its Phase 1 direct path.
+  let post = null;
+  try { post = createPost(core.renderer, VIEW_W, VIEW_H); } catch (e) { post = null; }
+  return { ...core, ...matSet, post, lastKey: null };
 }
 function ensureGL() {
   if (GL) return GL;
@@ -427,10 +433,8 @@ function composite(ctx, gl, grade, idMode) {
   sg2.addColorStop(0.45, `rgba(255,92,120,${0.05 * wA})`);
   sg2.addColorStop(1, `rgba(38,14,54,${0.08 * wA})`);
   ctx.fillStyle = sg2; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-  const vg = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.42, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.88);
-  vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(1, 'rgba(30,8,16,0.34)');
-  ctx.fillStyle = vg; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  // The vignette moved into post3d.js (Phase 2): it is part of the GL
+  // composite now, applied before this grade wash.
 }
 function renderGL(gl, ctx, game) {
   const p = game.player;
@@ -508,7 +512,12 @@ function renderGL(gl, ctx, game) {
   addMesh(B.plate, M.plate, M.idBlack, false, false);
   addMesh(B.bus, M.bus, M.idBlack, false, false);
   if (!idState.mode) addMesh(B.alpha, M.alpha, M.idBlack, false, false);
-  gl.renderer.render(gl.scene, cam);
+  // ID renders (scale measurement) keep the Phase 1 direct path —
+  // pure flat colours must reach the readback unmodified. Everything
+  // else goes through the post chain (HDR target → bloom → ACES →
+  // vignette) when it built successfully.
+  if (gl.post && !idState.mode) gl.post.render(gl.scene, cam);
+  else gl.renderer.render(gl.scene, cam);
   composite(ctx, gl, grade, idState.mode);
   F = null;
   idState.cat = null;
