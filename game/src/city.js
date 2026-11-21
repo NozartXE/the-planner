@@ -44,9 +44,20 @@ export function generateCity(seed) {
       if (isPark) {
         parks.push({ x: ox, y: oy, w: inner, h: inner, bx, by });
         const n = rng.int(7, 11);
-        for (let i = 0; i < n; i++) trees.push({ x: ox + rng.range(28, inner - 28), y: oy + rng.range(28, inner - 28), r: rng.range(11, 17) });
+        // Coast fix (audit N2, park planting): on the eastern column the
+        // park block overlaps Ocean Drive's band, so a tree or palm drawn
+        // at the block's east edge could stand in the drive [3660, 3760).
+        // The draw happens exactly as before (same RNG consumption), then
+        // the planted x is clamped west of the band — bx 7 park only.
+        for (let i = 0; i < n; i++) {
+          const tx = ox + rng.range(28, inner - 28);
+          trees.push({ x: bx === BLOCKS_PER_SIDE - 1 ? Math.min(tx, 3652) : tx, y: oy + rng.range(28, inner - 28), r: rng.range(11, 17) });
+        }
         const np = rng.int(2, 4);
-        for (let i = 0; i < np; i++) palms.push({ x: ox + rng.range(30, inner - 30), y: oy + rng.range(30, inner - 30), lean: rng.range(-3, 3), s: rng.range(0.9, 1.15) });
+        for (let i = 0; i < np; i++) {
+          const px2 = ox + rng.range(30, inner - 30);
+          palms.push({ x: bx === BLOCKS_PER_SIDE - 1 ? Math.min(px2, 3652) : px2, y: oy + rng.range(30, inner - 30), lean: rng.range(-3, 3), s: rng.range(0.9, 1.15) });
+        }
         continue;
       }
       // The eastern column is the beachfront: art-deco pastel facades on every block.
@@ -56,9 +67,18 @@ export function generateCity(seed) {
         for (let px = 0; px < 2; px++) {
           if (rng.chance(0.16)) continue;
           const inset = rng.range(10, 18);
-          const bw = plot - inset * 2;
+          let bw = plot - inset * 2;
           const bh = plot - inset * 2;
           const bw2 = ox + px * plot + inset, bh2 = oy + py * plot + inset;
+          // Coast fix (audit N2): on the eastern column (bx = 7) the east
+          // plots (px = 1) used to end at x 3734–3758, standing across
+          // Ocean Drive [3668, 3760). Their width is capped so every
+          // footprint ends at x ≤ 3660 — a narrow beachfront row of deco
+          // hotels fronting a clear drive. The cap applies AFTER the
+          // inset draw and consumes no RNG, so the seeded generation
+          // order is unchanged and every non-east column (and every
+          // bx = 7 west plot) generates byte-identically.
+          if (bx === BLOCKS_PER_SIDE - 1 && px === 1) bw = Math.min(bw, 3660 - bw2);
           const hasNeon = rng.chance(district.neonChance);
           // Sparse rooftop props, fixed at generation so every frame (and screenshot) agrees.
           const props = [];
