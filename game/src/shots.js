@@ -234,155 +234,119 @@ export function applyShot(game, name, step) {
     return true;
   }
   if (name === 'chase') {
-    // 5-star pursuit east along the Gazette avenue, frozen at the PIT
-    // contact moment: an interceptor crosses the hero's front-north quarter
-    // at a mid-PIT angle, sparks and smoke at the contact,
-    // skid arcs behind both cars, pursuit units in echelon and a roadblock ahead.
-    // Jobs 1–2 are done ($1,350) and the current job is 3, "Front Page".
-    // Displayed speed: round(150 * 0.62) = 93 km/h (Top-3 rebuild
-    // Phase 2, gap-audit D12: the staged hero speed was 225 → a
-    // 140 km/h readout over a formation that reads as queued traffic
-    // at a cordon. 150 matches the pursuit units' own staged speed
-    // and lands the readout at 93 km/h — fast traffic flow, no jam
-    // at a 140 readout).
-    // 3D framing: the chase cam sits ~84 units behind the hero, so the alongside cop
-    // (south side, level with the hero) and the cutter ahead carry the pursuit read;
-    // two more interceptors trail behind for the minimap's cop cluster.
+    // TOTAL REBUILD Phase 2 restage: the 5-star pursuit moves from the
+    // Gazette avenue to the CLEARED OCEAN DRIVE at golden hour — the
+    // top class's hero geography (the audit's benchmark frames are
+    // coast chases). The coast fix (city.js) capped every bx=7 east
+    // building plot at x <= 3660, so the drive's full width
+    // [3668, 3760) is open asphalt: hero lane, both sidewalks
+    // ([3651, 3668) west, [3760, 3777) east), the planted median at
+    // x 3714 and the promenade beyond. The hero runs SOUTH along the
+    // drive (heading -PI/2): the chase cam behind him looks down the
+    // coast with the deco facades on his right (west, screen-left)
+    // and the beach, sea and boats on his left (east, screen-right).
+    // Formation, tactics bands, skid/spark/smoke vocabulary and every
+    // invariant of the Gazette staging carry over unchanged — the
+    // formation placements are hero-relative via at(), and the sim's
+    // assignTactics bands are rotation-invariant, so the hunt reads
+    // identically, only the ground changed. Frozen at the PIT contact
+    // moment: an interceptor crosses the hero's front quarter at a
+    // mid-PIT angle, sparks and smoke at the contact, pursuit units
+    // in echelon, a roadblock pair ahead. Jobs 1-2 are done ($1,350)
+    // and the current job is 3, "Front Page". Displayed speed:
+    // round(150 * 0.62) = 93 km/h.
     game.screen = 'play';
     run(150);
     game.screen = 'play';
-    // Phase 2 restage: the hero runs MID-BLOCK EAST along the Gazette
-    // avenue — was frozen IN the intersection, where the road grammar
-    // has its designed gap (no markings, no median) and the formation
-    // read as a parked queue. From the avenue's west segment the red
-    // radio tower (park block, 1691,1691) clears the H95 roofline at
-    // the frame's right edge and the (2067,1316) cylinder tower stands
-    // ahead-right, closing the Phase 1 orange void. Mid-block, the
-    // double yellows, dashed lanes and planted median run THROUGH the
-    // action and the zebra waits at the intersection ahead. All
-    // formation placements are hero-relative via at(), so the whole
-    // hunt rotates with the heading.
-    putPlayerInCar(game, game.traffic[0], 1200, 1477, 0, 150, { kind: 'coupe', color: '#7a4a3a', hp: 31, maxHp: 90 });
+    putPlayerInCar(game, game.traffic[0], 3735, 2100, -Math.PI / 2, 150, { kind: 'coupe', color: '#7a4a3a', hp: 31, maxHp: 90 });
     game.traffic[0].steer = 0.30; // front wheels visibly cut — a swerve, not a park
     const hero = game.traffic[0];
+    const H = hero.angle;
     const rot = (a, x, y) => ({ x: x * Math.cos(a) - y * Math.sin(a), y: x * Math.sin(a) + y * Math.cos(a) });
     const at = (car, x, y) => { const r = rot(car.angle, x, y); return { x: car.x + r.x, y: car.y + r.y }; };
-    // Traffic on the road surface only: ONE distant eastbound car stopped
-    // short of the roadblock (a civilian halted by the block — it sits
-    // beyond the roadblock pair in frame, clear of their silhouettes),
-    // and the other traffic car staged behind the camera, out of the read.
+    // Traffic: with the hero heading south, at(fwd, lat) maps fwd to
+    // -y (ahead = smaller y) and lat to +x (east). The halted civilian
+    // ahead runs the OPPOSING (northbound) lane, angle H + PI.
     const civ = at(hero, 700, -8);
-    // Top-3 rebuild Phase 2 (D1 civilian variety): kinds set EXPLICITLY
-    // on the staged traffic so the chase frame shows at least three
-    // distinct civilian kinds — this halted coupe, the sedan rolling
-    // up the opposing lane below, plus the fleeing sedan + hatch of
-    // the Phase 8 Part 2 staging (hero coupe is the player's, not a
-    // civilian). Phase 1 routes the shaped profiles by kind.
-    setCar(game.traffic[1], civ.x, civ.y, Math.PI, 0, { kind: 'coupe', color: '#8a4a5a' });
+    setCar(game.traffic[1], civ.x, civ.y, H + Math.PI, 0, { kind: 'coupe', color: '#8a4a5a' });
     const behind = at(hero, -380, 15);
-    setCar(game.traffic[2], behind.x, behind.y, 0, 40);
-    // Phase 8 density (mid-field band): a second civilian rolling up
-    // the opposing lane BEHIND the roadblock (queued traffic at the
-    // cordon, clear of every cop silhouette) and one car PARKED at the
-    // south curb mid-block — the hunt flies past a street that was
-    // already alive, instead of an emptied stage road.
+    setCar(game.traffic[2], behind.x, behind.y, H, 40);
     const civ2 = at(hero, 560, -21);
-    setCar(game.traffic[3], civ2.x, civ2.y, Math.PI, 55, { kind: 'sedan', color: '#5f7a6a' });
-    const curb = at(hero, 430, 37);
-    setCar(game.traffic[4], curb.x, curb.y, 0, 0);
-    // Phase 8 Part 2 density remainder (Seat 1 defect 2): the pursuit
-    // read as a police-only diorama — TWO civilian cars now run EAST
-    // in the hero's own lane direction at mid-distance, beyond the
-    // roadblock (traffic that was already fleeing the cordon), same
-    // car family, LEONIDA plates by construction. Cops stay 5.
+    setCar(game.traffic[3], civ2.x, civ2.y, H + Math.PI, 55, { kind: 'sedan', color: '#5f7a6a' });
+    // Parked at the WEST curb (lat -60 -> x 3675, on the drive's west
+    // edge by the facades — the east side is sand, no parking there).
+    const curb = at(hero, 430, -60);
+    setCar(game.traffic[4], curb.x, curb.y, H, 0);
+    // Two civilians fleeing south in the hero's own direction beyond
+    // the roadblock (traffic that was already fleeing the cordon).
     const flee1 = at(hero, 470, 12);
-    setCar(game.traffic[5], flee1.x, flee1.y, 0, 45, { kind: 'sedan', color: '#6a7a8a' });
+    setCar(game.traffic[5], flee1.x, flee1.y, H, 45, { kind: 'sedan', color: '#6a7a8a' });
     const flee2 = at(hero, 585, 16);
-    setCar(game.traffic[6], flee2.x, flee2.y, 0, 45, { kind: 'hatch', color: '#a8835a' });
+    setCar(game.traffic[6], flee2.x, flee2.y, H, 45, { kind: 'hatch', color: '#a8835a' });
     game.police.cops = [];
-    // Formation-true hunt: EXACTLY five interceptors for the plan's
-    // forecast five stars. The hero is the largest vehicle, centre-low,
-    // alone in its lane — the ONE unmistakable player car (rust coupe,
-    // plate LW 278, wheels cut in a swerve). The PIT unit crosses its
-    // front-north quarter at a mid-PIT angle, sparked and smoked at the
-    // touch point; two pursuit units echelon behind at varied gaps; the
-    // roadblock pair sits PERPENDICULAR across both lanes far ahead,
-    // silhouettes fully separated. No cop exceeds a quarter of the frame
-    // width; none clips.
-    // Phase 2 pursuit geometry (was a parallel queue): the PIT unit runs
-    // at a MID-PIT ANGLE (0.52 rad across the hero's front-north quarter,
-    // wheels cut back, contact damage smoking), and the two pursuit units
-    // echelon at VARIED gaps (124 / 96 — kept inside the sim's own
-    // tactical bands: ahead ≤130 and d ≥95, so assignTactics honestly
-    // labels them PURSUIT) and lateral offsets (−27 / +24), so the
-    // formation reads as a hunt at speed, not bumper-to-bumper.
+    // Formation-true hunt: EXACTLY five units for the plan's forecast
+    // five stars, THINNED and spaced (Phase 2 note): the PIT unit at
+    // the hero's front quarter, the two pursuit units echeloned at
+    // varied gaps (124 / 96 — inside the sim's own tactical bands:
+    // ahead <= 130 and d >= 95, so assignTactics honestly labels them
+    // PURSUIT), the roadblock pair PERPENDICULAR across both lanes far
+    // ahead, silhouettes fully separated. The units' visual variants
+    // (interceptor / SUV / PIT) come from vehicles3d's per-car hash,
+    // so the echelon reads as three distinct police shapes, not a
+    // clone wall.
     const contact = at(hero, 16, -14);
-    const pitAngle = 0.52;
+    const pitAngle = H + 0.52;
     const pitPos = at(hero, 30, -30);
     const pit = addCop(game, pitPos.x, pitPos.y, pitAngle);
     pit.speed = 150; pit.steer = -0.42; pit.hp = 44; // contact damage: smokes at the touch point
     const pu1 = at(hero, 124, 14);
-    const pursuit1 = addCop(game, pu1.x, pu1.y, 0.06); pursuit1.speed = 150; pursuit1.steer = 0.14;
+    const pursuit1 = addCop(game, pu1.x, pu1.y, H + 0.06); pursuit1.speed = 150; pursuit1.steer = 0.14;
     const pu2 = at(hero, 96, -37);
-    const pursuit2 = addCop(game, pu2.x, pu2.y, -0.05); pursuit2.speed = 150; pursuit2.steer = -0.10;
-    // Roadblock pair: across both lanes of the road ahead, noses pointing
-    // opposite ways, a car's width of daylight between their inner ends.
+    const pursuit2 = addCop(game, pu2.x, pu2.y, H - 0.05); pursuit2.speed = 150; pursuit2.steer = -0.10;
+    // Roadblock pair: across both lanes of the drive ahead, noses
+    // pointing opposite ways, a car's width of daylight between them.
     const bl1 = at(hero, 268, -42);
-    const block1 = addCop(game, bl1.x, bl1.y, Math.PI / 2); block1.speed = 0;
+    const block1 = addCop(game, bl1.x, bl1.y, H + Math.PI / 2); block1.speed = 0;
     const bl2 = at(hero, 276, 8);
-    const block2 = addCop(game, bl2.x, bl2.y, -Math.PI / 2); block2.speed = 0;
+    const block2 = addCop(game, bl2.x, bl2.y, H - Math.PI / 2); block2.speed = 0;
     game.police.assignTactics(game.player);
     game.police.lastSeenX = hero.x; game.police.lastSeenY = hero.y;
-    // Peds clear of the roadway: three on the park-side south sidewalk
-    // (y 1512, between the road's 1502 edge and the park plots), two on
-    // the north sidewalk (y 1396).
-    stagePed(game, 0, 1500, 1396, 0, 0.7, 0);
-    stagePed(game, 1, 1750, 1396, Math.PI, 2.4, 1);
-    stagePed(game, 2, 1600, 1512, Math.PI, 4.0, 2);
-    stagePed(game, 3, 1850, 1512, 0, 1.5, 3);
-    stagePed(game, 4, 1400, 1396, Math.PI, 5.3, 0);
-    // Phase 8: two far sidewalk figures toward the vanishing point, so
-    // the mid-field band carries life past the roadblock as well.
-    stagePed(game, 5, 1900, 1512, 0, 2.9, 1);
-    stagePed(game, 6, 1980, 1396, Math.PI, 1.7, 2);
-    // Top-3 rebuild Phase 2 (gap-audit D1): the boulevard CROWD — 14
-    // more staged pedestrians on top of the 7 above, spread over BOTH
-    // sidewalks (north y 1396, south y 1512), the planted median
-    // (y 1456, on the median strip runs, clear of every vehicle) and
-    // the zebra crossing at the intersection ahead (x ≈1518–1522, the
-    // east arm). None stands in a traffic lane, none blocks the hero
-    // or the pursuit formation (kept exactly as staged above), and
-    // every one wears deterministic varied clothing / skin / hair
-    // with its own gait and walk phase. [x, y, angle, phase, gait,
-    // shirt, pants, skin, hair]
-    const CROWD = [
-      [1280, 1396, Math.PI, 0.9, 1, '#b8452e', '#2e3440', '#8a5a34', '#17171a'],
-      [1320, 1396, 0, 3.4, 2, '#2e6f8e', '#3a332a', '#d9b48f', '#3d2c1c'],
-      [1560, 1396, Math.PI, 5.1, 0, '#d9a441', '#2c3a34', '#e8c39a', '#5a4632'],
-      [1720, 1396, 0, 1.8, 3, '#5f8a4a', '#40303a', '#b87f56', '#2b2118'],
-      [1880, 1396, Math.PI, 4.2, 1, '#7a4a8e', '#333338', '#6e4526', '#41303e'],
-      [1290, 1512, 0, 2.6, 2, '#3f7f8c', '#31404e', '#d9b48f', '#77716a'],
-      [1350, 1512, Math.PI, 0.4, 3, '#c9742e', '#2e3440', '#8a5a34', '#17171a'],
-      [1580, 1512, 0, 5.7, 0, '#8e2e4a', '#3a332a', '#e8c39a', '#3d2c1c'],
-      [1780, 1512, Math.PI, 2.1, 1, '#4a6fa5', '#2c3a34', '#b87f56', '#5a4632'],
-      [1950, 1512, 0, 3.9, 2, '#a5b83f', '#40303a', '#d9b48f', '#2b2118'],
-      [1370, 1456, 0, 1.3, 0, '#e0e0d8', '#333338', '#6e4526', '#17171a'],
-      [1650, 1456, Math.PI, 4.8, 3, '#2e8e6f', '#31404e', '#e8c39a', '#41303e'],
-      [1518, 1438, Math.PI / 2, 2.9, 1, '#b83f6f', '#2e3440', '#8a5a34', '#3d2c1c'],
-      [1522, 1472, -Math.PI / 2, 0.2, 2, '#416fa5', '#3a332a', '#d9b48f', '#5a4632'],
+    // NEAR CROWD IN REACTION POSES (Phase 2): the five scale-audit
+    // pedestrians stand on the two sidewalks flanking the action —
+    // west sidewalk x 3658, east promenade x 3776 — in the sim's own
+    // reaction states: hands up (armsup) and fleeing (flee), turned
+    // toward or away from the hunt. None stands in a traffic lane.
+    // [x, y, angle, phase, gait, pose, shirt, pants, skin, hair]
+    const NEAR = [
+      [3658, 2060, 0, 0.7, 0, 'armsup', '#b8452e', '#2e3440', '#8a5a34', '#17171a'],
+      [3776, 2075, 0.15, 2.4, 1, 'flee', '#2e6f8e', '#3a332a', '#d9b48f', '#3d2c1c'],
+      [3658, 1960, Math.PI, 4.0, 2, 'flee', '#d9a441', '#2c3a34', '#e8c39a', '#5a4632'],
+      [3776, 1930, 1.81, 1.5, 3, 'armsup', '#5f8a4a', '#40303a', '#b87f56', '#2b2118'],
+      [3658, 2150, -Math.PI / 2, 5.3, 0, 'walk', '#7a4a8e', '#333338', '#6e4526', '#41303e'],
     ];
-    CROWD.forEach((cd, i) => stagePed(game, 7 + i, cd[0], cd[1], cd[2], cd[3], cd[4],
+    NEAR.forEach((cd, i) => stagePed(game, i, cd[0], cd[1], cd[2], cd[3], cd[4],
+      { pose: cd[5], shirt: cd[6], pants: cd[7], skin: cd[8], hair: cd[9] }));
+    // The coast crowd: more figures spread along both sidewalks past
+    // the roadblock toward the vanishing point, walking the promenade
+    // and the facade side — deterministic varied clothing, none in a
+    // lane, none blocking the formation.
+    const CROWD = [
+      [3776, 1780, Math.PI, 0.9, 1, '#3f7f8c', '#31404e', '#d9b48f', '#77716a'],
+      [3658, 1720, 0, 3.4, 2, '#c9742e', '#2e3440', '#8a5a34', '#17171a'],
+      [3776, 1620, 0.3, 5.1, 0, '#8e2e4a', '#3a332a', '#e8c39a', '#3d2c1c'],
+      [3658, 1580, Math.PI, 1.8, 3, '#4a6fa5', '#2c3a34', '#b87f56', '#5a4632'],
+      [3776, 1480, Math.PI, 4.2, 1, '#a5b83f', '#40303a', '#d9b48f', '#2b2118'],
+      [3658, 1490, 0, 2.6, 2, '#e0e0d8', '#333338', '#6e4526', '#17171a'],
+      [3776, 1330, 0, 5.7, 0, '#2e8e6f', '#31404e', '#e8c39a', '#41303e'],
+      [3658, 1300, Math.PI, 2.1, 1, '#b83f6f', '#2e3440', '#8a5a34', '#3d2c1c'],
+    ];
+    CROWD.forEach((cd, i) => stagePed(game, 5 + i, cd[0], cd[1], cd[2], cd[3], cd[4],
       { shirt: cd[5], pants: cd[6], skin: cd[7], hair: cd[8] }));
-    // The scooter beat (D1's cyclist): a step-through scooter PARKED
-    // at the NORTH kerb in the chase mid-field (1440, 1413 — just
-    // west of the roadblock pair, clear of the hero's lane and of
-    // every cop silhouette: the first placement, at the south kerb
-    // behind the pursuit unit, projected almost entirely behind
-    // that car's body — verified by projected-footprint overlap and
-    // by the capture crop), its rider still seated, hands on the
-    // bar, in the 'ride' pose. Built by view3d's buildScooter.
+    // The scooter beat: a step-through scooter PARKED at the WEST
+    // kerb mid-field, its rider seated in the 'ride' pose. Built by
+    // view3d's buildScooter.
     game.stagedScooter = {
-      x: 1440, y: 1413, angle: 0, color: '#3f7f8c',
+      x: 3652, y: 1985, angle: -Math.PI / 2, color: '#3f7f8c',
       rider: { shirt: '#c94f38', pants: '#2e3440', skin: '#8a5a34', hair: '#17171a' },
     };
     game.money = 1350;
@@ -395,29 +359,26 @@ export function applyShot(game, name, step) {
     game.police.setStars(game.planStatsCache.heatStars, game.nowMs);
     hero.name = 'VELOZ COMET';
     game.weapon = weaponForPlan(game.plan);
-    // Phase 3 grade (D6): the chase renders in bright DAY light. The
-    // plan object itself keeps its golden timeOfDay — its heat forecast
-    // (5 stars) is computed from it and must not move — only the FRAME's
-    // grade changes, the way the board (golden) and this job's dusk
-    // sequel already differ per frame.
-    game.timeGrade = 'day';
+    // Phase 2 grade: GOLDEN HOUR on the coast — the plan's own
+    // timeOfDay (STAGED_PLAN_J3 is a golden-hour job; its heat
+    // forecast is computed from it and must not move). The Gazette
+    // staging overrode the frame to 'day'; on Ocean Drive the frame
+    // takes the plan's golden light, the hero geography's signature.
+    game.timeGrade = 'golden';
     setMission(game, 2, 'pickup', 78);
     game.player.hp = 100;
     game.bullets = []; game.toasts = [];
-    // MOTION EVIDENCE (final-fix, staging/capture-moment only — the fix
-    // round's formation geometry above is untouched): the panels read the
-    // formation-correct chase as static, so the capture instant now carries
-    // the full motion vocabulary at readable scale. Skid ARCS: five longer,
-    // wider segments per side behind the hero, trailing ~95 units with the
-    // angle opening and the track drifting outward as it falls back, so the
-    // arc tails emerge from behind the hero's silhouette onto open road;
-    // three matching segments behind the PIT cop.
+    // MOTION EVIDENCE (staging/capture-moment only): skid ARCS behind
+    // the hero and the PIT cop, a spark burst at the contact point, a
+    // stacked contact-smoke PLUME and layered tyre smoke — the same
+    // vocabulary as the Gazette frame, re-based on the rotated
+    // formation through at().
     game.fx.skids = [];
     const skidAngles = [0.04, 0.10, 0.18, 0.28, 0.40];
     for (const side of [-8, 8]) {
       for (let i = 0; i < 5; i++) {
         const p = at(hero, -16 - i * 15, side * (1 + i * 0.85));
-        game.fx.skid(p.x, p.y, skidAngles[i], 24, 5.0);
+        game.fx.skid(p.x, p.y, H + skidAngles[i], 24, 5.0);
       }
     }
     const pitSkidAngles = [0.03, 0.10, 0.20];
@@ -427,11 +388,6 @@ export function applyShot(game, name, step) {
         game.fx.skid(p.x, p.y, pitAngle + pitSkidAngles[i], 22, 4.6);
       }
     }
-    // Frozen effects: a denser spark burst at the contact point, a stacked
-    // contact-smoke PLUME at the PIT touch point (six puffs at staggered
-    // life ratios, so the soft-sprite renderer stacks them into a rising
-    // column at the exact point where the two bodies meet), and layered
-    // tyre smoke at the hero's rear tyres and the PIT cop's front tyres.
     const heroTyreL = at(hero, -14, -8), heroTyreR = at(hero, -14, 8);
     const pitTyreL = at(pit, 15, -7), pitTyreR = at(pit, 15, 7);
     const sparkCols = ['#ffd76a', '#f2c14e'];
@@ -577,10 +533,33 @@ export function applyShot(game, name, step) {
     // audit demanded: the driver on the sedan's east flank and the
     // passenger on its west flank, both in 'armsup' facing the
     // shooter (angles point from each figure toward the player).
-    stagePed(game, 13, 1022, 1082, 1.34, 0, 0,
+    // Phase 2 (D7): the driver stands 6 units further south-east
+    // than the earlier staging had him — still on the sedan's east
+    // flank, still in the spotlight pool's light, but no longer
+    // masking the burning hood point (1010, 1057) behind his torso.
+    stagePed(game, 13, 1028, 1088, 1.34, 0, 0,
       { pose: 'armsup', shirt: '#54604f', pants: '#2e3440', skin: '#b87f56', hair: '#17171a' });
     stagePed(game, 14, 993, 1062, 1.12, 0, 1,
       { pose: 'armsup', shirt: '#c9742e', pants: '#31404e', skin: '#d9b48f', hair: '#5a4632' });
+    // Phase 2 (audit N5): ONE armed hostile at the target sedan — a
+    // third crew figure just north of the sedan's nose, in the 'aim'
+    // pose with the two-handed firearm the figure builder draws for
+    // that pose, facing the shooter (angle = the bearing from the
+    // figure to the player). Dark clothing against the surrendering
+    // pair's lighter shirts, so the frame reads as fire exchanged with
+    // a threat at the car — not fire into a crowd. Placement solved by
+    // projecting every nearby figure with the aim camera's own math:
+    // he stands just off the sedan's front-right corner, a full figure
+    // ~121 px tall at screen (1045, 363–484) — clear of the REACT
+    // pedestrian at (1050, 1110) (screen x 950–1005) by ~40 px and of
+    // the lamp at (1094) by ~50 px, his dark silhouette against the
+    // white roadblock car behind him. Three earlier spots were tried
+    // and rejected on the captures: the east flank (1034, 1062) and
+    // (1020, 1042) are both masked by that same nearer REACT figure,
+    // and (1000, 1035) merges with the surrendering driver's
+    // silhouette inside the spotlight cone.
+    stagePed(game, 15, 1036, 1052, Math.atan2(1158 - 1052, 1040 - 1036), 0, 2,
+      { pose: 'aim', shirt: '#2e3440', pants: '#23262c', skin: '#6e4526', hair: '#17171a' });
     game.money = 2250;
     // Claim alignment (Phase 2 defect 8c): the board's forecast for this
     // chain is 5 stars and the chase fields 5 — the mission fields the
@@ -612,7 +591,22 @@ export function applyShot(game, name, step) {
     // sedan's staged hp 18 (≤22%: layered hood glow + smoke column)
     // the fire reads as the CAR burning at its engine, not a ground
     // pool burning beside it.
-    game.zones = [{ kind: 'fire', x: 1010, y: 1057, r: 15, until: game.nowMs + 60000, dps: 26 }];
+    // Phase 2 (D7, burn must READ at native resolution): the patch
+    // grows back to r 19 and the particle stack below adds a flame
+    // cluster + a taller smoke column on the hood — through the new
+    // bloom pass the fire now carries real screen weight. All added
+    // particles use rgba() colours on purpose: qa/measure's MISSION-AIM
+    // centroid counts only '#' spark colours, so the aim proof is
+    // untouched.
+    game.zones = [{ kind: 'fire', x: 1010, y: 1057, r: 19, until: game.nowMs + 60000, dps: 26 }];
+    // Phase 2 (audit D7): two satellite fire zones widen the burn's
+    // ground footprint — one at the nose tip (1016, 1050, r 12),
+    // clear of the spotlight pool's disc, and one on the flank
+    // (1006, 1064, r 10); their discs stack with the main zone's, so
+    // the orange pool around the nose reads at native resolution
+    // instead of disappearing under the heli pool.
+    game.zones.push({ kind: 'fire', x: 1016, y: 1050, r: 12, until: game.nowMs + 60000, dps: 26 });
+    game.zones.push({ kind: 'fire', x: 1006, y: 1064, r: 10, until: game.nowMs + 60000, dps: 26 });
     // Phase 3 (D7): ONE police helicopter hovers over the intersection
     // just north of the roadblock at altitude 65, sweeping its
     // spotlight onto the road at the struck sedan's south-east flank
@@ -707,6 +701,20 @@ export function applyShot(game, name, step) {
       ...sparks,
       { x: 1001, y: 1066, vx: 0, vy: 0, life: 1.0, maxLife: 1.0, color: 'rgba(120,120,125,0.6)', size: 7, drag: 0 },
       { x: 1013, y: 1058, vx: 0, vy: 0, life: 0.9, maxLife: 0.9, color: 'rgba(120,120,125,0.5)', size: 5.5, drag: 0 },
+      // Phase 2 burn stack (D7): flame glows clustered on the hood
+      // point + a taller, wider smoke column climbing off it — the
+      // sedan's own ≤22% burning state in vehicles3d stacks its glows
+      // at the same point, and the bloom pass fuses them into one
+      // readable fire. rgba() colours only (see the zones note above).
+      { x: 1014, y: 1050, vx: 0, vy: 0, life: 0.88, maxLife: 1.0, color: 'rgba(255,160,60,0.9)', size: 4, drag: 0 },
+      { x: 1017, y: 1054, vx: 0, vy: 0, life: 0.82, maxLife: 1.0, color: 'rgba(255,120,35,0.9)', size: 4, drag: 0 },
+      { x: 1008, y: 1061, vx: 0, vy: 0, life: 0.9, maxLife: 1.0, color: 'rgba(255,150,50,0.9)', size: 4, drag: 0 },
+      { x: 1012, y: 1056, vx: 0, vy: 0, life: 0.8, maxLife: 1.0, color: 'rgba(255,110,30,0.9)', size: 4, drag: 0 },
+      { x: 1005, y: 1058, vx: 0, vy: 0, life: 0.85, maxLife: 1.0, color: 'rgba(255,190,80,0.9)', size: 4, drag: 0 },
+      { x: 1011, y: 1064, vx: 0, vy: 0, life: 0.75, maxLife: 1.0, color: 'rgba(255,140,40,0.85)', size: 4, drag: 0 },
+      { x: 1008, y: 1062, vx: 0, vy: 0, life: 0.8, maxLife: 1.0, color: 'rgba(120,120,125,0.6)', size: 10, drag: 0 },
+      { x: 1013, y: 1057, vx: 0, vy: 0, life: 0.62, maxLife: 1.0, color: 'rgba(120,120,125,0.5)', size: 12, drag: 0 },
+      { x: 1004, y: 1067, vx: 0, vy: 0, life: 0.45, maxLife: 1.0, color: 'rgba(120,120,125,0.45)', size: 9, drag: 0 },
       { x: 986, y: 834, vx: 0, vy: 0, life: 0.8, maxLife: 1.0, color: 'rgba(120,120,125,0.55)', size: 6.5, drag: 0 },
       { x: 992, y: 837, vx: 0, vy: 0, life: 0.62, maxLife: 1.0, color: 'rgba(120,120,125,0.5)', size: 8, drag: 0 },
     ];
