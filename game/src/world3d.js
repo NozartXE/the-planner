@@ -344,7 +344,15 @@ function buildVegetation(R, game) {
     const s = bt.s || 1;
     box(B.flat, bt.x, bt.y, 2.2 * s, 15 * s, 5 * s, 2.2 * s, 0, lin([232, 226, 212]));
     limb(B.flat, [bt.x, bt.y, 3 * s], [bt.x, bt.y, 19 * s], 0.65, 0.65, lin([110, 88, 68]), 5);
-    B.flat.quad([bt.x + 1.2 * s, bt.y, 18 * s], [bt.x + 1.2 * s, bt.y, 3.5 * s], [bt.x + 11 * s, bt.y, 3.5 * s], [bt.x + 1.2 * s, bt.y, 18 * s], lin(rgb(bt.sail || '#f2e8d8')));
+    // The sail is a triangle (mast top, mast foot, boom end). The
+    // fourth quad corner must NOT repeat the first: a degenerate
+    // corner makes quad() compute a zero-length normal, whose
+    // shading is undefined and blooms into a solid black square over
+    // the whole boat (found in the Phase 2 coast chase capture —
+    // hull-only and rectangle-sail tests isolated it to this call).
+    // A hairline fourth corner 0.1 above the boom end keeps the
+    // triangle's true normal and adds only an invisible sliver.
+    B.flat.quad([bt.x + 1.2 * s, bt.y, 18 * s], [bt.x + 1.2 * s, bt.y, 3.5 * s], [bt.x + 11 * s, bt.y, 3.5 * s], [bt.x + 11 * s, bt.y, 3.6 * s], lin(rgb(bt.sail || '#f2e8d8')));
   }
   const WOOD = lin([122, 94, 66]), IRON = lin([40, 42, 48]);
   if (inR(1330, 1512, 1080)) buildBusStop(R, 1330, 1512, [0, -1]);
