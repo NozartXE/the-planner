@@ -171,35 +171,32 @@ export function applyShot(game, name, step) {
   // shot renders without one.
   game.stagedHeli = null;
   if (name === 'title') {
-    // Phase 4 restage (D5): a TITLE VISTA, not a street frame. The
-    // renderer has exactly one elevated camera — the planning orbit
-    // (235 units out, 105 up, looking at planTarget) — so the staging
-    // raises game.titleVista and main.js renders the title's world
-    // pass through that framing. The drawTitle overlay owns the centre.
-    // FIX ROUND (rebuild panel, both seats' #1 defect): the Phase 4
-    // framing looked EAST down the Gazette avenue from the crossing
-    // at (1456, 986) — the hero coupe's rear spoiler struck through
-    // "Press ENTER to start" and the controls row sat on the
-    // intersection's bright zebra stripes. The vista is restaged
-    // MID-BLOCK on the St Sable avenue (x 1456), camera at
-    // (1456, 2274), 105 up, looking SOUTH at (1456, 2509): no
-    // intersection stands at the target, so no zebra arm projects
-    // into the text zone (the 2396 crossing's arms fall in the
-    // foreground below the save line, the 2866 arms above the
-    // logotype), the text zone's ground is the avenue's dark asphalt,
-    // and the hero coupe + player figure stand in the near
-    // foreground 135 / 128 units out — their silhouettes top out
-    // BELOW the save line. Far traffic rides the avenue at 600+
-    // units, projecting above the logotype as horizon silhouettes;
-    // nothing staged crosses any text line (native-res crop-verified
-    // line by line). Fix 1b (prove the coast) was attempted FIRST and
-    // is STILL OPEN, honestly: Ocean Drive's east-plot buildings
-    // stand across the drive itself at most block rows — a north
-    // framing from (3714, 2455) captured a single facade wall, hero
-    // and figure inside its footprint — and the one long clear
-    // stretch (y 2337–3119) is bracketed by that same building class
-    // at its north end and a median tree at (3714, 2690) whose canopy
-    // crosses the tagline at every viable camera depth on the stretch.
+    // TOTAL REBUILD Phase 2 restage: the TITLE VISTA moves to the
+    // cleared Ocean Drive at NIGHT — the fix round's "prove the
+    // coast" item (1b), unblocked by the city.js coast fix: no bx=7
+    // building footprint crosses the drive any more, so the corridor
+    // the Phase 4 attempt found walled off is open asphalt end to
+    // end. The renderer has exactly one elevated camera — the
+    // planning orbit (235 units out, 105 up, looking at planTarget) —
+    // so the staging raises game.titleVista and main.js renders the
+    // title's world pass through that framing; drawTitle owns the
+    // centre. Camera at (3714, 2480), looking NORTH down the drive:
+    // deco facades west (screen-left), sand, sea and boats east
+    // (screen-right), the skyline behind the hero. The framing
+    // reuses the fix round's PROVEN crossing geometry, translated
+    // to the coast: the 2396 crossing sits 38–130 units ahead, so
+    // its zebra arms fill the foreground BELOW the save line (two
+    // earlier coast attempts put the far arm across the controls
+    // row at 128–220 units and across the save line itself at
+    // 78–170 — the fix round's defect class, caught on the crops);
+    // the 1926 crossing is 554 out / 319 beyond the target,
+    // projecting above the logotype. The hero coupe + player figure
+    // stand in the near foreground 135 / 128 units out, silhouettes
+    // topping out BELOW the save line; far traffic rides the drive
+    // at 600+ units as horizon silhouettes; the renderer's title
+    // culls strip any tree or palm whose crown would cross the
+    // glyph band. Nothing staged crosses any text line — verified
+    // on native-res crops line by line.
     game.screen = 'title';
     run(150);
     game.screen = 'title';
@@ -207,28 +204,40 @@ export function applyShot(game, name, step) {
     // moonlight, lit windows and streetlight pools behind the logo.
     game.timeGrade = 'night';
     game.titleVista = true;
-    game.planTarget = { x: 1456, y: 2509 };
-    game.planOrbitAngle = -Math.PI / 2; // camera at (1456, 2274), 105 up, looking south
+    game.planTarget = { x: 3714, y: 2245 };
+    game.planOrbitAngle = Math.PI / 2; // camera at (3714, 2480), 105 up, looking north
     game.player.inCar = false; game.player.car = null;
-    game.player.x = 1472; game.player.y = 2402; game.player.angle = Math.PI / 2;
+    game.player.x = 3720; game.player.y = 2353; game.player.angle = -Math.PI / 2;
     game.player.walkPhase = 1.1; game.player.vx = 0; game.player.vy = 0; game.player.hp = 100;
-    setCar(game.traffic[0], 1432, 2409, Math.PI / 2, 0, { kind: 'coupe', color: '#b8523f' });
+    setCar(game.traffic[0], 3735, 2346, -Math.PI / 2, 0, { kind: 'coupe', color: '#b8523f' });
     game.traffic[0].occupiedByPlayer = false;
-    // Lit streets below: far traffic on the avenue itself, small at
-    // the horizon, all 600+ units from the camera.
-    setCar(game.traffic[1], 1476, 2874, Math.PI / 2, 40, { kind: 'sedan', color: '#5f7a6a' });
-    setCar(game.traffic[2], 1436, 2954, Math.PI / 2, 40, { kind: 'hatch', color: '#a8835a' });
-    setCar(game.traffic[3], 1476, 3034, Math.PI / 2, 40, { kind: 'sedan', color: '#7a8a99' });
+    // Lit streets below: far traffic on the drive itself, small at
+    // the horizon, all 600+ units from the camera — a northbound
+    // pair's taillights and one southbound car's headlights.
+    setCar(game.traffic[1], 3735, 1830, -Math.PI / 2, 40, { kind: 'sedan', color: '#5f7a6a' });
+    setCar(game.traffic[2], 3693, 1760, Math.PI / 2, 40, { kind: 'hatch', color: '#a8835a' });
+    setCar(game.traffic[3], 3735, 1620, -Math.PI / 2, 40, { kind: 'sedan', color: '#7a8a99' });
     for (let i = 4; i < game.traffic.length; i++) setCar(game.traffic[i], 3300 + i * 10, 3300, 0, 0);
-    // Foreground sidewalk life below the text zone (west + east
-    // sidewalks, 125–130 units out) and two horizon figures on the
+    // Foreground sidewalk life below the text zone (west sidewalk +
+    // east promenade, ~130 units out) and two horizon figures on the
     // far sidewalks, above the logotype.
-    stagePed(game, 0, 1404, 2404, 0.4, 1.2, 0);
-    stagePed(game, 1, 1508, 2399, -0.6, 3.0, 1);
-    stagePed(game, 2, 1404, 2800, 2.6, 5.0, 2);
-    stagePed(game, 3, 1508, 2800, -2.2, 2.2, 3);
+    stagePed(game, 0, 3658, 2345, 0.4, 1.2, 0);
+    stagePed(game, 1, 3776, 2340, -0.6, 3.0, 1);
+    stagePed(game, 2, 3658, 1800, 2.6, 5.0, 2);
+    stagePed(game, 3, 3776, 1750, -2.2, 2.2, 3);
     game.police.cops = [];
     game.police.setStars(0, game.nowMs);
+    // Audit N4: the title presents the SAME mid-chain save state as
+    // the other three stagings — jobs 1-3 banked ($2,000 earned on
+    // top of the $250 start = $2,250 cash), so drawTitle's save line
+    // reads 'Saved progress: $2250 · 3 jobs done · $2000 earned',
+    // matching the map frame, instead of 'No saved progress yet'
+    // beside a $2,250 map. saveData is the object drawTitle reads;
+    // the game-level fields mirror the map staging's for coherence.
+    game.saveData = { ...game.saveData, money: 2250, missionsCompleted: 3, totalEarned: 2000 };
+    game.money = 2250;
+    game.totalEarned = 2000;
+    game.missionsCompleted = 3;
     game.bullets = []; game.fx.particles = []; game.fx.skids = []; game.toasts = [];
     finish(game);
     return true;

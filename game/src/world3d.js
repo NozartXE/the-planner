@@ -264,13 +264,46 @@ function buildVegetation(R, game) {
   const { B } = R;
   const camX = R.F.cam[0], camY = R.F.cam[1];
   const inR = (x, y, r) => { const dx = x - camX, dy = y - camY; return dx * dx + dy * dy < r * r; };
+  // The title's world pass renders through the planning orbit with
+  // game.screen flipped to 'planning' (main.js), so F.screen never
+  // reads 'title' during the vista and the glyph-band culls below
+  // were dead code — the Phase 2 coast title's palms crossed the
+  // logotype with the cull in place. game.titleVista is the vista's
+  // own flag: treat it as the title screen for culling.
+  const scr = game.titleVista ? 'title' : R.F.screen;
+  // The culls also can't use R.project (view3d's projectPoint): it
+  // applies only the camera's projection matrix, never its view
+  // matrix, so its coordinates are not screen coordinates and no
+  // cull box ever matched. projectCull does the full view+projection
+  // from the frame's own cam/look (same basis and focal the QA
+  // mirror uses, verified against captures). Used for the TITLE
+  // cull only; the summary branch keeps the legacy R.project path
+  // so the Phase 3 results frame renders exactly as verified.
+  const projectCull = (x, y, z) => {
+    // F carries the camera position and its world right vector
+    // (no roll, so right is horizontal); the title vista is always
+    // the planning orbit — 235 out, 105 up, looking at z 6 (frame-
+    // Camera's planning branch) — so the forward vector is the
+    // right vector turned -90 degrees in plan, pitched down by the
+    // orbit's own drop: forward = (right.y, -right.x) * 235, z -99.
+    const c = R.F.cam, rt = R.F.right;
+    let fx = rt[1] * 235, fy = -rt[0] * 235, fz = -99;
+    const fl = Math.hypot(fx, fy, fz) || 1; fx /= fl; fy /= fl; fz /= fl;
+    const rx = rt[0], ry = rt[1];
+    const ux = -fz * ry, uy = fz * rx, uz = fx * ry - fy * rx;
+    const dx = x - c[0], dy = y - c[1], dz = z - c[2];
+    const cz = dx * fx + dy * fy + dz * fz;
+    if (cz < 5) return null;
+    const FOCAL = 640 / Math.tan(1.05 / 2);
+    return { x: 640 + (dx * rx + dy * ry) / cz * FOCAL, y: 400 - (dx * ux + dy * uy + dz * uz) / cz * FOCAL };
+  };
   for (const t of game.city.trees || []) {
     if (!inR(t.x, t.y, 760)) continue;
-    if (R.F.screen === 'title' || R.F.screen === 'summary') {
-      const cp = R.project(t.x, t.y, 15 + (t.r || 13));
+    if (scr === 'title' || scr === 'summary') {
+      const cp = scr === 'title' ? projectCull(t.x, t.y, 15 + (t.r || 13)) : R.project(t.x, t.y, 15 + (t.r || 13));
       if (cp) {
-        if (R.F.screen === 'title' && cp.y > 140 && cp.y < 370 && cp.x > 220 && cp.x < 1060) continue;
-        if (R.F.screen === 'summary' && cp.y > 50 && cp.y < 750 && cp.x > 230 && cp.x < 1050) continue;
+        if (scr === 'title' && cp.y > 140 && cp.y < 370 && cp.x > 220 && cp.x < 1060) continue;
+        if (scr === 'summary' && cp.y > 50 && cp.y < 750 && cp.x > 230 && cp.x < 1050) continue;
       }
     }
     const r = t.r || 13;
@@ -289,11 +322,11 @@ function buildVegetation(R, game) {
     const s = (pm.s || 1) * 0.72;
     const leanX = (pm.lean || 0) * 1.35;
     const H = 30 * s;
-    if (R.F.screen === 'title' || R.F.screen === 'summary') {
-      const cp = R.project(pm.x + leanX * 2.2, pm.y, H + 2);
+    if (scr === 'title' || scr === 'summary') {
+      const cp = scr === 'title' ? projectCull(pm.x + leanX * 2.2, pm.y, H + 2) : R.project(pm.x + leanX * 2.2, pm.y, H + 2);
       if (cp) {
-        if (R.F.screen === 'title' && cp.y > 150 && cp.y < 360 && cp.x > 240 && cp.x < 1040) continue;
-        if (R.F.screen === 'summary' && cp.y > 40 && cp.y < 760 && cp.x > -280 && cp.x < 1700) continue;
+        if (scr === 'title' && cp.y > 150 && cp.y < 360 && cp.x > 240 && cp.x < 1040) continue;
+        if (scr === 'summary' && cp.y > 40 && cp.y < 760 && cp.x > -280 && cp.x < 1700) continue;
       }
     }
     let p0 = [pm.x, pm.y, 0];
