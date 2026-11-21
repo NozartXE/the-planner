@@ -1,537 +1,50 @@
-// view3d.js — REAL-3D renderer for AMBER COAST (golden-hour coastal city),
-// built on a vendored Three.js WebGL scene (game/vendor/three.module.min.js).
-// It replaces the old hand-rolled canvas-2D projected-polygon renderer: the
-// world is now true geometry — boxes, cylinders and planes lit by one low
-// western sun with a real shadow map, hemisphere ambient, distance fog and
-// procedural canvas textures — rendered to an offscreen WebGL canvas and
-// composited into the game's 2D canvas inside renderView3D, so main.js can
-// keep drawing its HUD overlays on the same context afterwards. It only
-// READS game state — the simulation is untouched — and every variation is a
-// deterministic hash of world data (never Math.random / Date.now /
-// performance.now in the render path), so screenshot staging stays
-// byte-identical across runs.
+// view3d.js — TOTAL REBUILD Phase 1: thin orchestrator over the new
+// renderer modules. The presentation class moved: render3d.js owns the
+// core (ACES tone mapping, PCFSoft shadows, PMREM sky environment,
+// grades), materials3d.js the MeshStandardMaterial library,
+// vehicles3d.js the shaped cars, figures3d.js the smooth figure. This
+// file keeps the EXACT public contract — exports renderView3D and
+// projectPoint, same staging interface for shots.js / main.js /
+// render.js — and owns what Phase 1 leaves in place: the frame camera,
+// the world dressing (ground, buildings, vegetation, skyline, props),
+// particles/sprites, and the final composite. It only READS game state;
+// every variation is a deterministic hash (never Math.random / Date.now
+// in the render path), so screenshot staging stays byte-identical.
 //
-// SCALE CONTRACT (kept from the previous renderer): the world is ~8.6 units
-// per metre (car length 38 ≈ 4.4 m). A standing figure's head top is 15.1
-// units (1.76 m) with the hair silhouette reaching ≈15.45, against a sedan
-// roof of 12.6 (1.47 m) — a world silhouette ratio of ≈1.23, inside the
-// realistic 1.15–1.25 band (Phase 3 scale fix). Buildings render at
-// b.height × 3.2.
-// Cameras match the previous build's framing: LOW chase cam 84 behind / 30
-// up driving, 52 / 30 on foot, and the GTA over-the-shoulder RIGHT aim cam
-// (≈30 back / 21 up, lateral shift to the gun side) while the aim predicate
-// holds, so the hero lands lower-left with the weapon at shoulder height.
+// SCALE CONTRACT (unchanged): ~8.6 units per metre; figure silhouette
+// 15.45 vs sedan roof 12.6 → ratio 1.226 (figures3d / vehicles3d hold
+// the anchors). Buildings render at b.height × 3.2. Cameras match the
+// standing framing: chase 84 behind / 30 up, on foot 52 / 30, OTS-right
+// aim (48 back / 20 up, +27 lateral) with the proven aim geometry.
 // World→Three mapping: three.x = world x, three.y = world z (up),
 // three.z = world y; a world yaw θ becomes a Three rotationY of −θ.
 import { VIEW_W, VIEW_H, WORLD_SIZE, BLOCK_PITCH, ROAD_W, PALETTE } from './config.js';
 import { isOnRoad, roadCenters, pointInBuilding } from './city.js';
 import { clamp } from './rng.js';
 import * as THREE from '../vendor/three.module.min.js';
+import {
+  GRADES, SUN_DIR, Batch, box, limb, ball, disc, mat4,
+  rgb, lin, linColor, hash01, parseColor, probeWebGL, createCore, idState,
+} from './render3d.js';
+import { buildMaterials, SIGNS, paintPlateCell } from './materials3d.js';
+import { buildVehicles, buildHeli } from './vehicles3d.js';
+import { buildFigures } from './figures3d.js';
 
-const FOV = 1.05; // ~60 degrees horizontal, as before
+const FOV = 1.05;
 const FOCAL = (VIEW_W / 2) / Math.tan(FOV / 2);
 const VFOV = (2 * Math.atan((VIEW_H / 2) / FOCAL) * 180) / Math.PI;
 const NEAR = 5;
-const FIG_H = 15.1;         // standing figure HEAD-TOP height, world units (Phase 3 scale fix: was 15.4 with hair spikes to ≈16.15 — silhouette/roof 1.31, outside the realistic band; hair silhouette now ≤15.45, roof 12.6 → 1.23)
-const CAR_ROOF = 12.6;      // sedan/coupe cabin roof height (Phase 3: 12.3 → 12.6, 1.43 → 1.47 m)
-const BUILD_SCALE = 3.2;    // building render height = data height × this
-const SUNSET_TOP = [88, 102, 130];   // dusty pale blue (Phase 8: the plum top read as flat orange-pink in the judged frames; GTA V grade is pale blue over a warm horizon)
-const SUNSET_MID = [186, 124, 122];  // softened rose
-const SUNSET_HOR = [252, 184, 124];  // paler warm horizon
-const FOG = [214, 184, 166]; // pale warm GREY — distance haze, not a wash
-const SUN = [255, 196, 116];
-function norm3(x, y, z) { const l = Math.hypot(x, y, z); return [x / l, y / l, z / l]; }
-// Time-of-day grades — the plan's time choice made visible. GOLDEN is the
-// game's established sunset; DUSK is the same sun an hour later: deeper
-// plum sky, redder horizon, heavier fog, dimmer sun, stronger lit windows.
-// Top-3 rebuild Phase 3 (gap-audit D6 — one amber grade in every frame):
-// DAY and NIGHT extend the range to the two ends the top 3 span. DAY is a
-// bright neutral midday — pale blue sky, high sun (its own sunDir), light
-// haze fog, windows barely lit. NIGHT is deep blue under a low eastern
-// moon: dim ambient, dark close fog, and the window/sign emissive turned
-// all the way up so the city lights itself. fogNear/fogFar now ride on
-// the grade (golden/dusk keep their standing values exactly); a grade's
-// sunDir, when present, replaces the shared sun direction for that grade
-// only — golden/dusk keep SUN_DIR, so their frames are untouched.
-const GRADES = {
-  golden: { top: SUNSET_TOP, mid: SUNSET_MID, hor: SUNSET_HOR, fog: FOG, sun: SUN, light: 1.0, wash: 1.0, emissive: 0.38, fogNear: 240, fogFar: 1550 },
-  dusk: { top: [38, 26, 64], mid: [120, 52, 92], hor: [214, 102, 84], fog: [150, 88, 96], sun: [240, 150, 90], light: 0.72, wash: 1.6, emissive: 0.85, fogNear: 190, fogFar: 1250 },
-  day: { top: [97, 141, 190], mid: [154, 183, 208], hor: [219, 228, 224], fog: [200, 215, 224], sun: [255, 246, 228], light: 1.16, wash: 0.35, emissive: 0.10, fogNear: 300, fogFar: 1750, sunDir: norm3(-0.42, -0.26, 0.87) },
-  night: { top: [9, 15, 37], mid: [23, 33, 66], hor: [54, 64, 98], fog: [24, 32, 52], sun: [170, 190, 232], light: 0.34, wash: 0.45, emissive: 1.15, fogNear: 150, fogFar: 1000, sunDir: norm3(0.52, 0.30, 0.30) },
-};
-// Sun low in the WEST (world -x), slightly north: shadows stretch EAST.
-// (World-space direction TOWARD the sun, z up.)
-const SUN_DIR = norm3(-0.90, -0.24, 0.34);
-
-function hash01(n) { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); }
-const rgbCache = new Map();
-function rgb(hex) {
-  let c = rgbCache.get(hex);
-  if (!c) {
-    const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
-    c = m ? [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16)] : [200, 200, 200];
-    rgbCache.set(hex, c);
-  }
-  return c;
-}
-function parseColor(str, fallback) {
-  if (!str) return fallback;
-  if (str[0] === '#') return rgb(str);
-  const m = /(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(str);
-  return m ? [+m[1], +m[2], +m[3]] : fallback;
-}
-// sRGB triple (0..255) → linear-space triple (0..1) for vertex colours and
-// material colours: the renderer outputs sRGB, so authoring in sRGB and
-// converting on the way in keeps the established palette exact.
-const _tc = new THREE.Color();
-function lin(triple) {
-  _tc.setRGB(triple[0] / 255, triple[1] / 255, triple[2] / 255, THREE.SRGBToLinearColorSpace);
-  return [_tc.r, _tc.g, _tc.b];
-}
-function linColor(triple) { return new THREE.Color().setRGB(triple[0] / 255, triple[1] / 255, triple[2] / 255, THREE.SRGBToLinearColorSpace); }
+const BUILD_SCALE = 3.2;
 const ASPHALT = [60, 53, 55], SIDEWALK_C = [122, 102, 80], PLOT = [93, 79, 60];
 const GRASS_C = [84, 100, 60], SAND_C = rgb(PALETTE.sand), WATER_C = rgb(PALETTE.water);
-const GLASS = [27, 40, 54], TYRE = [12, 12, 15];
 
 // ------------------------------------------------------------ WebGL boot
-// The renderer is created lazily and ONCE. Support is probed by asking a
-// scratch canvas for a WebGL2 context and requiring a real version string
-// back — under the stubbed DOM of the smoke harness (and on any machine
-// without GL) the probe fails and renderView3D falls back to a flat 2D
-// wash instead of throwing, so no caller ever breaks.
-let GL = null;      // live renderer bundle
+let GL = null;
 let GL_DEAD = false;
-function probeWebGL() {
-  try {
-    if (typeof document === 'undefined' || !document.createElement) return false;
-    const cv = document.createElement('canvas');
-    if (!cv || !cv.getContext) return false;
-    const gl = cv.getContext('webgl2') || cv.getContext('webgl');
-    if (!gl || typeof gl.getParameter !== 'function') return false;
-    return typeof gl.getParameter(gl.VERSION) === 'string';
-  } catch (e) { return false; }
-}
-function makeCanvas2d(w, h) {
-  const cv = document.createElement('canvas');
-  cv.width = w; cv.height = h;
-  return [cv, cv.getContext('2d')];
-}
-function lcg(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
-
-// ------------------------------------------- procedural textures (seeded)
-// Every texture is painted ONCE from a seeded LCG (never Math.random), so
-// captures stay byte-identical. Tiles are MACRO-first (window grids, slab
-// joints, storey banding) — the detail must survive the 320 px contact
-// sheet the judge reads.
-function paintAsphalt(c, t, seed) {
-  const R = lcg(seed);
-  c.fillStyle = 'rgb(63,56,58)'; c.fillRect(t.x, t.y, t.w, t.h);
-  for (let i = 0; i < 16; i++) {
-    const px = t.x + R() * t.w, py = t.y + R() * t.h, r = 34 + R() * 96;
-    c.fillStyle = R() < 0.5 ? 'rgba(255,238,214,0.055)' : 'rgba(0,0,0,0.075)';
-    c.beginPath(); c.ellipse(px, py, r, r * 0.55, R() * 3, 0, Math.PI * 2); c.fill();
-  }
-  c.fillStyle = 'rgba(0,0,0,0.10)';
-  c.fillRect(t.x, t.y + t.h * 0.26, t.w, 24); c.fillRect(t.x, t.y + t.h * 0.62, t.w, 24);
-  c.fillStyle = 'rgba(255,255,255,0.045)';
-  c.fillRect(t.x, t.y + t.h * 0.26 + 10, t.w, 4); c.fillRect(t.x, t.y + t.h * 0.62 + 10, t.w, 4);
-  for (let i = 0; i < 5; i++) {
-    const px = t.x + R() * t.w, py = t.y + R() * t.h;
-    c.fillStyle = 'rgba(8,8,11,0.20)'; c.beginPath(); c.ellipse(px, py, 16 + R() * 30, 10 + R() * 16, R() * 3, 0, Math.PI * 2); c.fill();
-  }
-  c.strokeStyle = 'rgba(18,16,18,0.5)'; c.lineWidth = 2;
-  for (let i = 0; i < 3; i++) {
-    let px = t.x + R() * t.w, py = t.y + R() * t.h; c.beginPath(); c.moveTo(px, py);
-    for (let k = 0; k < 5; k++) { px += (R() - 0.3) * 60; py += (R() - 0.5) * 44; c.lineTo(px, py); }
-    c.stroke();
-  }
-  for (let i = 0; i < 2600; i++) {
-    const px = t.x + R() * t.w, py = t.y + R() * t.h;
-    c.fillStyle = R() < 0.5 ? 'rgba(255,244,220,0.05)' : 'rgba(0,0,0,0.06)';
-    c.fillRect(px, py, 2, 2);
-  }
-}
-function paintConcrete(c, t, seed) {
-  const R = lcg(seed);
-  c.fillStyle = 'rgb(169,164,156)'; c.fillRect(t.x, t.y, t.w, t.h); // light-grey sidewalk (Rect 2026-11-20 palette)
-  for (let i = 0; i < 12; i++) {
-    const px = t.x + R() * t.w, py = t.y + R() * t.h, r = 30 + R() * 80;
-    c.fillStyle = R() < 0.5 ? 'rgba(255,240,214,0.05)' : 'rgba(20,14,8,0.06)';
-    c.beginPath(); c.ellipse(px, py, r, r * 0.6, R() * 3, 0, Math.PI * 2); c.fill();
-  }
-  // Per-slab value alternation so individual pavement slabs read at
-  // distance instead of one flat sheet (Phase 8 sidewalk readability).
-  for (let sx = 0; sx < 4; sx++) for (let sy = 0; sy < 4; sy++) {
-    if ((sx + sy) % 2 === 0) continue;
-    c.fillStyle = 'rgba(52,44,36,0.07)';
-    c.fillRect(t.x + (t.w / 4) * sx, t.y + (t.h / 4) * sy, t.w / 4, t.h / 4);
-  }
-  // Expansion-joint grid: dark lines every quarter tile in both axes.
-  c.strokeStyle = 'rgba(38,30,22,0.72)'; c.lineWidth = 4;
-  for (let i = 0; i <= 4; i++) {
-    c.beginPath(); c.moveTo(t.x + (t.w / 4) * i, t.y); c.lineTo(t.x + (t.w / 4) * i, t.y + t.h); c.stroke();
-    c.beginPath(); c.moveTo(t.x, t.y + (t.h / 4) * i); c.lineTo(t.x + t.w, t.y + (t.h / 4) * i); c.stroke();
-  }
-  for (let i = 0; i < 1500; i++) {
-    const px = t.x + R() * t.w, py = t.y + R() * t.h;
-    c.fillStyle = R() < 0.5 ? 'rgba(255,244,220,0.05)' : 'rgba(0,0,0,0.05)';
-    c.fillRect(px, py, 2, 2);
-  }
-}
-// One facade tile spans ~95 world units in both axes: a strict window grid
-// (columns every ~19 units, rows every ~25), framed panes, a share of them
-// lit warm. The emissive twin carries ONLY the lit panes on black, so dusk
-// windows glow without the wall washing out. Returns nothing; paints into
-// the two canvases' contexts at the given tile rects.
-function paintFacade(c, e, t, base, seed, litFrac) {
-  const R = lcg(seed);
-  c.fillStyle = `rgb(${base[0]},${base[1]},${base[2]})`; c.fillRect(t.x, t.y, t.w, t.h);
-  e.fillStyle = 'rgb(0,0,0)'; e.fillRect(t.x, t.y, t.w, t.h);
-  for (let i = 0; i < 8; i++) { // soft value patches so the wall is not one tone
-    const px = t.x + R() * t.w, py = t.y + R() * t.h, r = 26 + R() * 60;
-    c.fillStyle = R() < 0.5 ? 'rgba(255,240,214,0.05)' : 'rgba(10,6,4,0.05)';
-    c.beginPath(); c.ellipse(px, py, r, r * 0.7, 0, 0, Math.PI * 2); c.fill();
-  }
-  const cols = 5, rows = 4, cw = t.w / cols, rh = t.h / rows;
-  for (let row = 0; row < rows; row++) {
-    // Storey band: a slightly darker line under each row of windows.
-    c.fillStyle = 'rgba(20,14,10,0.16)';
-    c.fillRect(t.x, t.y + row * rh + rh * 0.86, t.w, 3);
-    for (let col = 0; col < cols; col++) {
-      const wx = t.x + col * cw + cw * 0.22, wy = t.y + row * rh + rh * 0.16, ww = cw * 0.56, wh = rh * 0.58;
-      c.fillStyle = 'rgb(43,44,51)'; c.fillRect(wx - 2.5, wy - 2.5, ww + 5, wh + 5);
-      const lit = R() < litFrac;
-      if (lit) {
-        const warm = 0.82 + R() * 0.18;
-        c.fillStyle = `rgb(${Math.round(255 * warm)},${Math.round(202 * warm)},${Math.round(128 * warm)})`;
-        c.fillRect(wx, wy, ww, wh);
-        e.fillStyle = `rgb(${Math.round(255 * warm)},${Math.round(190 * warm)},${Math.round(110 * warm)})`;
-        e.fillRect(wx, wy, ww, wh);
-      } else {
-        const v = 0.85 + R() * 0.3;
-        c.fillStyle = `rgb(${Math.round(92 * v)},${Math.round(108 * v)},${Math.round(128 * v)})`;
-        c.fillRect(wx, wy, ww, wh);
-      }
-      c.fillStyle = 'rgba(255,255,255,0.10)'; c.fillRect(wx, wy, ww, 3); // pane header glint
-    }
-  }
-}
-function paintShop(c, e, t, seed) {
-  const R = lcg(seed);
-  c.fillStyle = 'rgb(96,74,56)'; c.fillRect(t.x, t.y, t.w, t.h);
-  e.fillStyle = 'rgb(0,0,0)'; e.fillRect(t.x, t.y, t.w, t.h);
-  // Sign band along the top of the tile (named sign quads sit proud of it).
-  c.fillStyle = 'rgb(70,52,40)'; c.fillRect(t.x, t.y, t.w, t.h * 0.30);
-  c.fillStyle = 'rgba(255,226,170,0.20)'; c.fillRect(t.x, t.y + t.h * 0.30, t.w, 3);
-  const bays = 4, bw = t.w / bays;
-  for (let i = 0; i < bays; i++) {
-    const bx = t.x + i * bw + bw * 0.10, by = t.y + t.h * 0.40, bwid = bw * 0.80, bh = t.h * 0.52;
-    c.fillStyle = 'rgb(56,40,28)'; c.fillRect(bx - 3, by - 3, bwid + 6, bh + 6);
-    const lit = R() < 0.8;
-    if (lit) {
-      c.fillStyle = 'rgb(216,158,100)'; c.fillRect(bx, by, bwid, bh);
-      e.fillStyle = 'rgb(150,100,52)'; e.fillRect(bx, by, bwid, bh);
-    } else {
-      c.fillStyle = 'rgb(96,116,134)'; c.fillRect(bx, by, bwid, bh);
-    }
-    c.fillStyle = 'rgba(40,28,20,0.8)';
-    c.fillRect(bx + bwid * 0.32, by, 3, bh); c.fillRect(bx + bwid * 0.64, by, 3, bh);
-    // Awning stripe over each bay.
-    c.fillStyle = `rgba(${140 + Math.floor(R() * 40)},${70 + Math.floor(R() * 30)},${52},0.85)`;
-    c.fillRect(bx - 3, by - t.h * 0.075, bwid + 6, t.h * 0.06);
-  }
-}
-function paintSandGrass(c, t, seed) {
-  const R = lcg(seed);
-  // Top half of the tile = sand, bottom half = grass (UV bands pick one).
-  c.fillStyle = 'rgb(217,189,143)'; c.fillRect(t.x, t.y, t.w, t.h / 2);
-  c.fillStyle = 'rgb(84,100,60)'; c.fillRect(t.x, t.y + t.h / 2, t.w, t.h / 2);
-  for (let i = 0; i < 900; i++) {
-    const px = t.x + R() * t.w, py = t.y + R() * (t.h / 2);
-    c.fillStyle = R() < 0.5 ? 'rgba(120,92,52,0.16)' : 'rgba(255,246,220,0.13)';
-    c.fillRect(px, py, 2.5, 2.5);
-  }
-  for (let i = 0; i < 26; i++) { // grass mottling: darker + lighter tuft patches
-    const px = t.x + R() * t.w, py = t.y + t.h / 2 + R() * (t.h / 2), r = 8 + R() * 22;
-    c.fillStyle = R() < 0.5 ? 'rgba(52,66,34,0.20)' : 'rgba(126,150,84,0.18)';
-    c.beginPath(); c.ellipse(px, py, r, r * 0.6, R() * 3, 0, Math.PI * 2); c.fill();
-  }
-}
-function paintRoof(c, t, seed) {
-  const R = lcg(seed);
-  c.fillStyle = 'rgb(203,181,154)'; c.fillRect(t.x, t.y, t.w, t.h);
-  for (let i = 0; i < 10; i++) {
-    const px = t.x + R() * t.w, py = t.y + R() * t.h, r = 20 + R() * 54;
-    c.fillStyle = R() < 0.5 ? 'rgba(120,96,70,0.10)' : 'rgba(255,244,224,0.08)';
-    c.beginPath(); c.ellipse(px, py, r, r * 0.7, R() * 3, 0, Math.PI * 2); c.fill();
-  }
-  for (let i = 0; i < 1600; i++) {
-    const px = t.x + R() * t.w, py = t.y + R() * t.h;
-    c.fillStyle = R() < 0.5 ? 'rgba(90,70,50,0.10)' : 'rgba(255,248,230,0.08)';
-    c.fillRect(px, py, 2, 2);
-  }
-  c.strokeStyle = 'rgba(90,72,54,0.35)'; c.lineWidth = 2;
-  c.strokeRect(t.x + 3, t.y + 3, t.w - 6, t.h - 6);
-}
-const SIGNS = [
-  { name: 'GATOR PAWN', bg: [146, 66, 54] },
-  { name: 'TACO SOL', bg: [172, 116, 48] },
-  { name: 'AMBER RIMS', bg: [56, 102, 110] },
-  { name: 'SALTY BAIT CO', bg: [96, 124, 84] },
-  { name: 'PALM LIQUOR', bg: [128, 84, 110] },
-  // Phase 3 (D11): five more Amber Coast originals — hotels and beach
-  // trade the first five lacked — so neighbouring storefronts stop
-  // repeating the same handful of names down a skyline. Muted grounds.
-  { name: 'HOTEL CORALINA', bg: [64, 96, 116] },
-  { name: 'VELA SUITES', bg: [110, 84, 96] },
-  { name: 'SURF & SAND', bg: [84, 116, 108] },
-  { name: 'CASA DEL FARO', bg: [150, 110, 62] },
-  { name: 'PELICAN DINER', bg: [96, 110, 64] },
-];
-function paintSignAtlas(c) {
-  SIGNS.forEach((s, i) => {
-    const y = i * 36;
-    c.fillStyle = `rgb(${s.bg[0]},${s.bg[1]},${s.bg[2]})`; c.fillRect(0, y, 256, 36);
-    c.strokeStyle = 'rgba(24,18,14,0.55)'; c.lineWidth = 3; c.strokeRect(1.5, y + 1.5, 253, 33);
-    c.fillStyle = '#f7efdd'; c.font = '700 22px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.fillText(s.name, 128, y + 19);
-  });
-}
-// Plate atlas: 8×8 cells of 160×50. A car's registration is derived from
-// its own id with the standing formula, so the plate it wears is stable.
-const PLATE_COLS = 8, PLATE_ROWS = 8;
-function paintPlateCell(c, id) {
-  const cell = ((id % (PLATE_COLS * PLATE_ROWS)) + PLATE_COLS * PLATE_ROWS) % (PLATE_COLS * PLATE_ROWS);
-  const x = (cell % PLATE_COLS) * 160, y = Math.floor(cell / PLATE_COLS) * 50;
-  c.fillStyle = '#edeade'; c.fillRect(x, y, 160, 50);
-  c.strokeStyle = '#3a3f4a'; c.lineWidth = 4; c.strokeRect(x + 2, y + 2, 156, 46);
-  c.fillStyle = '#31405c'; c.font = '700 12px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'top';
-  c.fillText('L E O N I D A', x + 80, y + 5);
-  const letters = 'ABCDEFGHJKLMNPRSTUVWXYZ';
-  const reg = letters[(id * 7 + 3) % 23] + letters[(id * 11 + 8) % 23] + ' ' + (100 + ((id * 137 + 41) % 900));
-  c.fillStyle = '#1c1e24'; c.font = '700 25px system-ui, sans-serif';
-  c.fillText(reg, x + 80, y + 20);
-}
-function plateUV(id) {
-  const cell = ((id % (PLATE_COLS * PLATE_ROWS)) + PLATE_COLS * PLATE_ROWS) % (PLATE_COLS * PLATE_ROWS);
-  const cx = cell % PLATE_COLS, cy = Math.floor(cell / PLATE_COLS);
-  // CanvasTexture flipY: v = 1 is the TOP of the painted canvas.
-  return { u0: cx / PLATE_COLS, u1: (cx + 1) / PLATE_COLS, v0: 1 - (cy + 1) / PLATE_ROWS, v1: 1 - cy / PLATE_ROWS };
-}
-function radialSprite(size, stops) {
-  const [cv, c] = makeCanvas2d(size, size);
-  const g = c.createRadialGradient(size / 2, size / 2, 1, size / 2, size / 2, size / 2);
-  for (const [o, col] of stops) g.addColorStop(o, col);
-  c.fillStyle = g; c.fillRect(0, 0, size, size);
-  return cv;
-}
-
 function buildGL() {
-  const glCanvas = document.createElement('canvas');
-  glCanvas.width = VIEW_W; glCanvas.height = VIEW_H;
-  const renderer = new THREE.WebGLRenderer({ canvas: glCanvas, antialias: true, powerPreference: 'default' });
-  renderer.setSize(VIEW_W, VIEW_H, false);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
-  renderer.toneMapping = THREE.NoToneMapping;
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(VFOV, VIEW_W / VIEW_H, 1, 4200);
-
-  // ---- textures
-  function texOf(w, h, painter, srgb = true) {
-    const [cv, c] = makeCanvas2d(w, h);
-    painter(c, { x: 0, y: 0, w, h });
-    const t = new THREE.CanvasTexture(cv);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
-    t.anisotropy = 4;
-    return t;
-  }
-  function facadePair(base, seed, litFrac) {
-    const [cv, c] = makeCanvas2d(256, 256);
-    const [ev, e] = makeCanvas2d(256, 256);
-    paintFacade(c, e, { x: 0, y: 0, w: 256, h: 256 }, base, seed, litFrac);
-    const map = new THREE.CanvasTexture(cv);
-    map.wrapS = map.wrapT = THREE.RepeatWrapping; map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = 4;
-    const emissiveMap = new THREE.CanvasTexture(ev);
-    emissiveMap.wrapS = emissiveMap.wrapT = THREE.RepeatWrapping; emissiveMap.colorSpace = THREE.SRGBColorSpace;
-    return { map, emissiveMap };
-  }
-  const asphaltTex = texOf(512, 256, (c, t) => paintAsphalt(c, t, 1103));
-  const concreteTex = texOf(512, 256, (c, t) => paintConcrete(c, t, 2207));
-  const sandGrassTex = texOf(256, 256, (c, t) => paintSandGrass(c, t, 3301));
-  const roofTex = texOf(256, 256, (c, t) => paintRoof(c, t, 4417));
-  const fw = facadePair([188, 168, 146], 5513, 0.45);
-  const fc = facadePair([172, 164, 152], 6629, 0.40);
-  // Office facade (Phase 8): a third grid family — fewer, WIDER panes,
-  // thick spandrel bands, some floors blind-dark — so mid-rise slabs stop
-  // sharing one window grid with the residential towers.
-  const fo = (() => {
-    const [cv, c] = makeCanvas2d(256, 256);
-    const [ev, e] = makeCanvas2d(256, 256);
-    const R = lcg(9949);
-    c.fillStyle = 'rgb(176,158,138)'; c.fillRect(0, 0, 256, 256);
-    e.fillStyle = 'rgb(0,0,0)'; e.fillRect(0, 0, 256, 256);
-    for (let i = 0; i < 8; i++) {
-      const px = R() * 256, py = R() * 256, r = 26 + R() * 60;
-      c.fillStyle = R() < 0.5 ? 'rgba(255,240,214,0.05)' : 'rgba(10,6,4,0.05)';
-      c.beginPath(); c.ellipse(px, py, r, r * 0.7, 0, 0, Math.PI * 2); c.fill();
-    }
-    const cols = 4, rows = 3, cw = 256 / cols, rh = 256 / rows;
-    for (let row = 0; row < rows; row++) {
-      c.fillStyle = 'rgba(30,22,16,0.30)';
-      c.fillRect(0, row * rh + rh * 0.78, 256, rh * 0.22); // spandrel band
-      for (let col = 0; col < cols; col++) {
-        const wx = col * cw + cw * 0.14, wy = row * rh + rh * 0.12, ww = cw * 0.72, wh = rh * 0.56;
-        c.fillStyle = 'rgb(48,46,50)'; c.fillRect(wx - 2.5, wy - 2.5, ww + 5, wh + 5);
-        const r = R();
-        if (r < 0.38) {
-          const warm = 0.82 + R() * 0.18;
-          c.fillStyle = `rgb(${Math.round(255 * warm)},${Math.round(202 * warm)},${Math.round(128 * warm)})`;
-          c.fillRect(wx, wy, ww, wh);
-          e.fillStyle = `rgb(${Math.round(255 * warm)},${Math.round(190 * warm)},${Math.round(110 * warm)})`;
-          e.fillRect(wx, wy, ww, wh);
-        } else if (r < 0.48) { c.fillStyle = 'rgb(72,74,80)'; c.fillRect(wx, wy, ww, wh); } // blinds down
-        else { const v = 0.85 + R() * 0.3; c.fillStyle = `rgb(${Math.round(96 * v)},${Math.round(110 * v)},${Math.round(126 * v)})`; c.fillRect(wx, wy, ww, wh); }
-        c.fillStyle = 'rgba(255,255,255,0.10)'; c.fillRect(wx, wy, ww, 3);
-      }
-    }
-    const map = new THREE.CanvasTexture(cv);
-    map.wrapS = map.wrapT = THREE.RepeatWrapping; map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = 4;
-    const emissiveMap = new THREE.CanvasTexture(ev);
-    emissiveMap.wrapS = emissiveMap.wrapT = THREE.RepeatWrapping; emissiveMap.colorSpace = THREE.SRGBColorSpace;
-    return { map, emissiveMap };
-  })();
-  // Glass-tower pair (Rect's 2026-11-20 city reference): dense blue-teal
-  // pane grid — sky-bright panes against deep teal, few lit at dusk.
-  const fg = (() => {
-    const [cv, c] = makeCanvas2d(256, 256);
-    const [ev, e] = makeCanvas2d(256, 256);
-    const R = lcg(8813);
-    c.fillStyle = 'rgb(148,168,178)'; c.fillRect(0, 0, 256, 256);
-    e.fillStyle = 'rgb(0,0,0)'; e.fillRect(0, 0, 256, 256);
-    const cols = 6, rows = 5, cw = 256 / cols, rh = 256 / rows;
-    for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
-      const wx = col * cw + 2.5, wy = row * rh + 2.5, ww = cw - 5, wh = rh - 5;
-      const r = R();
-      if (r < 0.34) c.fillStyle = `rgb(${168 + Math.floor(R() * 22)},${202 + Math.floor(R() * 18)},${212 + Math.floor(R() * 14)})`;
-      else if (r < 0.44) { c.fillStyle = 'rgb(240,196,120)'; e.fillStyle = 'rgb(190,140,70)'; e.fillRect(wx, wy, ww, wh); }
-      else c.fillStyle = `rgb(${52 + Math.floor(R() * 16)},${86 + Math.floor(R() * 18)},${104 + Math.floor(R() * 16)})`;
-      c.fillRect(wx, wy, ww, wh);
-      c.fillStyle = 'rgba(255,255,255,0.13)'; c.fillRect(wx, wy, ww, 3);
-    }
-    const map = new THREE.CanvasTexture(cv);
-    map.wrapS = map.wrapT = THREE.RepeatWrapping; map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = 4;
-    const emissiveMap = new THREE.CanvasTexture(ev);
-    emissiveMap.wrapS = emissiveMap.wrapT = THREE.RepeatWrapping; emissiveMap.colorSpace = THREE.SRGBColorSpace;
-    return { map, emissiveMap };
-  })();
-  const [shopCv, shopC] = makeCanvas2d(512, 256);
-  const [shopEv, shopE] = makeCanvas2d(512, 256);
-  paintShop(shopC, shopE, { x: 0, y: 0, w: 512, h: 256 }, 7739);
-  const shopTex = new THREE.CanvasTexture(shopCv);
-  shopTex.wrapS = shopTex.wrapT = THREE.RepeatWrapping; shopTex.colorSpace = THREE.SRGBColorSpace; shopTex.anisotropy = 4;
-  const shopEmissive = new THREE.CanvasTexture(shopEv);
-  shopEmissive.wrapS = shopEmissive.wrapT = THREE.RepeatWrapping; shopEmissive.colorSpace = THREE.SRGBColorSpace;
-  const [signCv, signC] = makeCanvas2d(256, 36 * SIGNS.length);
-  paintSignAtlas(signC);
-  const signTex = new THREE.CanvasTexture(signCv);
-  signTex.colorSpace = THREE.SRGBColorSpace;
-  // Bus-stop sign face (Phase 8): invented transit branding, painted once.
-  const [busCv, busC] = makeCanvas2d(256, 128);
-  busC.fillStyle = 'rgb(36,90,100)'; busC.fillRect(0, 0, 256, 128);
-  busC.strokeStyle = '#f7efdd'; busC.lineWidth = 6; busC.strokeRect(5, 5, 246, 118);
-  busC.fillStyle = '#f7efdd'; busC.textAlign = 'center'; busC.textBaseline = 'middle';
-  busC.font = '700 58px system-ui, sans-serif'; busC.fillText('BUS', 128, 46);
-  busC.font = '700 25px system-ui, sans-serif'; busC.fillText('AMBER LINE', 128, 98);
-  const busTex = new THREE.CanvasTexture(busCv);
-  busTex.colorSpace = THREE.SRGBColorSpace;
-  const [plateCv, plateC] = makeCanvas2d(160 * PLATE_COLS, 50 * PLATE_ROWS);
-  plateC.fillStyle = '#edeade'; plateC.fillRect(0, 0, plateCv.width, plateCv.height);
-  const plateTex = new THREE.CanvasTexture(plateCv);
-  plateTex.colorSpace = THREE.SRGBColorSpace;
-  const glowTex = new THREE.CanvasTexture(radialSprite(128, [[0, 'rgba(255,255,255,1)'], [0.25, 'rgba(255,255,255,0.42)'], [1, 'rgba(255,255,255,0)']]));
-  const smokeTex = new THREE.CanvasTexture(radialSprite(128, [[0, 'rgba(255,255,255,0.85)'], [0.55, 'rgba(255,255,255,0.45)'], [1, 'rgba(255,255,255,0)']]));
-
-  // ---- materials
-  const mats = {
-    flat: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }),
-    // Phase 9/10 paint batch (proven in Phase 9 F1): Phong with a warm
-    // directional specular so sunlit car paint carries a highlight
-    // streak tied to the sun — Lambert has no specular channel at all.
-    paint: new THREE.MeshPhongMaterial({ vertexColors: true, specular: linColor([255, 205, 150]), shininess: 24 }),
-    // Top-3 rebuild Phase 1 (D3): glass gets its OWN specular — a cooler,
-    // tighter highlight than paint's warm streak, so the glasshouse reads
-    // as reflective glass against the paint instead of a black slab.
-    glasspaint: new THREE.MeshPhongMaterial({ vertexColors: true, specular: linColor([205, 228, 255]), shininess: 52 }),
-    basic: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }),
-    alpha: new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide }),
-    asphalt: new THREE.MeshLambertMaterial({ map: asphaltTex }),
-    concrete: new THREE.MeshLambertMaterial({ map: concreteTex }),
-    sandgrass: new THREE.MeshLambertMaterial({ map: sandGrassTex }),
-    roof: new THREE.MeshLambertMaterial({ map: roofTex, vertexColors: true }),
-    fwarm: new THREE.MeshLambertMaterial({ map: fw.map, emissiveMap: fw.emissiveMap, emissive: linColor([255, 196, 116]), emissiveIntensity: 0.38, vertexColors: true }),
-    fcool: new THREE.MeshLambertMaterial({ map: fc.map, emissiveMap: fc.emissiveMap, emissive: linColor([255, 196, 116]), emissiveIntensity: 0.38, vertexColors: true }),
-    foffice: new THREE.MeshLambertMaterial({ map: fo.map, emissiveMap: fo.emissiveMap, emissive: linColor([255, 196, 116]), emissiveIntensity: 0.38, vertexColors: true }),
-    glass: new THREE.MeshLambertMaterial({ map: fg.map, emissiveMap: fg.emissiveMap, emissive: linColor([255, 196, 116]), emissiveIntensity: 0.3, vertexColors: true }),
-    shop: new THREE.MeshLambertMaterial({ map: shopTex, emissiveMap: shopEmissive, emissive: linColor([255, 190, 110]), emissiveIntensity: 0.3, vertexColors: true }),
-    sign: new THREE.MeshBasicMaterial({ map: signTex }),
-    bus: new THREE.MeshBasicMaterial({ map: busTex, side: THREE.DoubleSide }),
-    plate: new THREE.MeshBasicMaterial({ map: plateTex }),
-    idFlat: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }),
-    idBlack: new THREE.MeshBasicMaterial({ color: 0x000000 }),
-  };
-
-  // ---- sky dome: gradient + sun disc in one shader (fog-exempt).
-  const skyMat = new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: {
-      top: { value: linColor(SUNSET_TOP) }, mid: { value: linColor(SUNSET_MID) }, hor: { value: linColor(SUNSET_HOR) },
-      sunDir: { value: new THREE.Vector3(SUN_DIR[0], SUN_DIR[2], SUN_DIR[1]) }, sunCol: { value: linColor(SUN) },
-      haze: { value: linColor(FOG) },
-    },
-    vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: [
-      'uniform vec3 top; uniform vec3 mid; uniform vec3 hor; uniform vec3 sunDir; uniform vec3 sunCol; uniform vec3 haze;',
-      'varying vec3 vDir;',
-      'void main(){',
-      '  float h = clamp(vDir.y, -0.08, 1.0);',
-      '  vec3 col = h > 0.32 ? mix(mid, top, smoothstep(0.32, 0.95, h)) : mix(hor, mid, smoothstep(-0.02, 0.32, h));',
-      // Phase 8 haze band: a warm thin haze sitting ON the skyline —
-      // full fog tone at the horizon line, gone by h=0.16 — so distant
-      // towers meet a hazed sky instead of a hard orange edge. This is
-      // inside the sky material only; scene surfaces are untouched.
-      '  col = mix(haze, col, smoothstep(-0.01, 0.16, h));',
-      '  float s = max(dot(normalize(vDir), normalize(sunDir)), 0.0);',
-      '  col += sunCol * (pow(s, 220.0) * 0.85 + pow(s, 18.0) * 0.30);',
-      '  gl_FragColor = vec4(col, 1.0);',
-      '}',
-    ].join('\n'),
-  });
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(3400, 24, 12), skyMat);
-  sky.frustumCulled = false;
-  scene.add(sky);
-
-  const hemi = new THREE.HemisphereLight(linColor([255, 196, 150]), linColor([84, 66, 54]), 0.85);
-  scene.add(hemi);
-  const sun = new THREE.DirectionalLight(linColor(SUN), 2.1);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
-  sun.shadow.camera.near = 1; sun.shadow.camera.far = 2400;
-  sun.shadow.camera.left = -420; sun.shadow.camera.right = 420;
-  sun.shadow.camera.top = 420; sun.shadow.camera.bottom = -420;
-  sun.shadow.bias = -0.0006;
-  scene.add(sun); scene.add(sun.target);
-  scene.fog = new THREE.Fog(linColor(FOG), 240, 1550);
-
-  return {
-    renderer, scene, camera, glCanvas, mats, skyMat, sky, hemi, sun,
-    plateC, plateTex, paintedPlates: new Set(), glowTex, smokeTex,
-    dyn: [], // dynamic meshes rebuilt per frame (disposed after render)
-    sprites: [], // pooled sprites
-  };
+  const core = createCore(VIEW_W, VIEW_H, VFOV);
+  const matSet = buildMaterials();
+  return { ...core, ...matSet, lastKey: null };
 }
 function ensureGL() {
   if (GL) return GL;
@@ -541,141 +54,9 @@ function ensureGL() {
   return GL;
 }
 
-// ------------------------------------------------------- geometry batches
-// The whole world is rebuilt per frame into a handful of merged meshes:
-// one vertex-coloured Lambert batch (all flat-shaded geometry), one unlit
-// batch (lights, plates glow), one RGBA alpha batch (skids, fire, marker,
-// crosswalks), and one batch per textured material. Merging keeps draw
-// calls in the dozens even with ~200 buildings and 100+ vehicles/figures.
-let IDMODE = false;
-const ID_COLORS = { fig: [0, 1, 0], car: [0, 0, 1], tank: [1, 0, 0], plane: [1, 0, 1] };
-let curCat = null; // id-render category of the object currently being built
-class Batch {
-  constructor(withUv = false, rgba = false) {
-    this.pos = []; this.nor = []; this.col = []; this.uv = withUv ? [] : null; this.rgba = rgba;
-  }
-  push(geom, matrix, color, uvMul, uvOff) {
-    const g = geom.index ? geom.toNonIndexed() : geom;
-    const p = g.attributes.position, n = g.attributes.normal, u = g.attributes.uv;
-    const nm = new THREE.Matrix3().getNormalMatrix(matrix);
-    const v = new THREE.Vector3(), nv = new THREE.Vector3();
-    let col = color;
-    if (IDMODE) { const idc = ID_COLORS[curCat]; col = idc ? [idc[0], idc[1], idc[2], color[3]] : [0, 0, 0, color[3]]; }
-    for (let i = 0; i < p.count; i++) {
-      v.fromBufferAttribute(p, i).applyMatrix4(matrix);
-      this.pos.push(v.x, v.y, v.z);
-      nv.fromBufferAttribute(n, i).applyMatrix3(nm).normalize();
-      this.nor.push(nv.x, nv.y, nv.z);
-      this.col.push(col[0], col[1], col[2]);
-      if (this.rgba) this.col.push(col.length > 3 ? col[3] : 1);
-      if (this.uv) {
-        const uu = u ? u.getX(i) : 0, vv = u ? u.getY(i) : 0;
-        this.uv.push(uvMul ? uu * uvMul[0] + (uvOff ? uvOff[0] : 0) : uu, uvMul ? vv * uvMul[1] + (uvOff ? uvOff[1] : 0) : vv);
-      }
-    }
-    if (g !== geom) g.dispose();
-  }
-  // One quad from four world corners (x, y, z-up), counter-clockwise seen
-  // from the lit side; uv = [u0, v0, u1, v1] mapped corner-wise p0..p3.
-  quad(p0, p1, p2, p3, color, uv) {
-    const a = new THREE.Vector3(p0[0], p0[2], p0[1]), b = new THREE.Vector3(p1[0], p1[2], p1[1]);
-    const c = new THREE.Vector3(p2[0], p2[2], p2[1]), d = new THREE.Vector3(p3[0], p3[2], p3[1]);
-    const n = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(d, a)).normalize();
-    let col = color;
-    if (IDMODE) { const idc = ID_COLORS[curCat]; col = idc ? [idc[0], idc[1], idc[2], color[3]] : [0, 0, 0, color[3]]; }
-    const pts = [a, b, c, a, c, d];
-    const uvs = uv ? [[uv[0], uv[1]], [uv[2], uv[1]], [uv[2], uv[3]], [uv[0], uv[1]], [uv[2], uv[3]], [uv[0], uv[3]]] : null;
-    for (let i = 0; i < 6; i++) {
-      this.pos.push(pts[i].x, pts[i].y, pts[i].z);
-      this.nor.push(n.x, n.y, n.z);
-      this.col.push(col[0], col[1], col[2]);
-      if (this.rgba) this.col.push(col.length > 3 ? col[3] : 1);
-      if (this.uv) this.uv.push(uvs ? uvs[i][0] : 0, uvs ? uvs[i][1] : 0);
-    }
-  }
-  build(mat, shadows = true) {
-    if (!this.pos.length) return null;
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, this.rgba ? 4 : 3));
-    if (this.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
-    const m = new THREE.Mesh(g, mat);
-    if (shadows) { m.castShadow = true; m.receiveShadow = true; }
-    return m;
-  }
-}
-const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler();
-function mat4(px, py, pz, rotY = 0, sx = 1, sy = 1, sz = 1) {
-  _e.set(0, rotY, 0); _q.setFromEuler(_e);
-  return new THREE.Matrix4().compose(new THREE.Vector3(px, py, pz), _q.clone(), new THREE.Vector3(sx, sy, sz));
-}
-const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
-// Axis-aligned-in-yaw box from world centre + half extents (x, y, z-up).
-function box(batch, cx, cy, cz, hx, hy, hz, yaw, color, uvMul, uvOff) {
-  batch.push(UNIT_BOX, mat4(cx, cz, cy, -yaw, hx * 2, hz * 2, hy * 2), color, uvMul, uvOff);
-}
-// Tapered segment between two world points (limbs, trunks, barrels):
-// a round-section cylinder, smooth-shaded, radius r0 at p0 → r1 at p1.
-// Optional elliptical squash (sz) for torsos.
-function limb(batch, p0, p1, r0, r1, color, segs = 7, squash = 1) {
-  const a = new THREE.Vector3(p0[0], p0[2], p0[1]), b = new THREE.Vector3(p1[0], p1[2], p1[1]);
-  const dir = new THREE.Vector3().subVectors(b, a);
-  const len = dir.length() || 0.001;
-  const g = new THREE.CylinderGeometry(r1, r0, len, segs);
-  const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
-  const mid = a.clone().add(b).multiplyScalar(0.5);
-  const m = new THREE.Matrix4().compose(mid, quat, new THREE.Vector3(1, 1, squash));
-  batch.push(g, m, color);
-  g.dispose();
-}
-function ball(batch, x, y, z, r, color, detail = 0) {
-  const g = new THREE.IcosahedronGeometry(r, detail);
-  batch.push(g, mat4(x, z, y, 0, 1, 1, 1), color);
-  g.dispose();
-}
-function disc(batch, x, y, z, r, color, seg = 20) {
-  const g = new THREE.CircleGeometry(r, seg);
-  batch.push(g, mat4(x, z, y, 0).multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2)), color);
-  g.dispose();
-}
-// Trapezoid prism in CAR-LOCAL space (x forward, y up, z lateral) — the
-// shaped-profile primitive of the Phase 1 vehicle rebuild (D3): a box
-// whose top face slopes from rRear (fraction of height at x −0.5) to
-// rFront (at x +0.5), flat-shaded with computed face normals, pushed
-// through the same batcher as box(). Heights are fractions so one unit
-// geometry serves every slope; the local matrix supplies real size.
-function prismGeo(rRear, rFront) {
-  const RBL = [-0.5, 0, -0.5], RBR = [-0.5, 0, 0.5], RTL = [-0.5, rRear, -0.5], RTR = [-0.5, rRear, 0.5];
-  const FBL = [0.5, 0, -0.5], FBR = [0.5, 0, 0.5], FTL = [0.5, rFront, -0.5], FTR = [0.5, rFront, 0.5];
-  const tris = [
-    RTL, RTR, FTR, RTL, FTR, FTL, // top (sloped)
-    RBL, FBR, RBR, RBL, FBL, FBR, // bottom
-    RBL, FTL, FBL, RBL, RTL, FTL, // left flank
-    RBR, FBR, FTR, RBR, FTR, RTR, // right flank
-    RBL, RBR, RTR, RBL, RTR, RTL, // rear face
-    FBL, FTL, FTR, FBL, FTR, FBR, // front face
-  ];
-  const pos = [];
-  for (const v of tris) pos.push(v[0], v[1], v[2]);
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.computeVertexNormals(); // non-indexed → one flat normal per face
-  return g;
-}
-// Push a prism into a batch in car-local space: centre x cx, base at
-// zBase (world-up units), length/wid along the car, top edge heights
-// hRear / hFront measured up from zBase.
-function prism(batch, M, cx, zBase, len, wid, hRear, hFront, color) {
-  const hMax = Math.max(hRear, hFront, 0.01);
-  const g = prismGeo(hRear / hMax, hFront / hMax);
-  batch.push(g, M.clone().multiply(mat4(cx, zBase, 0, 0, len, hMax, wid)), color);
-  g.dispose();
-}
-
 // ------------------------------------------------------------- frame state
-let F = null; // { cam:[x,y,z], right:[x,y], grade, time, screen, heroCar }
-let lastCam = null; // three camera of the most recent WebGL frame
+let F = null; // { cam, right, gradeName, gradeEmissive, time, screen, heroCar }
+let lastCam = null;
 export function projectPoint(x, y, z) {
   if (!lastCam) return null;
   const v = new THREE.Vector3(x, z, y);
@@ -685,10 +66,10 @@ export function projectPoint(x, y, z) {
   if (v.z > 1) return null;
   return { x: (v.x + 1) / 2 * VIEW_W, y: (1 - v.y) / 2 * VIEW_H, dist: -view.z };
 }
-// Camera framing, matched to the previous build: planning = elevated
-// orbit of the target block; driving = 84 back / 30 up looking 40 ahead;
-// on foot = 52 / 30; aiming = OTS right (31 back / 19 up, +30 lateral to
-// the gun side, look swung −17 to the opposite side).
+// Camera framing (standing values): planning = elevated orbit; driving
+// = 84 back / 30 up looking 40 ahead; on foot = 52 / 30; aiming = the
+// OTS-right rig (48 back / 20 up, +27 gun-side lateral, look 110 ahead /
+// −22) whose staged impact qa/measure.mjs verifies.
 function frameCamera(game) {
   const p = game.player;
   const isDrive = !!p.inCar && !!p.car;
@@ -701,24 +82,6 @@ function frameCamera(game) {
     return { cam: [camX, camY, camH], look: [t.x, t.y, 6], isDrive };
   }
   const aiming = !isDrive && ((game.bullets && game.bullets.length > 0) || (game.lastShotAt && game.nowMs - game.lastShotAt < 700));
-  // Phase 2 aim framing: OTS-right — the single shooter fills the
-  // lower-left foreground (head + right shoulder large to camera, scene
-  // ahead still wide). Phase 3 aim coherence (Rect: "crosshair dimana
-  // dan nembaknya kemana"): the Phase 2 offsets projected the staged
-  // impact 240 px from the fixed HUD reticle — the camera sat back
-  // 40 / height 18 / lateral +26 with the look swung 125 ahead / −27, a
-  // staging solved numerically (and re-measured in qa/measure.mjs) so
-  // the muzzle→impact line passes through the reticle centre at
-  // (0.536W, 0.5H) with the whole figure still in frame.
-  // Top-3 rebuild Phase 2 restage (gap-audit D8: the figure stood LARGE
-  // centre-left — 363 px of the 800-tall frame): the aim camera pulls
-  // back/up to 48 / height 20 / lateral +27 and the look settles at
-  // 110 ahead / −22. The staged impact world point is UNCHANGED (the
-  // Phase 4 first-cabin-contact slide), so qa/measure.mjs — which
-  // mirrors the Phase 3 camera — still reports its 8.15 / 8.1 px; the
-  // new framing was re-solved with the same projection math against
-  // THIS camera: impact delta 4.95 px, muzzle-line distance 4.24 px,
-  // shooter height 309 px, feet at (408, 729) — smaller, lower-left.
   const back = isDrive ? 84 : aiming ? 48 : 52;
   const camH = isDrive ? 30 : aiming ? 20 : 30;
   const fh = [Math.cos(yaw), Math.sin(yaw)];
@@ -762,10 +125,10 @@ function getSprite(gl, i) {
   return gl.sprites[i];
 }
 let spriteN = 0;
-function addGlow(gl, x, y, z, r, colorLin, alpha) {
-  if (IDMODE || alpha <= 0.003) return;
-  const sp = getSprite(gl, spriteN++);
-  sp.material.map = gl.glowTex;
+function addGlow(x, y, z, r, colorLin, alpha) {
+  if (idState.mode || alpha <= 0.003 || !GL) return;
+  const sp = getSprite(GL, spriteN++);
+  sp.material.map = GL.glowTex;
   sp.material.blending = THREE.AdditiveBlending;
   sp.material.color.setRGB(colorLin[0], colorLin[1], colorLin[2]);
   sp.material.opacity = alpha;
@@ -774,10 +137,10 @@ function addGlow(gl, x, y, z, r, colorLin, alpha) {
   sp.scale.set(r * 2, r * 2, 1);
   sp.visible = true;
 }
-function addSmoke(gl, x, y, z, r, alpha, grey = 0.58) {
-  if (IDMODE || alpha <= 0.003) return;
-  const sp = getSprite(gl, spriteN++);
-  sp.material.map = gl.smokeTex;
+function addSmoke(x, y, z, r, alpha, grey = 0.58) {
+  if (idState.mode || alpha <= 0.003 || !GL) return;
+  const sp = getSprite(GL, spriteN++);
+  sp.material.map = GL.smokeTex;
   sp.material.blending = THREE.NormalBlending;
   sp.material.color.setRGB(grey, grey, grey * 1.02);
   sp.material.opacity = alpha;
@@ -785,6 +148,12 @@ function addSmoke(gl, x, y, z, r, alpha, grey = 0.58) {
   sp.position.set(x, z, y);
   sp.scale.set(r * 2, r * 2, 1);
   sp.visible = true;
+}
+function ensurePlate(id) {
+  if (!GL || GL.paintedPlates.has(id)) return;
+  paintPlateCell(GL.plateC, id);
+  GL.paintedPlates.add(id);
+  GL.plateTex.needsUpdate = true;
 }
 
 // ------------------------------------------------------------------ ground
@@ -803,7 +172,8 @@ function groundKind(game, x, y) {
 }
 const PLANE_G = new THREE.PlaneGeometry(45.2, 45.2).rotateX(-Math.PI / 2);
 const WHITE = [1, 1, 1];
-function buildGround(gl, game, B) {
+function buildGround(R, game) {
+  const { B } = R;
   const camX = F.cam[0], camY = F.cam[1];
   const CELL = 44;
   const i0 = Math.floor((camX - 1280) / CELL), i1 = Math.floor((camX + 1280) / CELL);
@@ -829,7 +199,6 @@ function buildGround(gl, game, B) {
         const wc = wHash > 0.86 ? [110, 178, 182] : wHash > 0.68 ? [64, 138, 152] : WATER_C;
         B.flat.quad([cx - 23, cy - 23, 0.06], [cx + 23, cy - 23, 0.06], [cx + 23, cy + 23, 0.06], [cx - 23, cy + 23, 0.06], lin(wc));
       } else {
-        // Site pads read as concrete; everything else is plot ground.
         let site = false;
         if (game.city.sites) for (const st of game.city.sites) if (cx >= st.x && cx <= st.x + st.w && cy >= st.y && cy <= st.y + st.h) site = true;
         if (site) B.concrete.push(PLANE_G, m, WHITE, [2, 2], [0, 0]);
@@ -837,11 +206,9 @@ function buildGround(gl, game, B) {
       }
     }
   }
-  // Open water east of the shore, one sheet under the cells.
   B.flat.quad([WORLD_SIZE + 40, -240, 0.02], [4700, -240, 0.02], [4700, WORLD_SIZE + 240, 0.02], [WORLD_SIZE + 40, WORLD_SIZE + 240, 0.02], lin([46, 116, 132]));
   const centers = roadCenters();
   const inRange = (x, y, r = 1080) => { const dx = x - camX, dy = y - camY; return dx * dx + dy * dy < r * r; };
-  // Actors that break median segments (a median never spears a vehicle).
   const actors = [];
   for (const c of game.traffic) actors.push(c);
   for (const c of game.specials || []) actors.push(c);
@@ -849,25 +216,22 @@ function buildGround(gl, game, B) {
   actors.push(game.player);
   if (game.crewMate) actors.push(game.crewMate);
   const actorNear = (x, y, r) => actors.some((a) => { const dx = a.x - x, dy = a.y - y; return dx * dx + dy * dy < r * r; });
-  // --- Rect 2026-11-20 road pattern: planted medians, double yellow centre
-  // lines flanking them, dashed white lane lines, zebra crossings.
+  // Road grammar: planted medians, double yellow centre lines, dashed
+  // white lane lines, zebra crossings, kerbs.
   const YELLOW = lin([218, 182, 94]), LANEWHITE = lin([226, 223, 215]);
   const MED_SIDE = lin([150, 146, 138]), MED_TOP = lin([86, 104, 62]);
   const BUSH = lin([70, 102, 52]), BUSH_L = lin([96, 128, 66]);
   for (const c of centers) {
     for (const vert of [true, false]) {
-      // Segments along this road, block by block (gaps at intersections).
       for (let k = 0; k <= 8; k++) {
         const a0 = k * BLOCK_PITCH + ROAD_W + 6, a1 = (k + 1) * BLOCK_PITCH - 6;
         const mid = (a0 + a1) / 2;
         const mx = vert ? c : mid, my = vert ? mid : c;
         if (!inRange(mx, my, 1180)) continue;
-        // Double yellow lines flanking the median line, per block segment.
         for (const off of [-5.9, 5.9]) {
           if (vert) B.flat.quad([c + off - 0.8, a0, 0.3], [c + off + 0.8, a0, 0.3], [c + off + 0.8, a1, 0.3], [c + off - 0.8, a1, 0.3], YELLOW);
           else B.flat.quad([a0, c + off - 0.8, 0.3], [a1, c + off - 0.8, 0.3], [a1, c + off + 0.8, 0.3], [a0, c + off + 0.8, 0.3], YELLOW);
         }
-        // Dashed white lane lines at ±24.
         for (const off of [-24, 24]) {
           for (let d = a0 + 4; d < a1 - 14; d += 44) {
             if (hash01(c * 3 + d + off) < 0.08) continue;
@@ -875,8 +239,6 @@ function buildGround(gl, game, B) {
             else B.flat.quad([d, c + off - 0.8, 0.3], [d + 15, c + off - 0.8, 0.3], [d + 15, c + off + 0.8, 0.3], [d, c + off + 0.8, 0.3], LANEWHITE);
           }
         }
-        // Planted median: raised strip in ~44-unit runs, broken wherever a
-        // vehicle or the hero stands, with bushes and the odd small tree.
         for (let d = a0 + 22; d < a1 - 10; d += 44) {
           const sx = vert ? c : d, sy = vert ? d : c;
           if (!inRange(sx, sy, 1080) || actorNear(sx, sy, 40)) continue;
@@ -895,10 +257,6 @@ function buildGround(gl, game, B) {
       }
     }
   }
-  // Curbs (Phase 8): a low light-grey kerb box along every road edge,
-  // segmented with the same intersection gaps as the medians, so the
-  // sidewalk band reads as a raised pavement with an edge — not as a
-  // texture change on a flat plane. Sun shading separates its faces.
   const CURB = lin([172, 168, 160]);
   for (const c of centers) {
     for (const vert of [true, false]) {
@@ -913,7 +271,8 @@ function buildGround(gl, game, B) {
       }
     }
   }
-  // Zebra crossings at intersections.
+  // Zebra crossings at intersections (standing geometry — the title
+  // staging was crop-verified against these exact arms).
   const ZEBRA = [...lin([224, 216, 202]), 0.72];
   for (const cx of centers) for (const cy of centers) {
     if (!inRange(cx, cy)) continue;
@@ -952,7 +311,7 @@ function buildGround(gl, game, B) {
     if (z.kind === 'fire') {
       disc(B.alpha, z.x, z.y, 0.4, z.r, [...lin([214, 110, 40]), 0.5]);
       disc(B.alpha, z.x, z.y, 0.45, z.r * 0.55, [...lin([246, 178, 60]), 0.65]);
-      addGlow(gl, z.x, z.y, 4, z.r * 0.9, lin([255, 150, 60]), 0.30);
+      addGlow(z.x, z.y, 4, z.r * 0.9, lin([255, 150, 60]), 0.30);
     } else if (z.kind === 'gas') disc(B.alpha, z.x, z.y, 0.4, z.r, [...lin([168, 178, 150]), 0.30]);
     else if (z.kind === 'flare') {
       disc(B.alpha, z.x, z.y, 0.4, z.r, [...lin([255, 120, 90]), 0.4]);
@@ -961,20 +320,13 @@ function buildGround(gl, game, B) {
   }
   for (const pl of game.placed || []) if (inRange(pl.x, pl.y)) box(B.flat, pl.x, pl.y, 1.6, 3.4, 3.4, 1.6, 0, lin([30, 30, 34]));
   for (const pr of game.projectiles || []) if (inRange(pr.x, pr.y)) ball(B.flat, pr.x, pr.y, pr.z || 6, pr.behavior === 'rocket' || pr.behavior === 'cannon' ? 2.6 : 1.9, lin([40, 38, 36]));
-  // Mission marker (Top-3 rebuild Phase 2, gap-audit D12): the old
-  // ground RING (radius ~30) + light pillar read in the mission frame
-  // as unexplained green rings around the distant police cars it
-  // happened to sit under. The marker now speaks the HUD's own
-  // grammar — the minimap objective is a small DIAMOND in this same
-  // colour with the place name + distance printed under the map — so
-  // the world carries that same diamond: a small floating octahedron
-  // over the objective point on a slim beacon column, with a small
-  // flat diamond outline (radius 7, not 30) at its base. No ring.
+  // Mission marker: a small floating diamond over the objective point
+  // on a slim beacon column, with a flat diamond outline at its base —
+  // the HUD minimap's own grammar, in the world.
   const marker = game.missions.marker();
   if (marker) {
     const mc = marker.color === 'pickup' ? lin([232, 200, 50]) : lin([79, 201, 106]);
     const bob = Math.sin((game.time || 0) * 3.2) * 1.5;
-    // Slim beacon column: four narrow faces, 2.4 units across.
     for (let i = 0; i < 4; i++) {
       const a0 = (i / 4) * Math.PI * 2 + Math.PI / 4, a1 = ((i + 1) / 4) * Math.PI * 2 + Math.PI / 4;
       B.alpha.quad(
@@ -983,7 +335,6 @@ function buildGround(gl, game, B) {
         [marker.x + Math.cos(a1) * 1.7, marker.y + Math.sin(a1) * 1.7, 26],
         [marker.x + Math.cos(a0) * 1.7, marker.y + Math.sin(a0) * 1.7, 26], [...mc, 0.28]);
     }
-    // Flat diamond outline at the base (a rotated square, HUD-style).
     for (let i = 0; i < 4; i++) {
       const a0 = (i / 4) * Math.PI * 2, a1 = ((i + 1) / 4) * Math.PI * 2;
       const b0 = a0 + 0.16, b1 = a1 - 0.16;
@@ -993,7 +344,6 @@ function buildGround(gl, game, B) {
         [marker.x + Math.cos(a1) * 7, marker.y + Math.sin(a1) * 7, 0.6],
         [marker.x + Math.cos(a0) * 7, marker.y + Math.sin(a0) * 7, 0.6], [...mc, 0.8]);
     }
-    // The floating diamond itself, bobbing over the point.
     const dia = new THREE.OctahedronGeometry(3.4);
     B.basic.push(dia, mat4(marker.x, 30 + bob, marker.y, (game.time || 0) * 0.9, 1, 1.25, 1), mc);
     dia.dispose();
@@ -1001,18 +351,16 @@ function buildGround(gl, game, B) {
 }
 
 // ------------------------------------------------------- skyline fillers
-// Rect 2026-11-20: the skyline is never empty — a red radio tower and a
-// bridge silhouette stand in the background. Both are renderer dressing at
+// A red radio tower and a bridge silhouette stand in the background at
 // fixed world spots (the park at bx3/by3; the water east of the shore).
-function buildSkyline(gl, game, B) {
+// Phase 2 hooks: world3d.js (coast) and post3d.js (bloom/vignette pass)
+// attach here in the next session — the grade/env core already feeds
+// them everything they need.
+function buildSkyline(R, game) {
+  const { B } = R;
   const camX = F.cam[0], camY = F.cam[1];
   const tx = 1691, ty = 1691;
   if (Math.hypot(tx - camX, ty - camY) < 1500) {
-    // Phase 2 legibility: the Phase 1 mast (r ≤15 tapering to 1.1, thin
-    // crossarm discs) vanished at action-frame distance — a few pixels of
-    // fog-washed red on an orange sky. The mast keeps its proportions at
-    // the base but carries WIDE crossarm bars and bigger band discs, the
-    // classic radio-tower silhouette that survives the contact sheet.
     const RED = lin([178, 36, 32]), WHT = lin([236, 234, 228]);
     limb(B.flat, [tx, ty, 0], [tx, ty, 235], 15, 2.6, RED, 4);
     for (const [z, r] of [[58, 15], [116, 11.5], [174, 8]]) {
@@ -1027,9 +375,8 @@ function buildSkyline(gl, game, B) {
     for (const sx of [-1, 1]) for (const sy of [-1, 1]) limb(B.flat, [tx + sx * 13, ty + sy * 13, 0], [tx + sx * 2, ty + sy * 2, 120], 0.9, 0.7, RED, 4);
     limb(B.flat, [tx, ty, 235], [tx, ty, 268], 1.6, 0.5, RED, 5);
     ball(B.flat, tx, ty, 244, 3.4, RED);
-    addGlow(gl, tx, ty, 246, 11, lin([255, 70, 60]), 0.55);
+    addGlow(tx, ty, 246, 11, lin([255, 70, 60]), 0.55);
   }
-  // Bridge silhouette over the eastern water (deck + two pylons + cables).
   const SIL = lin([56, 62, 76]);
   const bx0 = WORLD_SIZE + 30, bx1 = WORLD_SIZE + 720, by = 2250;
   if (Math.hypot((bx0 + bx1) / 2 - camX, by - camY) < 1900) {
@@ -1042,23 +389,16 @@ function buildSkyline(gl, game, B) {
 }
 
 // --------------------------------------------------------------- buildings
-function buildBuildings(gl, game, B) {
+function buildBuildings(R, game) {
+  const { B } = R;
   const camX = F.cam[0], camY = F.cam[1];
   for (const b of game.city.buildings) {
     const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
     const dx = cx - camX, dy = cy - camY;
     const dist = Math.hypot(dx, dy);
     if (dist > 1180) continue;
-    // Phase 10 F1(a): ONE surgical presentation-only exception — the
-    // north-side slab at (761.8, 1231.8) west of the Gazette hero
-    // segment is the shadow caster whose swept shadow (sun from the
-    // west-northwest, shadow offset ≈ (2.65, 0.71) × H) covers the
-    // hero at (1200, 1477) at its standing H≈135. Rendering this slab
-    // at H=76 caps its ground shadow at y≈1455, north of the hero's
-    // footprint (y≥1468), so direct sun reaches the ORIGINAL chase
-    // formation — no restage, no composition spent. The slab stands
-    // west of the chase camera (behind it in the judged frame); the
-    // sim's building data, footprint and collision are untouched.
+    // Standing presentation exception (Phase 10): the Gazette shadow-
+    // caster slab renders at H=76 so direct sun reaches the chase hero.
     const isGazetteCaster = Math.abs(b.x - 761.7910715453327) < 0.01 && Math.abs(b.y - 1231.7910715453327) < 0.01;
     const H = isGazetteCaster ? 76 : b.height * BUILD_SCALE;
     const bid = Math.round(b.x * 3 + b.y * 7);
@@ -1067,15 +407,10 @@ function buildBuildings(gl, game, B) {
     const wallShade = rgb(b.wallDark || PALETTE.wallDark);
     const wallSouth = wallSun.map((v) => v * 0.88);
     const wallNorth = wallShade.map((v) => Math.min(255, v * 1.12));
-    // Facade variant: tall buildings may be glass towers (some of them
-    // cylinders); the rest split warm/cool by hash, as before.
     const isGlass = b.height > 46 && hash01(bid * 7.7) < 0.42;
     const vh = hash01(bid * 13.7);
     const variant = isGlass ? 'glass' : vh < 0.34 ? 'fwarm' : vh < 0.67 ? 'fcool' : 'foffice';
     const baseRGB = variant === 'glass' ? [148, 168, 178] : variant === 'fwarm' ? [188, 168, 146] : variant === 'foffice' ? [176, 158, 138] : [172, 164, 152];
-    // Phase 3 (D11): a subtle per-building tint step (±8% by hash) over
-    // walls and roof alike, so a run of same-district slabs stops reading
-    // as one repeated extrusion — value only, never a hue swing.
     const tintVar = 0.92 + hash01(bid * 41.3) * 0.16;
     const tintOf = (wall) => lin([0, 1, 2].map((i) => clamp(wall[i] / baseRGB[i] * 255, 40, 255))).map((v) => Math.min(1, v * tintVar));
     const FB = variant === 'glass' ? B.glass : variant === 'fwarm' ? B.fwarm : variant === 'foffice' ? B.foffice : B.fcool;
@@ -1086,9 +421,6 @@ function buildBuildings(gl, game, B) {
       { n: [-1, 0], tint: tintOf(wallSun), wid: b.h, fixed: b.x, mk: (z0, z1) => [[b.x, b.y, z0], [b.x, b.y + b.h, z0], [b.x, b.y + b.h, z1], [b.x, b.y, z1]] },
     ];
     const isCyl = isGlass && hash01(bid * 3.1) < 0.45;
-    // Phase 2 facade variation: every building samples its window grid at
-    // its OWN offset, so neighbouring towers never share an aligned grid,
-    // and ~40% carry a mid-height trim band in a muted accent.
     const uOff = hash01(bid * 5.3) * 0.61, vOff = hash01(bid * 9.1) * 0.43;
     if (isCyl) {
       const r = Math.min(b.w, b.h) / 2 * 0.96;
@@ -1116,8 +448,6 @@ function buildBuildings(gl, game, B) {
           FB.quad(fp[0], fp[1], fp[2], fp[3], w.tint, [uOff, vOff, uOff + uRep, vOff + vRep]);
         }
       }
-      // Mid-height trim band on hash-selected buildings: a flat accent
-      // stripe proud of every wall, breaking the repeated grid.
       if (hash01(bid * 17.7) < 0.42 && H > 52) {
         const ACCENTS = [[64, 110, 116], [168, 96, 72], [206, 188, 158], [120, 84, 110]];
         const acc = lin(ACCENTS[Math.floor(hash01(bid * 23.3) * 4) % 4]);
@@ -1129,9 +459,6 @@ function buildBuildings(gl, game, B) {
           B.flat.quad(sh(bp[0]), sh(bp[1]), sh(bp[2]), sh(bp[3]), acc);
         }
       }
-      // Facade depth (Phase 8, near buildings only): a light cornice
-      // strip under the parapet, darker pilaster strips running from
-      // the shop band to the cornice — the slab faces gain a frame.
       if (dist < 760 && H > 40) {
         const corC = lin(rgb(b.wallLight || PALETTE.wallLight).map((v) => Math.min(255, v * 1.12)));
         for (const w of walls) {
@@ -1149,7 +476,6 @@ function buildBuildings(gl, game, B) {
           }
         }
       }
-      // Roof + parapet cap + stored rooftop props.
       B.roof.quad([b.x, b.y + b.h, H], [b.x + b.w, b.y + b.h, H], [b.x + b.w, b.y, H], [b.x, b.y, H], lin(roofC).map((v) => Math.min(1, v * tintVar)), [0, 0, Math.max(1, Math.round(b.w / 70)), Math.max(1, Math.round(b.h / 70))]);
       box(B.flat, cx, cy, H + 1.6, b.w / 2 + 2.2, b.h / 2 + 2.2, 1.8, 0, lin(roofC.map((v) => v * 0.92)));
       if (b.props) for (const pr of b.props) {
@@ -1158,38 +484,28 @@ function buildBuildings(gl, game, B) {
         else if (pr.kind === 'vent') box(B.flat, px, py, H + 2.2, pr.w / 2, pr.h / 2, 2.2, 0, lin([96, 98, 104]));
         else box(B.flat, px, py, H + 3, pr.w / 2, pr.h / 2, 3, 0, lin([113, 115, 121]));
       }
-      // Phase 3 rooftop variety (D11): on top of the city's own stored
-      // props, a hash subset of roofs carries ONE larger silhouette
-      // piece — a water tank, a paired AC plant or a slim antenna — at
-      // a hash corner inset from the parapet, so the skyline's top edge
-      // varies tower to tower instead of ending in identical slabs.
-      // Deterministic in bid only; footprints too small are skipped.
       if (b.w > 52 && b.h > 52 && H > 44) {
         const rp = hash01(bid * 53.7);
         if (rp < 0.58) {
           const qx = b.x + b.w * (hash01(bid * 59.3) < 0.5 ? 0.28 : 0.72);
           const qy = b.y + b.h * (hash01(bid * 61.7) < 0.5 ? 0.28 : 0.72);
           if (rp < 0.20) {
-            // Water tank: stave cylinder on short legs + a cap disc.
             for (const [lx, ly] of [[-3, -3], [3, -3], [-3, 3], [3, 3]]) box(B.flat, qx + lx, qy + ly, H + 1.8, 0.7, 0.7, 1.8, 0, lin([80, 72, 64]));
             const tankG = new THREE.CylinderGeometry(4.6, 4.9, 7.5, 10);
             B.flat.push(tankG, mat4(qx, H + 7.3, qy, 0), lin([122, 102, 82]));
             tankG.dispose();
             disc(B.roof, qx, qy, H + 11.3, 5.1, lin(roofC.map((v) => v * 0.85)), 10);
           } else if (rp < 0.40) {
-            // AC plant: two plant boxes of different heights + a duct.
             box(B.flat, qx, qy, H + 2.4, 5.5, 4.2, 2.4, 0, lin([108, 110, 116]));
             box(B.flat, qx + 8.5, qy + 2, H + 1.7, 3.6, 3.0, 1.7, 0, lin([96, 98, 104]));
             box(B.flat, qx + 4, qy + 1, H + 0.9, 2.2, 1.1, 0.9, 0, lin([88, 90, 96]));
           } else {
-            // Antenna: a slim mast, two crossarms, a tip light point.
             limb(B.flat, [qx, qy, H], [qx, qy, H + 13], 0.55, 0.3, lin([52, 54, 60]), 5);
             box(B.flat, qx, qy, H + 10.6, 3.4, 0.4, 0.4, 0, lin([52, 54, 60]));
             box(B.flat, qx, qy, H + 8.2, 2.4, 0.4, 0.4, 0, lin([52, 54, 60]));
           }
         }
       }
-      // Art-deco beachfront stripes under the parapet.
       if (b.deco && H > 60) {
         for (const w of walls) {
           const s1 = w.mk(H - 15, H - 10), s2 = w.mk(H - 21, H - 17.5);
@@ -1209,11 +525,8 @@ function buildBuildings(gl, game, B) {
           const sh = (p) => [p[0] + off[0], p[1] + off[1], p[2]];
           B.basic.quad(sh(np[0]), sh(np[1]), sh(np[2]), sh(np[3]), lin(nc));
         }
-        addGlow(gl, cx, cy, H - 8.5, 13, lin(rgb(b.neonColor)), 0.26);
+        addGlow(cx, cy, H - 8.5, 13, lin(rgb(b.neonColor)), 0.26);
       }
-      // Named storefront sign on the most camera-facing wall: a muted
-      // backing box + the atlas-textured face, along flipped to screen-
-      // right so the name never mirrors.
       let best = null, bestD = 0;
       for (const w of walls) {
         const mid = w.n[0] ? [w.fixed, cy] : [cx, w.fixed];
@@ -1235,9 +548,6 @@ function buildBuildings(gl, game, B) {
         const v1 = 1 - sIdx / SIGNS.length, v0 = 1 - (sIdx + 1) / SIGNS.length;
         B.sign.quad([a0[0], a0[1], 11.4], [a1[0], a1[1], 11.4], [a1[0], a1[1], 16.6], [a0[0], a0[1], 16.6], WHITE, [0, v0, 1, v1]);
       }
-      // Awning canopy (Phase 8): a flat muted canopy slab over the
-      // shopfront on the most camera-facing wall of near buildings —
-      // street-level depth the texture stripes alone could not give.
       if (best && dist < 760 && hash01(bid * 31.7) < 0.6) {
         const AWN = [[150, 70, 58], [52, 96, 104], [196, 150, 84]];
         const awnC = lin(AWN[Math.floor(hash01(bid * 37.3) * 3) % 3]);
@@ -1249,859 +559,9 @@ function buildBuildings(gl, game, B) {
   }
 }
 
-// --------------------------------------------------------------- vehicles
-// Phase 3 wheel scale: radius 3.3 → 2.9 (Ø 6.6 u ≈ 0.77 m was oversized;
-// Ø 5.8 u ≈ 0.67 m is sedan-true); hub/cap radii scale proportionally.
-const TYRE_G = new THREE.CylinderGeometry(2.9, 2.9, 3.8, 14).rotateX(Math.PI / 2);
-const HUB_G = new THREE.CylinderGeometry(1.8, 1.8, 4.0, 10).rotateX(Math.PI / 2);
-const CAP_G = new THREE.CylinderGeometry(0.75, 0.75, 4.15, 8).rotateX(Math.PI / 2);
-// Phase 1 wheel depth (D3): a recessed rim barrel, a tyre shoulder ring
-// and five spoke boxes layered over the hub, all sharing the wheel's
-// spin/steer matrix, so the wheel stops reading as a flat disc. Radius
-// and placement stay the Phase 3 contract (r 2.9, centre z 2.9).
-const RIM_G = new THREE.CylinderGeometry(2.02, 2.02, 0.5, 14).rotateX(Math.PI / 2);
-const SHOULDER_G = new THREE.TorusGeometry(2.45, 0.42, 6, 16);
-const SPOKE_G = new THREE.BoxGeometry(0.55, 1.7, 0.34);
-function buildTank(gl, game, B, car) {
-  curCat = 'tank';
-  const yaw = car.angle, L = car.len, W = car.wid;
-  const camo = lin([92, 100, 74]), camoD = lin([70, 78, 56]), dark = lin([34, 36, 32]);
-  disc(B.alpha, car.x, car.y, 0.25, L * 0.62, [...lin([8, 8, 10]), 0.30]);
-  const c = Math.cos(yaw), s = Math.sin(yaw);
-  const LP = (lx, ly, lz) => [car.x + lx * c - ly * s, car.y + lx * s + ly * c, lz];
-  for (const sy of [1, -1]) {
-    const tp = LP(0, sy * (W / 2 - 3.6), 0);
-    box(B.flat, tp[0], tp[1], 3.6, L / 2, 3.6, 3.6, yaw, dark);
-    for (const wx of [-L * 0.32, -L * 0.11, L * 0.11, L * 0.32]) { const wp = LP(wx, sy * (W / 2 - 0.4), 3.4); box(B.flat, wp[0], wp[1], wp[2], 2.6, 0.8, 2.6, yaw, lin([58, 60, 54])); }
-  }
-  box(B.flat, car.x, car.y, 7.6, L / 2 - 2, W / 2 - 6.5, 3.9, yaw, camo);
-  const g0 = LP(L / 2 - 2, -W / 2 + 7, 4.2), g1 = LP(L / 2 - 2, W / 2 - 7, 4.2), g2 = LP(L * 0.18, W / 2 - 7.5, 11.4), g3 = LP(L * 0.18, -W / 2 + 7.5, 11.4);
-  B.flat.quad(g0, g1, g2, g3, camoD);
-  box(B.flat, car.x, car.y, 11.2, L * 0.30, W / 2 - 6.0, 0.9, yaw, camoD);
-  const t = car.turret || yaw, tc = Math.cos(t), ts = Math.sin(t);
-  const tX = car.x - c * 2, tY = car.y - s * 2;
-  box(B.flat, tX, tY, 14.6, 11, 9.5, 3.4, t, camo);
-  box(B.flat, tX + tc * 3, tY + ts * 3, 18.4, 4.6, 4.6, 1.2, t, camoD);
-  limb(B.flat, [tX + tc * 10, tY + ts * 10, 15.2], [tX + tc * 34, tY + ts * 34, 15.6], 1.7, 1.2, dark, 6);
-  const bp = [tX + tc * 34, tY + ts * 34, 15.6];
-  box(B.flat, bp[0], bp[1], bp[2], 3.4, 3.4, 2.0, t, dark);
-  limb(B.flat, [tX - tc * 6, tY - ts * 6, 18], [tX - tc * 7.5, tY - ts * 7.5, 27], 0.35, 0.35, dark, 4);
-}
-function buildPlane(gl, game, B, car) {
-  curCat = 'plane';
-  const yaw = car.angle, alt = car.alt || 0;
-  const body = lin(rgb(car.color)), bodyTop = lin(rgb(car.color).map((v) => Math.min(255, v * 1.18)));
-  disc(B.alpha, car.x, car.y, 0.25, 30, [...lin([8, 8, 10]), Math.max(0.08, 0.30 - alt * 0.0016)]);
-  const c = Math.cos(yaw), s = Math.sin(yaw);
-  const LP = (lx, ly, lz) => [car.x + lx * c - ly * s, car.y + lx * s + ly * c, (lz || 0) + alt];
-  limb(B.flat, LP(-30, 0, 9), LP(28, 0, 10), 5.5, 4.25, body, 9);
-  const cp = LP(6, 0, 14.5);
-  box(B.flat, cp[0], cp[1], cp[2], 9, 6.4, 3.4, yaw, lin([24, 33, 48]));
-  for (const sy of [1, -1]) { const fp = LP(2, sy * 8.5, 3.4); box(B.flat, fp[0], fp[1], fp[2], 17, 2.2, 2.6, yaw, lin([52, 56, 62])); }
-  B.flat.quad(LP(10, -31, 11.5), LP(2, -31, 11.5), LP(0, 31, 11.5), LP(8, 31, 11.5), bodyTop);
-  B.flat.quad(LP(-26, -13, 12), LP(-31, -13, 12), LP(-31, 13, 12), LP(-26, 13, 12), bodyTop);
-  B.flat.quad(LP(-30, 0, 12), LP(-25, 0, 12), LP(-26.5, 0, 22), LP(-29.5, 0, 22), body);
-  const nose = LP(31, 0, 10);
-  const prop = new THREE.CircleGeometry(8.6, 12);
-  B.alpha.push(prop, mat4(nose[0], nose[2], nose[1], Math.PI / 2 - yaw), [...lin([30, 30, 34]), 0.4]);
-  prop.dispose();
-}
-function buildCar(gl, game, B, car) {
-  const dx = car.x - F.cam[0], dy = car.y - F.cam[1];
-  if (dx * dx + dy * dy > 1080 * 1080) return;
-  if (car.kind === 'tank') { buildTank(gl, game, B, car); return; }
-  if (car.kind === 'plane') { buildPlane(gl, game, B, car); return; }
-  const isHero = car === F.heroCar;
-  curCat = isHero ? 'car' : null;
-  const yaw = car.angle;
-  const L = car.len || 38;
-  // Phase 3: render-local width — sim car.wid (19 u ≈ 2.21 m) is too wide
-  // and made sedans read squat beside the figures; the renderer draws
-  // non-van bodies at 17.5 u (≈2.03 m) while car.wid stays sim data.
-  // Wheels, plates, lights and the cabin all derive from this W, so the
-  // rendered car stays internally consistent. Vans keep their own width.
-  const W = car.kind === 'van' ? (car.wid || 21) : 17.5;
-  const body = car.dead ? lin([44, 44, 48]) : lin(rgb(car.color));
-  const bodyTop = car.dead ? body : lin(rgb(car.color).map((v) => Math.min(255, v * 1.2)));
-  const isVan = car.kind === 'van';
-  const bodyTopZ = isVan ? 10.2 : 8.2;
-  const roofZ = isVan ? 11.6 : CAR_ROOF;
-  disc(B.alpha, car.x, car.y, 0.25, L * 0.58, [...lin([8, 8, 10]), 0.32]);
-  const c = Math.cos(yaw), s = Math.sin(yaw);
-  const LP = (lx, ly, lz) => [car.x + lx * c - ly * s, car.y + lx * s + ly * c, lz];
-  const M = mat4(car.x, 0, car.y, -yaw);
-  const part = (geom, local, color, uvMul, uvOff) => B.flat.push(geom, M.clone().multiply(local), color, uvMul, uvOff);
-  const partPaint = (geom, local, color, uvMul, uvOff) => B.paint.push(geom, M.clone().multiply(local), color, uvMul, uvOff);
-  // ---- Shaped body (Top-3 rebuild Phase 1, defect D3) ----------------
-  // The stacked-box body is gone for the car classes: a centre box
-  // carries the flanks and a trapezoid prism at each end gives a real
-  // side profile — a nose/hood falling toward the bumper and a deck
-  // rising to the glasshouse. Profiles differ per class while EVERY
-  // class keeps its cabin roof at exactly CAR_ROOF 12.6, so the scale
-  // contract is untouched. The sim already exposes the class on
-  // car.kind; an unrecognised kind falls back to a deterministic
-  // id-hash pick so frames stay reproducible. Vans keep their standing
-  // slab body (their own class, roof 11.6).
-  const variant = isVan ? 'van'
-    : car.isCop || car.kind === 'interceptor' ? 'interceptor'
-    : car.kind === 'sedan' || car.kind === 'coupe' || car.kind === 'hatch' || car.kind === 'armored' ? car.kind
-    : ['sedan', 'coupe', 'hatch'][Math.floor(hash01((car.id || 1) * 3.13) * 3) % 3];
-  const bodyDark = car.dead ? body : lin(rgb(car.color).map((v) => v * 0.85));
-  if (isVan) {
-    partPaint(UNIT_BOX, mat4(0, (1.8 + bodyTopZ) / 2, 0, 0, L, bodyTopZ - 1.8, W), body);
-    B.paint.quad(LP(L / 2, -W / 2 + 1, bodyTopZ - 1.2), LP(L / 2, W / 2 - 1, bodyTopZ - 1.2), LP(L * 0.24, W / 2 - 1.6, bodyTopZ + 0.4), LP(L * 0.24, -W / 2 + 1.6, bodyTopZ + 0.4), bodyTop);
-    B.paint.quad(LP(-L * 0.24, -W / 2 + 1.6, bodyTopZ + 0.4), LP(-L * 0.24, W / 2 - 1.6, bodyTopZ + 0.4), LP(-L / 2, W / 2 - 1, bodyTopZ - 0.9), LP(-L / 2, -W / 2 + 1, bodyTopZ - 0.9), bodyTop);
-  } else {
-    const PROF = {
-      sedan: { noseX: 0.22, noseDrop: 1.7, deckX: -0.26, deckDrop: 1.0 },
-      coupe: { noseX: 0.08, noseDrop: 2.0, deckX: -0.20, deckDrop: 0.8 },
-      hatch: { noseX: 0.24, noseDrop: 1.5, deckX: -0.40, deckDrop: -0.3 },
-      armored: { noseX: 0.26, noseDrop: 1.0, deckX: -0.26, deckDrop: 0.7 },
-      interceptor: { noseX: 0.22, noseDrop: 1.7, deckX: -0.26, deckDrop: 1.0 },
-    }[variant];
-    const noseX = L * PROF.noseX, deckX = L * PROF.deckX;
-    partPaint(UNIT_BOX, mat4((noseX + deckX) / 2, (1.8 + bodyTopZ) / 2, 0, 0, noseX - deckX, bodyTopZ - 1.8, W), body);
-    prism(B.paint, M, (noseX + L / 2) / 2, 1.8, L / 2 - noseX, W - 1.4, bodyTopZ + 0.4 - 1.8, bodyTopZ - PROF.noseDrop - 1.8, bodyTop);
-    prism(B.paint, M, (deckX - L / 2) / 2, 1.8, deckX + L / 2, W - 1.4, bodyTopZ - PROF.deckDrop - 1.8, bodyTopZ + 0.4 - 1.8, bodyTop);
-  }
-  // Bumpers.
-  part(UNIT_BOX, mat4(L / 2 + 0.8, 3.6, 0, 0, 3.2, 4.4, W - 1.2), lin([30, 31, 36]));
-  part(UNIT_BOX, mat4(-L / 2 - 0.8, 3.6, 0, 0, 3.2, 4.4, W - 1.2), lin([30, 31, 36]));
-  // Cabin: painted frame, glasshouse band, narrower roof. Phase 2: the
-  // glass band sits nearly flush with the frame (inset 0.9, not 2.0) and
-  // runs deeper, so the glasshouse reads as its own band against the body
-  // colour from the rear three-quarter — not as a dark box on a slab.
-  // Phase 1 (D3): cabin length/placement now follow the class — the
-  // coupe's glasshouse sits further back under a long hood, the hatch's
-  // runs almost to the tail; the roof height never moves.
-  const cabLen = isVan ? L * 0.52 : variant === 'coupe' ? L * 0.42 : variant === 'hatch' ? L * 0.60 : L * 0.46, cabWid = W - 3.4;
-  const cabOff = isVan ? -L * 0.08 : variant === 'coupe' ? -L * 0.05 : variant === 'hatch' ? -L * 0.07 : variant === 'armored' ? L * 0.02 : L * 0.03;
-  partPaint(UNIT_BOX, mat4(cabOff, (bodyTopZ + roofZ) / 2, 0, 0, cabLen, roofZ - bodyTopZ, cabWid), bodyDark);
-  // Phase 10 F2 glass (Phase 9 F3 TUNED values, re-scoped): the band
-  // sits PROUD at cabWid+0.3 (the standing cabWid-0.9 box is enclosed
-  // by the cabin frame and never renders), split into 4 hard-edged
-  // pane segments in the specular glass batch with seeded per-car
-  // jitter; pane luminances are the tuned family (avg ~57, wide
-  // between-pane spread — variance lives BETWEEN panes).
-  {
-    const PANES = [[4, 8, 14], [16, 24, 34], [44, 60, 76], [120, 142, 160]];
-    const gLen = cabLen - 1.1, gH = roofZ - bodyTopZ - 0.5, gZ = (bodyTopZ + roofZ) / 2 - 0.2;
-    for (let pi = 0; pi < 4; pi++) {
-      const jit = 0.85 + 0.30 * hash01((car.id || 1) * 7.31 + pi * 3.17);
-      const segL = gLen / 4 - 0.25;
-      const segC = cabOff - gLen / 2 + (gLen * (pi + 0.5)) / 4;
-      B.glasspaint.push(UNIT_BOX, M.clone().multiply(mat4(segC, gZ, 0, 0, segL, gH, cabWid + 0.3)), lin(PANES[pi].map((v) => Math.min(255, v * jit))));
-    }
-  }
-  const roofLen = isVan ? cabLen - 4.4 : variant === 'coupe' ? cabLen - 7.0 : variant === 'hatch' ? cabLen - 3.4 : cabLen - 4.4;
-  partPaint(UNIT_BOX, mat4(cabOff, roofZ - 0.4, 0, 0, roofLen, 1.1, cabWid - 3.8), bodyTop);
-  if (!isVan) {
-    // Sloped windshield + rear glass in the specular glass batch,
-    // framed by body-colour A/C pillar limbs over the side band — the
-    // glasshouse reads as glass set INTO a pillared frame. The coupe's
-    // rear glass runs long (fastback), the hatch's stands near-vertical.
-    const cabFront = cabOff + cabLen / 2, cabRear = cabOff - cabLen / 2;
-    const wsIn = variant === 'coupe' ? 4.2 : variant === 'hatch' ? 3.0 : variant === 'armored' ? 2.6 : 3.4;
-    const rsIn = variant === 'coupe' ? 7.5 : variant === 'hatch' ? 1.1 : variant === 'armored' ? 2.4 : 3.0;
-    const wsCol = lin([58, 78, 98].map((v) => Math.min(255, v * (0.85 + 0.30 * hash01((car.id || 1) * 5.77)))));
-    B.glasspaint.quad(LP(cabFront + 0.55, cabWid / 2 - 0.55, bodyTopZ + 0.55), LP(cabFront + 0.55, -(cabWid / 2 - 0.55), bodyTopZ + 0.55), LP(cabFront - wsIn, -(cabWid / 2 - 0.75), roofZ - 0.75), LP(cabFront - wsIn, cabWid / 2 - 0.75, roofZ - 0.75), wsCol);
-    B.glasspaint.quad(LP(cabRear - 0.55, -(cabWid / 2 - 0.55), bodyTopZ + 0.6), LP(cabRear - 0.55, cabWid / 2 - 0.55, bodyTopZ + 0.6), LP(cabRear + rsIn, cabWid / 2 - 0.75, roofZ - 0.75), LP(cabRear + rsIn, -(cabWid / 2 - 0.75), roofZ - 0.75), wsCol);
-    for (const sy of [1, -1]) {
-      limb(B.paint, LP(cabFront + 0.3, sy * (cabWid / 2 + 0.05), bodyTopZ + 0.5), LP(cabFront - wsIn + 0.3, sy * (cabWid / 2 - 0.35), roofZ - 0.7), 0.5, 0.45, bodyDark, 5);
-      limb(B.paint, LP(cabRear - 0.3, sy * (cabWid / 2 + 0.05), bodyTopZ + 0.55), LP(cabRear + rsIn - 0.3, sy * (cabWid / 2 - 0.35), roofZ - 0.7), variant === 'coupe' ? 0.85 : 0.55, 0.5, bodyDark, 5);
-    }
-  }
-  // Phase 8 car detail — all surface-hugging or inside the standing
-  // silhouette (no glass-colour change, no bbox growth): a body-colour
-  // B-pillar dividing the glasshouse into front/rear panes, a chrome
-  // side trim strip, a roof antenna fin (top exactly at roofZ) and an
-  // exhaust tip seated in the rear bumper.
-  partPaint(UNIT_BOX, mat4(cabOff, (bodyTopZ + roofZ) / 2 - 0.2, 0, 0, 0.7, roofZ - bodyTopZ - 0.5, cabWid + 0.45), bodyDark);
-  for (const sy of [1, -1]) part(UNIT_BOX, mat4(-0.5, 4.6, sy * (W / 2 + 0.06), 0, L * 0.62, 0.55, 0.12), lin([198, 200, 205]));
-  if (!isVan) part(UNIT_BOX, mat4(cabOff - cabLen / 2 + 2.2, roofZ - 0.55, 0, 0, 2.6, 1.1, 0.5), lin([24, 25, 30]));
-  part(UNIT_BOX, mat4(-L / 2 - 1.6, 2.2, W / 2 - 3.4, 0, 1.8, 0.9, 0.9), lin([120, 122, 128]));
-  // Mirrors + door seams.
-  for (const sy of [1, -1]) {
-    const mp = LP(L * 0.26, sy * (W / 2 + 1.1), bodyTopZ + 1.6);
-    box(B.flat, mp[0], mp[1], mp[2], 1.2, 2.0, 1.5, yaw, lin([22, 23, 28]));
-    for (const lx of [-L * 0.08, L * 0.16]) {
-      B.flat.quad(LP(lx, sy * (W / 2 + 0.14), 2.6), LP(lx + 0.8, sy * (W / 2 + 0.14), 2.6), LP(lx + 0.8, sy * (W / 2 + 0.14), bodyTopZ - 0.6), LP(lx, sy * (W / 2 + 0.14), bodyTopZ - 0.6), lin([16, 17, 21]));
-    }
-  }
-  // Class trim (Phase 1): the coupe wears a trunk-lip spoiler, dark
-  // side skirts and a front splitter (the lower-stance read); the
-  // armored car wears flank armour skirts over the same sedan profile.
-  if (variant === 'coupe') {
-    part(UNIT_BOX, mat4(-L / 2 + 0.9, bodyTopZ - 0.35, 0, 0, 2.4, 0.55, W - 5.2), bodyDark);
-    for (const sy of [1, -1]) part(UNIT_BOX, mat4(-0.5, 1.9, sy * (W / 2 + 0.05), 0, L * 0.6, 1.3, 0.3), lin([24, 24, 28]));
-    part(UNIT_BOX, mat4(L / 2 + 0.6, 1.6, 0, 0, 2.6, 0.7, W - 2), lin([24, 24, 28]));
-  } else if (variant === 'armored') {
-    for (const sy of [1, -1]) part(UNIT_BOX, mat4(0, 2.4, sy * (W / 2 + 0.05), 0, L * 0.55, 2.0, 0.35), lin([34, 36, 40]));
-  }
-  // FOUR REAL WHEELS: cylinder tyres + bright hubs + dark lug caps,
-  // spinning with travel (angle = speed × sim time / radius — a pure
-  // function of state) and the front pair yawing with the car's steer
-  // value. Phase 2: wider tyres track proud of the body (offset W/2−0.35)
-  // behind a dark arch flare, so tyre/hub/body separation survives the
-  // 320 px thumbnail instead of melting into the slab. Phase 1 (D3):
-  // rim depth — a dark shoulder ring on the tyre's outer face, a
-  // recessed rim barrel and five alloy spokes layered over the hub, all
-  // riding the same spin/steer matrix.
-  const spin = ((car.speed || 0) * (game.time || 0)) / 2.9;
-  const steer = car.steer || 0;
-  for (const [lx, lz, front] of [[L / 2 - 7.5, W / 2 - 0.35, 1], [L / 2 - 7.5, -W / 2 + 0.35, 1], [-L / 2 + 7.5, W / 2 - 0.35, 0], [-L / 2 + 7.5, -W / 2 + 0.35, 0]]) {
-    part(UNIT_BOX, mat4(lx, 6.9, Math.sign(lz) * (W / 2 + 0.15), 0, 9.4, 2.6, 1.5), lin([15, 15, 18])); // fender lip over the wheel
-    const wm = new THREE.Matrix4().makeTranslation(lx, 2.9, lz)
-      .multiply(new THREE.Matrix4().makeRotationY(front ? -steer : 0))
-      .multiply(new THREE.Matrix4().makeRotationZ(spin));
-    B.flat.push(TYRE_G, M.clone().multiply(wm), lin(TYRE));
-    const out = Math.sign(lz);
-    B.flat.push(SHOULDER_G, M.clone().multiply(wm.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, out * 1.55))), lin([9, 9, 11]));
-    B.flat.push(RIM_G, M.clone().multiply(wm.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, out * 1.62))), lin([62, 64, 70]));
-    for (let k = 0; k < 5; k++) {
-      const sm = wm.clone().multiply(new THREE.Matrix4().makeRotationZ((k * Math.PI * 2) / 5)).multiply(new THREE.Matrix4().makeTranslation(0, 1.02, out * 1.9));
-      B.flat.push(SPOKE_G, M.clone().multiply(sm), lin([172, 176, 184]));
-    }
-    B.flat.push(HUB_G, M.clone().multiply(wm), lin([190, 194, 202]));
-    B.flat.push(CAP_G, M.clone().multiply(wm), lin([38, 40, 46]));
-  }
-  // Lights: emissive quads, head pale / tail red — Phase 2 clusters:
-  // TWO lamp units per corner with a dark gap between them, so each
-  // corner reads as a cluster, not one smeared bar.
-  const quadAt = (lx, ly, z, wHalf, hHalf, colLin) => {
-    const px = car.x + c * lx - s * ly, py = car.y + s * lx + c * ly;
-    const side = [-s * wHalf, c * wHalf];
-    const out = [c * Math.sign(lx) * 0.55, s * Math.sign(lx) * 0.55];
-    B.basic.quad([px + side[0] + out[0], py + side[1] + out[1], z - hHalf], [px - side[0] + out[0], py - side[1] + out[1], z - hHalf],
-      [px - side[0] + out[0], py - side[1] + out[1], z + hHalf], [px + side[0] + out[0], py + side[1] + out[1], z + hHalf], colLin);
-  };
-  for (const sy of [1, -1]) {
-    quadAt(-L / 2 - 0.4, sy * (W / 2 - 2.3), 5.6, 1.55, 1.35, lin([255, 52, 60]));
-    quadAt(-L / 2 - 0.4, sy * (W / 2 - 5.6), 5.6, 1.35, 1.35, lin([226, 36, 46]));
-    quadAt(L / 2 + 0.4, sy * (W / 2 - 2.3), 5.8, 1.55, 1.35, lin([255, 243, 190]));
-    quadAt(L / 2 + 0.4, sy * (W / 2 - 5.6), 5.8, 1.35, 1.35, lin([240, 226, 168]));
-  }
-  if (!car.dead) {
-    const hg1 = LP(L / 2 + 0.4, W / 2 - 3.4, 5.8), hg2 = LP(L / 2 + 0.4, -W / 2 + 3.4, 5.8);
-    // Phase 10 F4 focal discipline: COP headlight bloom is TAMED
-    // (radius 5.5→3.5, alpha 0.15→0.05) — in the standing frame the PIT
-    // unit's bloom was the scene's brightest object, outshining the
-    // hero. Civilian and hero glows keep the standing values; the lamp
-    // quads themselves (gameplay signalling) are untouched.
-    const glowR = car.isCop ? 3.5 : 5.5, glowA = car.isCop ? 0.05 : 0.15;
-    addGlow(gl, hg1[0], hg1[1], 5.8, glowR, lin([255, 243, 190]), glowA);
-    addGlow(gl, hg2[0], hg2[1], 5.8, glowR, lin([255, 243, 190]), glowA);
-    // Phase 3 (D7): HEADLIGHT POOLS in dark grades — each lamp spills a
-    // small bright disc on the asphalt ahead of the car and the pair
-    // merges into one fainter wash further out. Grade-gated on the
-    // emissive exactly like the streetlight pools (dusk/night only), so
-    // day and golden frames render no pools. Batch discs, no sprites.
-    if ((F.gradeEmissive || 0) > 0.5) {
-      for (const sy of [1, -1]) {
-        const hp = LP(L / 2 + 10, sy * (W / 2 - 3.4), 0);
-        disc(B.alpha, hp[0], hp[1], 0.56, 7.5, [...lin([255, 226, 170]), 0.16]);
-      }
-      const pool = LP(L / 2 + 12, 0, 0);
-      disc(B.alpha, pool[0], pool[1], 0.54, 11.5, [...lin([255, 226, 170]), 0.10]);
-    }
-  }
-  // Rear LEONIDA plate in a dark recess (registration derived from the
-  // car's own id): the recess box sits proud of the bumper, the plate
-  // face proud of the recess, so the plate reads as set INTO the car.
-  {
-    const id = car.id || 1;
-    if (!gl.paintedPlates.has(id)) { paintPlateCell(gl.plateC, id); gl.paintedPlates.add(id); gl.plateTex.needsUpdate = true; }
-    const uv = plateUV(id);
-    const rec = LP(-L / 2 - 2.15, 0, 4.4);
-    box(B.flat, rec[0], rec[1], rec[2], 0.55, 5.3, 2.05, yaw, lin([17, 17, 21]));
-    const plx = -L / 2 - 2.78, pw2 = 4.3, pz = 4.4, ph2 = 1.35;
-    B.plate.quad(LP(plx, -pw2, pz - ph2), LP(plx, pw2, pz - ph2), LP(plx, pw2, pz + ph2), LP(plx, -pw2, pz + ph2), WHITE, [uv.u0, uv.v0, uv.u1, uv.v1]);
-  }
-  if (car.isCop) {
-    // Per-unit shade variation (id hash): no two interceptors wear the
-    // exact same white — the Phase 1 row of identical boxes is gone.
-    const copShade = 0.90 + hash01((car.id || 1) * 3.7) * 0.10;
-    partPaint(UNIT_BOX, mat4(0, 5.4, 0, 0, L * 0.60, 6.8, W + 0.44), lin([236 * copShade, 239 * copShade, 243 * copShade]));
-    // Interceptor push bar (Phase 1): two uprights and a crossbar ahead
-    // of the front bumper, tied back to it with short struts — the
-    // pursuit read that separates the police build from a white sedan.
-    part(UNIT_BOX, mat4(L / 2 + 2.5, 4.5, 0, 0, 1.0, 1.1, W - 4.2), lin([26, 27, 32]));
-    for (const sy of [1, -1]) {
-      part(UNIT_BOX, mat4(L / 2 + 2.5, 4.3, sy * (W / 2 - 3.6), 0, 1.0, 4.4, 1.0), lin([26, 27, 32]));
-      part(UNIT_BOX, mat4(L / 2 + 1.3, 3.9, sy * (W / 2 - 3.6), 0, 2.4, 0.8, 0.8), lin([26, 27, 32]));
-    }
-    const flash = Math.sin((game.time || 0) * 10 + (car.sirenPhase || 0)) > 0;
-    // Light bar (Phase 1 rework, D3): a low dark housing on a slim tray
-    // carrying SEPARATE red / blue lens segments — two per side around a
-    // clear centre section, lenses standing proud of the housing front
-    // and rear faces — in true red/blue emissive-look colours. The old
-    // solid cyan/pink slabs are gone.
-    part(UNIT_BOX, mat4(cabOff, roofZ + 0.2, 0, 0, 3.4, 0.4, cabWid - 0.8), lin([24, 25, 30]));
-    part(UNIT_BOX, mat4(cabOff, roofZ + 0.62, 0, 0, 2.6, 0.85, cabWid - 1.2), lin([20, 21, 26]));
-    if (!car.dead) {
-      for (const side of [1, -1]) {
-        const on = side > 0 ? flash : !flash;
-        const bright = side > 0 ? [255, 66, 60] : [70, 140, 255];
-        const dim = side > 0 ? [128, 32, 32] : [36, 64, 128];
-        for (const latC of [2.05, 4.55]) {
-          const lp = LP(cabOff, side * latC, roofZ + 0.62);
-          box(B.basic, lp[0], lp[1], lp[2], 1.6, 1.12, 0.46, yaw, lin(on ? bright : dim));
-        }
-        const gp = LP(cabOff, side * 3.3, roofZ + 1.15);
-        addGlow(gl, gp[0], gp[1], roofZ + 1.15, 9, lin(on ? bright : dim), on ? 0.26 : 0.10);
-      }
-      const cp2 = LP(cabOff, 0, roofZ + 0.62);
-      box(B.basic, cp2[0], cp2[1], cp2[2], 1.6, 0.65, 0.46, yaw, lin([196, 202, 208]));
-    }
-  }
-  if (isHero && !isVan) {
-    const wing = LP(-L * 0.44, 0, roofZ - 0.6);
-    box(B.flat, wing[0], wing[1], wing[2], 2.0, W / 2 - 0.8, 1.0, yaw, lin([24, 25, 30]));
-    for (const sy of [6.4, -6.4]) { const st = LP(-L * 0.44, sy, roofZ - 3.4); box(B.flat, st[0], st[1], st[2], 1.3, 1.3, 2.4, yaw, lin([24, 25, 30])); }
-    // Hero tail strip — Phase 2 toned down: a NARROW deep-red strip
-    // between the lamp clusters (was a full-width bright bar whose glow
-    // bloomed into a pink plank across the hero's rear).
-    quadAt(-L / 2 - 0.5, 0, 7.6, W / 2 - 4.6, 0.8, lin([168, 30, 40]));
-    if (!car.dead) { const tb = LP(-L / 2 - 0.5, 0, 7.6); addGlow(gl, tb[0], tb[1], 7.6, 8, lin([200, 36, 46]), 0.09); }
-  }
-  // Damage states (Phase 3, D7 — the effects layer the audit found
-  // missing: nothing in the world ever dented, smoked or burned). All
-  // read from the car's own hp ratio, all deterministic:
-  //  below 70% — a CRUMPLED panel on the struck side (an id-hash side
-  //    for traffic/cops; the hero wears it on the REAR quarter, the
-  //    PIT-contact side, on the PIT unit's own side of the hit);
-  //  below 40% — engine SMOKE off the hood (the hero, still running
-  //    mid-chase, rates only a slight wisp);
-  //  at/below 22% — the engine BURNS: layered orange glow at the hood
-  //    under a taller, darker smoke column, so the fire reads as the
-  //    CAR burning, not a pool on the ground.
-  const maxHp = car.maxHp || 100;
-  const ratio = car.dead ? 1 : (typeof car.hp === 'number' ? car.hp : maxHp) / maxHp;
-  if (!car.dead && ratio < 0.70) {
-    const dmgC = lin(rgb(car.color).map((v) => v * 0.52));
-    const creaseC = lin([18, 18, 22]);
-    if (isHero) {
-      // Dented rear quarter on the PIT side (north flank, lateral −1):
-      // a darkened panel riding slightly proud and low, a crease above.
-      part(UNIT_BOX, mat4(-L * 0.31, 5.0, -(W / 2 + 0.30), 0, 8.5, 4.4, 0.9), dmgC);
-      part(UNIT_BOX, mat4(-L * 0.31, 6.6, -(W / 2 + 0.42), 0, 7.0, 0.7, 0.5), creaseC);
-    } else {
-      const side = hash01((car.id || 1) * 7.7) < 0.5 ? 1 : -1;
-      part(UNIT_BOX, mat4(L * 0.30, 5.0, side * (W / 2 + 0.30), 0, 8.5, 4.4, 0.9), dmgC);
-      part(UNIT_BOX, mat4(L * 0.30, 6.6, side * (W / 2 + 0.42), 0, 7.0, 0.7, 0.5), creaseC);
-      if (ratio < 0.40) part(UNIT_BOX, mat4(-L * 0.02, 4.6, side * (W / 2 + 0.26), 0, 7.5, 3.6, 0.7), lin(rgb(car.color).map((v) => v * 0.62)));
-    }
-  }
-  if (!car.dead && ratio <= 0.22) {
-    // Burning engine: flame glows layered at the hood + smoke column.
-    const bp = LP(L * 0.30, 0, 0);
-    addGlow(gl, bp[0], bp[1], 9.5, 9, lin([255, 110, 30]), 0.30);
-    addGlow(gl, bp[0], bp[1], 10.5, 6, lin([255, 140, 40]), 0.55);
-    addGlow(gl, bp[0], bp[1], 11, 3.4, lin([255, 205, 95]), 0.80);
-    addGlow(gl, bp[0] + 1.5, bp[1] - 1, 13.5, 4.2, lin([255, 150, 50]), 0.42);
-    addSmoke(gl, bp[0], bp[1], 16, 6.5, 0.32, 0.32);
-    addSmoke(gl, bp[0] + 3, bp[1] - 2, 21.5, 9.5, 0.24, 0.32);
-    addSmoke(gl, bp[0] + 5, bp[1] - 3, 28, 13, 0.15, 0.32);
-  } else if (!car.dead && ratio < 0.40) {
-    const hp0 = LP(L * 0.26, 0, 0);
-    if (isHero) {
-      // Slight wisp only — the hero is damaged, not dying.
-      addSmoke(gl, hp0[0], hp0[1], 13.5, 5.5, 0.15, 0.45);
-      addSmoke(gl, hp0[0] + 2, hp0[1] - 1, 17.5, 8, 0.08, 0.45);
-    } else {
-      addSmoke(gl, hp0[0], hp0[1], 14.5, 7.5, 0.26, 0.45);
-      addSmoke(gl, hp0[0] + 3, hp0[1] - 2, 19, 10.5, 0.18, 0.45);
-      addSmoke(gl, hp0[0] + 5, hp0[1] - 3, 24, 13.5, 0.11, 0.45);
-    }
-  }
-  curCat = null;
-}
-function buildVehicles(gl, game, B) {
-  const all = [];
-  for (const car of game.traffic) all.push(car);
-  for (const car of game.specials || []) all.push(car);
-  for (const cop of game.police.cops) all.push(cop);
-  if (game.markedCarRef && !all.includes(game.markedCarRef)) all.push(game.markedCarRef);
-  for (const car of all) {
-    if (game.debugHideHeroCar && car === F.heroCar) continue;
-    buildCar(gl, game, B, car);
-  }
-}
-// ONE helicopter builder (Phase 3, D7 — the air unit the top 3 field and
-// this world never did): a flat-shaded police airframe in the same batch
-// style as the cars — fuselage + glass nose, tail boom + fin, main and
-// tail rotors, skid gear — staged ONLY by shots.js as game.stagedHeli
-// (mission frame atmosphere; it is NOT a police.cops unit and never
-// enters the dispatch roster or the scale audit's vehicle pairing). Its
-// searchlight throws a deterministic SPOTLIGHT: two nested translucent
-// cones in the alpha batch from the belly lamp to the staged ground
-// point, a bright disc + glow where the beam lands. Fixed geometry —
-// the rotor angle is a constant offset, never time-driven — so frozen
-// captures stay byte-identical.
-function buildHeli(gl, game, B, heli) {
-  const dx = heli.x - F.cam[0], dy = heli.y - F.cam[1];
-  if (dx * dx + dy * dy > 1250 * 1250) return;
-  curCat = null; // aircraft dressing: no ID colour, no audit pairing
-  const yaw = heli.angle || 0, alt = heli.z || 120;
-  const c = Math.cos(yaw), s = Math.sin(yaw);
-  const LP = (lx, ly, lz) => [heli.x + lx * c - ly * s, heli.y + lx * s + ly * c, (lz || 0) + alt];
-  const BODY = lin([44, 54, 72]), BODY_D = lin([30, 38, 52]), GLASS_C = lin([24, 33, 48]);
-  const BAND = lin([214, 216, 220]), DARK = lin([20, 21, 26]);
-  // Soft ground shadow far below, like the plane's.
-  disc(B.alpha, heli.x, heli.y, 0.25, 27, [...lin([8, 8, 10]), 0.20]);
-  const fb = LP(0, 0, 0);
-  box(B.flat, fb[0], fb[1], fb[2], 12.5, 4.6, 3.8, yaw, BODY);
-  const nose = LP(11.5, 0, -0.3);
-  box(B.flat, nose[0], nose[1], nose[2], 4.2, 4.0, 3.3, yaw, BODY);
-  const gl1 = LP(14.8, 0, 0.7);
-  box(B.flat, gl1[0], gl1[1], gl1[2], 2.0, 3.3, 2.3, yaw, GLASS_C);
-  const band = LP(1.5, 0, 1.1);
-  box(B.flat, band[0], band[1], band[2], 9.5, 4.75, 1.1, yaw, BAND);
-  const deck = LP(-2, 0, 4.6);
-  box(B.flat, deck[0], deck[1], deck[2], 6, 3.4, 1.2, yaw, BODY_D);
-  // Tail boom, fin and tail rotor.
-  const boom = LP(-19, 0, 1.1);
-  box(B.flat, boom[0], boom[1], boom[2], 8.5, 1.6, 1.6, yaw, BODY);
-  const fin = LP(-27.5, 0, 3.2);
-  box(B.flat, fin[0], fin[1], fin[2], 1.3, 0.45, 3.4, yaw, BODY_D);
-  const tr = LP(-27.5, 1.4, 3.2);
-  box(B.flat, tr[0], tr[1], tr[2], 0.35, 0.5, 3.1, yaw, DARK);
-  box(B.flat, tr[0], tr[1], tr[2], 3.1, 0.5, 0.35, yaw, DARK);
-  const stab = LP(-24, 0, 0.6);
-  box(B.flat, stab[0], stab[1], stab[2], 1.6, 5.2, 0.5, yaw, BODY_D);
-  // Main rotor: mast, two crossed blade boxes at a fixed angle, and a
-  // faint translucent disc so the rotor reads as a disc at distance.
-  const mast = LP(-2, 0, 6.0);
-  box(B.flat, mast[0], mast[1], mast[2], 1.0, 1.0, 1.5, yaw, DARK);
-  const hub = LP(-2, 0, 7.3);
-  box(B.flat, hub[0], hub[1], hub[2], 23, 1.05, 0.32, yaw + 0.7, DARK);
-  box(B.flat, hub[0], hub[1], hub[2], 1.05, 23, 0.32, yaw + 0.7, DARK);
-  disc(B.alpha, hub[0], hub[1], hub[2], 23.5, [...lin([196, 206, 216]), 0.13]);
-  // Skid gear: two tubes on four struts under the belly.
-  for (const sy of [1, -1]) {
-    limb(B.flat, LP(9.5, sy * 5.6, -6.4), LP(-9.5, sy * 5.6, -6.4), 0.55, 0.55, DARK, 6);
-    limb(B.flat, LP(6.5, sy * 3.4, -3.6), LP(6.5, sy * 5.6, -6.4), 0.45, 0.45, DARK, 5);
-    limb(B.flat, LP(-6.5, sy * 3.4, -3.6), LP(-6.5, sy * 5.6, -6.4), 0.45, 0.45, DARK, 5);
-  }
-  // Belly searchlight housing + its lamp glow.
-  const lamp = LP(4.5, 0, -4.3);
-  box(B.basic, lamp[0], lamp[1], lamp[2], 1.5, 1.5, 1.0, yaw, lin([255, 240, 200]));
-  addGlow(gl, lamp[0], lamp[1], lamp[2], 6, lin([255, 240, 200]), 0.5);
-  // Spotlight cone to the staged ground point: outer + inner nested
-  // cones (apex at the lamp, base at the ground), a landing disc and a
-  // glow at the foot. Deterministic geometry in the alpha batch.
-  if (typeof heli.spotX === 'number') {
-    const from = new THREE.Vector3(lamp[0], lamp[2], lamp[1]);
-    const to = new THREE.Vector3(heli.spotX, 0.8, heli.spotY);
-    const dir = from.clone().sub(to);
-    const len = dir.length() || 1;
-    dir.normalize();
-    const mid = from.clone().add(to).multiplyScalar(0.5);
-    const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-    for (const [rad, al] of [[15, 0.10], [8, 0.09]]) {
-      const cone = new THREE.ConeGeometry(rad, 1, 18, 1, true);
-      B.alpha.push(cone, new THREE.Matrix4().compose(mid, quat, new THREE.Vector3(1, len, 1)), [...lin([255, 238, 196]), al]);
-      cone.dispose();
-    }
-    disc(B.alpha, heli.spotX, heli.spotY, 0.58, 16, [...lin([255, 238, 196]), 0.30]);
-    disc(B.alpha, heli.spotX, heli.spotY, 0.60, 8, [...lin([255, 246, 214]), 0.38]);
-    addGlow(gl, heli.spotX, heli.spotY, 5, 17, lin([255, 238, 196]), 0.45);
-  }
-  curCat = null;
-}
-
-// ---------------------------------------------------------------- figures
-// ONE figure builder for player, crew and peds. Proportions per Rect's
-// 2026-11-20 anime reference (superseding the Polygon War big-head card):
-// tall and slim, wide shoulders, SMALL head (≈2 units of the 15.1 total).
-// Phase 2 re-proportion (panel defects 2/4): legs carry real thickness
-// (thigh r 1.22, shin r 0.98 — no more stilts), the aim stance is a compact
-// athletic brace (foot spread ≈12 units fore-aft, lateral ≤1.35 — inside
-// the 2.3 shoulder line), feet land ON the ground plane, and the hair is
-// a shaped spiky cap — two stacked slabs + seven chunky 4-sided spikes +
-// a forward fringe — whose silhouette separates from the head at chase
-// distance. Background peds get a contrast lift (shirt up, pants down in
-// value) so head/torso/leg separation survives to the back of the frame.
-// Method follows the reference too: box-modelled torso/head, mirror
-// symmetry, smooth-shaded segmented limbs with extra joint volumes at
-// elbows/knees so bends read cleanly, hair as a SEPARATE cap mesh, eyes
-// as small inset shapes on the face. Poses: walk / run (walkPhase),
-// stand, aim (two-handed long gun at shoulder height, OTS presentation).
-// Phase 11 (Rect's direct order, 2026-11-20): NORMAL HUMAN proportions.
-// The figure's legs ran 55.7% of height (HIP_Z 8.6 / silhouette 15.45) —
-// the tall/slim anime read Rect rejected on sight ("kakinya kepanjangan").
-// HIP_Z drops 8.6 → 7.6 and the leg segments scale with it (thigh 4.4 →
-// 3.89, shin 4.2 → 3.71; sum 7.60 = HIP_Z, as before), so the legs are
-// 49.2% of height and the hip→ankle inseam is 45.6%. SHO_Z, the whole
-// head/hair stack and the silhouette top (15.45) are UNCHANGED — the
-// torso (hip→shoulder) lengthens 4.5 → 5.5 by exactly what the legs lose,
-// and total height / the 1.226 figure:car ratio never move.
-const HIP_Z = 7.6, SHO_Z = 13.1;
-function buildFigure(gl, game, B, o) {
-  const dx = o.x - F.cam[0], dy = o.y - F.cam[1];
-  if (dx * dx + dy * dy > 820 * 820) return;
-  curCat = o.isPlayer ? 'fig' : null;
-  const a = o.angle;
-  const f = [Math.cos(a), Math.sin(a)], s = [-Math.sin(a), Math.cos(a)];
-  const P = (fu, sv, z) => [o.x + f[0] * fu + s[0] * sv, o.y + f[1] * fu + s[1] * sv, z];
-  disc(B.alpha, o.x, o.y, 0.22, 6.2, [...lin([8, 8, 10]), 0.30]);
-  // Background peds (no tactical gear) get a value-contrast lift so the
-  // shirt reads against the pants and the street at chase distance.
-  const shirt = o.gear ? lin(o.shirt) : lin(o.shirt.map((v) => Math.min(255, v * 1.10 + 6)));
-  const skin = lin(o.skin);
-  const pants = o.gear ? lin(o.pants) : lin(o.pants.map((v) => v * 0.82));
-  const hair = lin(o.hair);
-  if (o.dead) {
-    box(B.flat, o.x, o.y, 1.6, 8.6, 2.6, 1.6, a, shirt);
-    const hc = P(10.4, 0, 1.4);
-    box(B.flat, hc[0], hc[1], hc[2], 1.5, 1.45, 0.8, a, skin);
-    const hr = P(10.0, 0, 2.0);
-    box(B.flat, hr[0], hr[1], hr[2], 1.3, 1.5, 0.35, a, hair);
-    curCat = null;
-    return;
-  }
-  if (o.pose === 'down') {
-    // Fallen figure (Phase 1 pose, for the D4/D7 set): lying on its back
-    // along the facing axis, built from the SAME segment lengths as the
-    // standing figure — legs extended behind the hips, torso flat, head
-    // at the far end, arms fallen open to the sides.
-    for (const sideSign of [1, -1]) {
-      const hipD = P(1.2, sideSign * 1.0, 1.15), kneeD = P(-3.4, sideSign * 1.05, 1.05), footD = P(-8.3, sideSign * 1.1, 0.9);
-      limb(B.flat, hipD, kneeD, 1.22, 1.0, pants, 7);
-      ball(B.flat, kneeD[0], kneeD[1], kneeD[2], 1.02, pants);
-      limb(B.flat, kneeD, footD, 0.98, 0.72, pants, 7);
-      box(B.flat, footD[0] - f[0] * 0.7, footD[1] - f[1] * 0.7, 0.55, 1.5, 0.8, 0.5, a, lin([26, 22, 19]));
-    }
-    const torsoD = P(3.4, 0, 1.35);
-    box(B.flat, torsoD[0], torsoD[1], torsoD[2], 3.1, 1.95, 1.15, a, shirt);
-    if (o.gear) { const vestD = P(3.6, 0, 2.3); box(B.flat, vestD[0], vestD[1], vestD[2], 2.2, 1.6, 0.35, a, lin([86, 93, 63])); }
-    const headD = P(7.6, 0, 1.25);
-    ball(B.flat, headD[0], headD[1], headD[2], 0.92, skin, 1);
-    const hairD = P(7.3, 0, 1.5);
-    ball(B.flat, hairD[0], hairD[1], hairD[2], 0.98, hair, 1);
-    for (const sideSign of [1, -1]) {
-      const shoD = P(5.6, sideSign * 1.9, 1.2), elbD = P(4.6, sideSign * 4.6, 0.95), handD = P(3.4, sideSign * 6.8, 0.8);
-      limb(B.flat, shoD, elbD, 0.78, 0.64, shirt, 7);
-      limb(B.flat, elbD, handD, 0.62, 0.5, skin, 7);
-      ball(B.flat, handD[0], handD[1], handD[2], 0.52, skin);
-    }
-    curCat = null;
-    return;
-  }
-  const pose = o.pose, ph = o.phase || 0;
-  const lean = pose === 'flee' ? 2.8 : pose === 'run' ? 2.4 : pose === 'aim' ? 1.5 : pose === 'walk' ? 0.7 : pose === 'ride' ? 0.6 : 0;
-  // Legs: thigh 3.89 + shin 3.71 (Phase 11: scaled by 7.6/8.6 with the
-  // hip drop — normal human proportion, see HIP_Z) with believable
-  // thickness, knee joint volume at the bend, hip attachment at ±1.05
-  // and feet grounded at z 0.55 (the shoe box spans z 0–1.1, so the
-  // sole sits ON the ground plane).
-  for (const sideSign of [1, -1]) {
-    const hip = P(0, sideSign * 1.05, HIP_Z);
-    let knee, foot;
-    if (pose === 'walk' || pose === 'run') {
-      const amp = pose === 'run' ? 0.82 : 0.52;
-      const sw = Math.sin(ph + (sideSign > 0 ? 0 : Math.PI)) * amp;
-      const sw2 = sw - (pose === 'run' ? 0.55 : 0.40);
-      knee = P(Math.sin(sw) * 3.89, sideSign * 1.05, HIP_Z - Math.cos(sw) * 3.89);
-      foot = P(Math.sin(sw) * 3.89 + Math.sin(sw2) * 3.71, sideSign * 1.05, Math.max(0.55, HIP_Z - Math.cos(sw) * 3.89 - Math.cos(sw2) * 3.71));
-    } else if (pose === 'flee') {
-      // Wide mid-stride (Phase 1 pose): front foot planted far ahead,
-      // back foot kicked up behind — the run's bigger, desperate
-      // sibling, feet still under the hip line laterally.
-      if (sideSign > 0) { knee = P(4.4, 1.02, HIP_Z - 3.1); foot = P(7.0, 1.05, 0.55); }
-      else { knee = P(-3.6, -1.02, HIP_Z - 3.3); foot = P(-6.6, -1.05, 2.3); }
-    } else if (pose === 'ride') {
-      // Seated on the scooter (Top-3 rebuild Phase 2): the hip stays
-      // at the standing HIP_Z — the scooter's seat top meets it there —
-      // while the legs fold: thigh forward to a knee ahead of the hip,
-      // shin down to a foot resting on the floorboard (z 3.4, the
-      // board's top + shoe sole). Same segment lengths, bent.
-      knee = P(3.5, sideSign * 1.05, HIP_Z - 0.7);
-      foot = P(3.9, sideSign * 1.05, 3.4);
-    } else if (pose === 'aim') {
-      // Compact brace: front foot +5.66, back foot −4.95 (spread 10.6;
-      // Phase 11: the whole stance scaled by 7.6/8.6 with the leg
-      // segments — it was spread 12 on the old 8.6 legs, 16.6 before
-      // Phase 2 — the split that read as splayed stilts), lateral
-      // inside the shoulder line, both soles flat on the ground.
-      if (sideSign > 0) { knee = P(3.0, 1.1, HIP_Z - 3.71); foot = P(5.66, 1.22, 0.55); }
-      else { knee = P(-2.3, -1.1, HIP_Z - 3.8); foot = P(-4.95, -1.22, 0.55); }
-    } else {
-      // Stand (and armsup, which shares these legs): feet directly
-      // under the hips at ±1.05 — no splay (Phase 1, D4).
-      knee = P(0.3, sideSign * 1.05, HIP_Z - 3.89);
-      foot = P(0.6, sideSign * 1.05, 0.55);
-    }
-    limb(B.flat, hip, knee, 1.22, 1.0, pants, 7);
-    ball(B.flat, knee[0], knee[1], knee[2], 1.02, pants);
-    limb(B.flat, knee, foot, 0.98, 0.72, pants, 7);
-    // Shoe (Phase 1, D4): elongated FORWARD of the ankle with a short
-    // heel — a shoe last, not the old slab that ran as far behind the
-    // ankle as ahead of it. Grounded poses keep the sole at z 0.55.
-    const shoeZ = pose === 'flee' || pose === 'ride' ? foot[2] : 0.55;
-    box(B.flat, foot[0] + f[0] * 1.05, foot[1] + f[1] * 1.05, shoeZ, 1.5, 0.8, 0.5, a, lin([26, 22, 19]));
-  }
-  // Torso: box-modelled — slim pelvis box, wider chest box (shoulders),
-  // a waist step between them; the pair leans with the pose.
-  const hipC = P(0, 0, HIP_Z + 0.3);
-  // Phase 3 slimming: pelvis span 4.7 → 4.1, chest span 5.24 → 4.6 and
-  // chest depth 3.36 → 2.9 — the slab bulk that read giant beside the
-  // cars is gone; the tall/slim anime read stays.
-  // Phase 8 (Rect's eye over the audit): the read is BULK, not height —
-  // spans slim again (chest 4.6 → 4.0, depth 2.9 → 2.6; pelvis 4.1 →
-  // 3.6; waist 3.9 → 3.5) while the silhouette HEIGHT (15.45, ratio
-  // 1.226) and every z/forward coordinate stay exactly as they were,
-  // so poses, gear assembly and the muzzle line are untouched.
-  // Phase 11: pelvis + waist are HIP_Z-relative and drop the full 1.0
-  // with the hip; the chest stays at SHO_Z — so the torso lengthens by
-  // exactly the leg shortening with no width change (Phase 8 spans hold).
-  box(B.flat, hipC[0], hipC[1], HIP_Z + 0.9, 1.25, 1.8, 1.35, a, pants);
-  const chestZ = SHO_Z - 1.35, chestP = P(lean * 0.82, 0, chestZ);
-  box(B.flat, chestP[0], chestP[1], chestZ, 1.3, 2.0, 1.5, a, shirt);
-  const waistP = P(lean * 0.4, 0, HIP_Z + 2.6);
-  box(B.flat, waistP[0], waistP[1], HIP_Z + 2.6, 1.22, 1.75, 1.15, a, shirt);
-  // Clothing read (Phase 1, D4): a chest panel sitting slightly proud
-  // of the chest in a lighter tone of the shirt, plus a dark belt line
-  // at the waist — the figure reads CLOTHED, not moulded from one tone.
-  // Geared figures skip the panel; the vest owns their chest.
-  if (!o.gear) {
-    const panelP = P(lean * 0.82 + 1.34, 0, chestZ + 0.1);
-    box(B.flat, panelP[0], panelP[1], panelP[2], 0.16, 1.5, 1.2, a, lin(o.shirt.map((v) => Math.min(255, v * 1.14 + 8))));
-  }
-  const beltP = P(lean * 0.35, 0, HIP_Z + 1.5);
-  box(B.flat, beltP[0], beltP[1], beltP[2], 1.3, 1.86, 0.3, a, lin([30, 28, 30]));
-  // Modular tactical gear (player + crew only): olive vest slabs, khaki
-  // pouches, shoulder pads in darkened shirt, slung long gun on the back
-  // when not aiming.
-  if (o.gear) {
-    const OLIVE = lin([86, 93, 63]), OLIVE_D = lin([57, 64, 45]), KHAKI = lin([139, 138, 103]);
-    const midZ = (HIP_Z + SHO_Z) / 2, midLean = lean * 0.55;
-    const vf = P(midLean + 1.78, 0, midZ), vb = P(midLean - 1.78, 0, midZ);
-    box(B.flat, vf[0], vf[1], vf[2], 0.30, 1.55, 1.85, a, OLIVE);
-    box(B.flat, vb[0], vb[1], vb[2], 0.30, 1.55, 1.85, a, OLIVE);
-    for (const px of [-1.05, 0, 1.05]) {
-      const pp = P(midLean + 2.16, px, HIP_Z + 1.6);
-      box(B.flat, pp[0], pp[1], pp[2], 0.34, 0.5, 0.7, a, KHAKI);
-    }
-    for (const sx of [1, -1]) {
-      const st = P(lean * 0.85, sx * 1.35, SHO_Z - 0.3);
-      box(B.flat, st[0], st[1], st[2], 1.7, 0.42, 0.28, a, OLIVE_D);
-      const pd = P(lean, sx * 2.22, SHO_Z - 0.1);
-      box(B.flat, pd[0], pd[1], pd[2], 1.5, 0.82, 0.48, a, lin(o.shirt.map((v) => v * 0.62)));
-    }
-    if (pose !== 'aim') {
-      const sg = P(-2.3, 0, (HIP_Z + SHO_Z) / 2 + 0.5);
-      box(B.flat, sg[0], sg[1], sg[2], 0.42, 0.52, (SHO_Z - HIP_Z) / 2 + 0.5, a, lin([37, 39, 45]));
-    }
-  }
-  // Neck + SHAPED HEAD (Phase 1 rebuild, D4): the slab head and the
-  // spiked hair are gone — the audit's mannequin read lived here. A
-  // short visible neck carries a SLIMMER multi-box head: a cranium box
-  // with a narrower crown step on top (the rounded read), a jaw step
-  // under it, a slightly lighter face plane flush on the cranium's
-  // front, a small nose, and hair as a CLOSE CAP — a low dome ball
-  // seated back on the crown plus back/side panels, no spikes. The
-  // stack keeps the Phase 3 heights exactly: head top 15.10, hair
-  // silhouette 15.44 ≤ 15.45.
-  limb(B.flat, P(lean, 0, SHO_Z - 0.2), P(lean + 0.12, 0, SHO_Z + 0.62), 0.55, 0.55, skin, 6);
-  const headC = P(lean + 0.25, 0, 14.28);
-  box(B.flat, headC[0], headC[1], headC[2], 1.18, 1.08, 0.82, a, skin);
-  const crownP = P(lean + 0.22, 0, 14.8);
-  box(B.flat, crownP[0], crownP[1], crownP[2], 0.94, 0.86, 0.3, a, skin);
-  const jawP = P(lean + 0.31, 0, 13.28);
-  box(B.flat, jawP[0], jawP[1], jawP[2], 0.98, 0.88, 0.28, a, skin);
-  const faceP = P(lean + 0.25 + 1.2, 0, 13.95);
-  box(B.flat, faceP[0], faceP[1], faceP[2], 0.14, 0.72, 0.52, a, lin(o.skin.map((v) => Math.min(255, v * 1.07 + 5))));
-  const noseP = P(lean + 0.25 + 1.42, 0, 13.9);
-  box(B.flat, noseP[0], noseP[1], noseP[2], 0.14, 0.16, 0.26, a, lin(o.skin.map((v) => v * 0.92)));
-  if (o.gear) {
-    // Geared / player variants wear a dark eyewear band across the face.
-    const bandP = P(lean + 0.25 + 1.27, 0, 14.3);
-    box(B.flat, bandP[0], bandP[1], bandP[2], 0.12, 0.95, 0.28, a, lin([24, 24, 28]));
-  } else {
-    for (const sx of [1, -1]) { // inset eyes: small dark shapes on the face
-      const ep = P(lean + 0.25 + 1.36, sx * 0.42, 14.28);
-      box(B.flat, ep[0], ep[1], ep[2], 0.08, 0.22, 0.3, a, lin([30, 26, 30]));
-    }
-  }
-  // Hair cap: a low dome seated back on the crown (front reach stays
-  // behind the face, so a hairline reads), a back panel dropping
-  // toward the neck and side panels over the ears.
-  const capC = P(lean + 0.1, 0, 14.42);
-  ball(B.flat, capC[0], capC[1], capC[2], 1.02, hair, 1);
-  const backP = P(lean + 0.25 - 1.15, 0, 14.0);
-  box(B.flat, backP[0], backP[1], backP[2], 0.3, 1.0, 0.8, a, hair);
-  for (const sx of [1, -1]) {
-    const lk = P(lean + 0.18, sx * 1.02, 14.15);
-    box(B.flat, lk[0], lk[1], lk[2], 0.95, 0.2, 0.6, a, hair);
-  }
-  // Arms: upper 3.5 + forearm 3.3, slim, elbow joint volume at the bend.
-  for (const sideSign of [1, -1]) {
-    const sho = P(lean, sideSign * 2.02, SHO_Z - 0.2);
-    let elbow, hand;
-    if (pose === 'aim') {
-      // Both hands ON the gun: trigger hand at the stock (+4.4), support
-      // hand under the fore-end (+7.6) — the two-handed shouldered grip.
-      if (sideSign > 0) { elbow = P(lean + 1.0, 2.1, SHO_Z - 1.9); hand = P(lean + 4.4, 0.55, SHO_Z - 0.2); }
-      else { elbow = P(lean + 4.6, -1.8, SHO_Z - 1.5); hand = P(lean + 7.6, 0.25, SHO_Z + 0.1); }
-    } else if (pose === 'walk' || pose === 'run') {
-      const amp = pose === 'run' ? 0.78 : 0.44;
-      const sw = Math.sin(ph + (sideSign > 0 ? Math.PI : 0)) * amp;
-      elbow = P(lean + Math.sin(sw) * 3.5, sideSign * 2.2, SHO_Z - 0.2 - Math.cos(sw) * 3.5);
-      const sw2 = sw * 0.7 - 0.32;
-      hand = P(lean + Math.sin(sw) * 3.5 + Math.sin(sw2) * 3.3, sideSign * 2.2, SHO_Z - 0.2 - Math.cos(sw) * 3.5 - Math.cos(sw2) * 3.3);
-    } else if (pose === 'armsup') {
-      // Fleeing civilian (Phase 1 pose): both arms thrown up and out,
-      // hands open above the head — the universal hands-up read.
-      elbow = P(lean + 0.7, sideSign * 3.05, SHO_Z + 2.4);
-      hand = P(lean + 1.0, sideSign * 3.7, SHO_Z + 5.4);
-    } else if (pose === 'flee') {
-      // Arms pumped BACK against the stride (Phase 1 pose), elbows bent.
-      elbow = P(lean - 2.4, sideSign * 2.25, SHO_Z - 2.4);
-      hand = P(lean - 4.8, sideSign * 2.15, SHO_Z - 4.0);
-    } else if (pose === 'ride') {
-      // Arms forward-down to the handlebar (Top-3 rebuild Phase 2):
-      // elbows low and forward, hands at the bar's grips (fu +6.4,
-      // lateral ±1.55, z SHO_Z − 0.4 — the scooter builder puts its
-      // bar at fu +5.85 / z 12.35, so the hand balls close on it).
-      elbow = P(lean + 3.2, sideSign * 2.15, SHO_Z - 1.6);
-      hand = P(lean + 6.4, sideSign * 1.55, SHO_Z - 0.4);
-    } else {
-      elbow = P(lean + 0.5, sideSign * 2.2, SHO_Z - 3.7);
-      hand = P(lean + 1.2, sideSign * 2.12, SHO_Z - 6.9);
-    }
-    limb(B.flat, sho, elbow, 0.78, 0.64, shirt, 7);
-    ball(B.flat, elbow[0], elbow[1], elbow[2], 0.66, shirt);
-    limb(B.flat, elbow, hand, 0.62, 0.5, skin, 7);
-    ball(B.flat, hand[0], hand[1], hand[2], 0.52, skin); // hand (Phase 1: a ball, not the old cube)
-    if (pose === 'aim' && sideSign > 0) {
-      // TWO-HANDED FIREARM, REBUILT (Phase 1, D4/D8): the old dark tube
-      // is now a readable weapon — stock at the shoulder, a boxy
-      // RECEIVER under the trigger hand, a handguard under the support
-      // hand, a slim barrel, a box magazine, and front + rear sights.
-      // INVARIANT (Phase 4 record): the muzzle tip stays EXACTLY at
-      // lean + 15.2 fwd / +0.28 lat / SHO_Z + 0.42, so MISSION-AIM
-      // keeps deltaLen 8.15 / muzzleLineDist 8.1 — parts were sized
-      // around the tip, never the other way round.
-      const GUN = lin([37, 39, 45]), GUN_TIP = lin([52, 55, 63]);
-      const stock = P(lean + 0.9, 0.5, SHO_Z + 0.2);
-      box(B.flat, stock[0], stock[1], stock[2], 1.6, 0.52, 0.92, a, GUN);
-      const recv = P(lean + 4.3, 0.38, SHO_Z + 0.35);
-      box(B.flat, recv[0], recv[1], recv[2], 2.1, 0.55, 0.62, a, GUN);
-      const grip = P(lean + 3.0, 0.45, SHO_Z - 0.72);
-      box(B.flat, grip[0], grip[1], grip[2], 0.42, 0.4, 0.68, a, GUN);
-      const mag = P(lean + 5.6, 0.36, SHO_Z - 1.12);
-      box(B.flat, mag[0], mag[1], mag[2], 0.55, 0.42, 1.02, a, GUN);
-      const fore = P(lean + 8.3, 0.32, SHO_Z + 0.35);
-      box(B.flat, fore[0], fore[1], fore[2], 1.9, 0.48, 0.5, a, GUN);
-      limb(B.flat, P(lean + 10.2, 0.3, SHO_Z + 0.38), P(lean + 14.6, 0.28, SHO_Z + 0.4), 0.3, 0.26, GUN, 6);
-      limb(B.flat, P(lean + 14.6, 0.28, SHO_Z + 0.4), P(lean + 15.2, 0.28, SHO_Z + 0.42), 0.42, 0.38, GUN_TIP, 6);
-      const rs = P(lean + 4.6, 0.34, SHO_Z + 1.12);
-      box(B.flat, rs[0], rs[1], rs[2], 0.8, 0.36, 0.38, a, GUN_TIP);
-      const fs = P(lean + 11.8, 0.3, SHO_Z + 0.95);
-      box(B.flat, fs[0], fs[1], fs[2], 0.3, 0.22, 0.32, a, GUN_TIP);
-    }
-  }
-  curCat = null;
-}
-// ONE scooter builder (Top-3 rebuild Phase 2, gap-audit D1's cyclist
-// beat): a small step-through scooter in the same flat-shaded batch
-// style as the cars — two wheels, a leg shield, a floorboard, a seat
-// and a handlebar — staged by shots.js as game.stagedScooter with a
-// seated rider (buildFigure pose 'ride'). Local space matches the
-// figure's: +fu is the facing direction, the seat top (z 7.0) meets
-// the rider's standing HIP_Z so the seated silhouette keeps the
-// figure's own proportions, and the bar (fu +5.85, z 12.35) meets
-// the 'ride' pose's hands.
-function buildScooter(gl, game, B, sc) {
-  const dx = sc.x - F.cam[0], dy = sc.y - F.cam[1];
-  if (dx * dx + dy * dy > 820 * 820) return;
-  curCat = null;
-  const a = sc.angle, c = Math.cos(a), s = Math.sin(a);
-  const LP = (lx, ly, lz) => [sc.x + lx * c - ly * s, sc.y + lx * s + ly * c, lz];
-  const body = lin(rgb(sc.color || '#3f7f8c'));
-  const bodyTop = lin(rgb(sc.color || '#3f7f8c').map((v) => Math.min(255, v * 1.18)));
-  const DARK = lin([26, 26, 30]), SEAT = lin([34, 32, 34]);
-  disc(B.alpha, sc.x, sc.y, 0.22, 11, [...lin([8, 8, 10]), 0.30]);
-  // Two wheels: lateral cylinders (tyre) + a pale hub ball each.
-  for (const wx of [8.2, -7.8]) {
-    limb(B.flat, LP(wx, -1.0, 2.3), LP(wx, 1.0, 2.3), 2.3, 2.3, lin(TYRE), 12);
-    ball(B.flat, ...LP(wx, 0, 2.3), 0.85, lin([172, 176, 184]));
-  }
-  // Floorboard between the rider's feet (top z 2.9, under the shoes).
-  const fb = LP(2.2, 0, 2.55); box(B.flat, fb[0], fb[1], fb[2], 2.6, 2.1, 0.35, a, DARK);
-  // Leg shield: a vertical panel ahead of the rider's shins, body
-  // colour, with the steering column rising out of it to the bar.
-  const sh1 = LP(6.35, 0, 5.2); box(B.flat, sh1[0], sh1[1], sh1[2], 0.55, 2.15, 3.4, a, body);
-  limb(B.flat, LP(6.3, 0, 8.2), LP(5.9, 0, 12.2), 0.45, 0.4, DARK, 6);
-  // Handlebar: a lateral bar on the column top, grips at its ends.
-  const bar = LP(5.85, 0, 12.35); box(B.flat, bar[0], bar[1], bar[2], 0.35, 2.5, 0.35, a, DARK);
-  // Front fork down to the axle + a body-colour fender over the wheel.
-  limb(B.flat, LP(8.2, 0, 2.3), LP(6.6, 0, 9.0), 0.4, 0.35, DARK, 6);
-  const fen = LP(8.2, 0, 4.9); box(B.flat, fen[0], fen[1], fen[2], 1.6, 1.9, 0.35, a, bodyTop);
-  const lamp = LP(7.0, 0, 9.4); box(B.basic, lamp[0], lamp[1], lamp[2], 0.3, 0.9, 0.7, a, lin([255, 243, 190]));
-  // Seat (top z 7.0 under the rider's hips) + the rear body hump
-  // carrying the tail, in body colour over a dark undertail.
-  const seat = LP(-1.6, 0, 6.3); box(B.flat, seat[0], seat[1], seat[2], 2.9, 2.0, 0.7, a, SEAT);
-  const rb = LP(-6.4, 0, 4.6); box(B.flat, rb[0], rb[1], rb[2], 2.6, 2.3, 1.9, a, body);
-  const ut = LP(-6.6, 0, 2.4); box(B.flat, ut[0], ut[1], ut[2], 2.2, 1.9, 0.6, a, DARK);
-  const tail = LP(-9.15, 0, 5.6); box(B.basic, tail[0], tail[1], tail[2], 0.3, 0.8, 0.6, a, lin([226, 36, 46]));
-  curCat = null;
-}
-function buildFigures(gl, game, B) {
-  for (const ped of game.peds) {
-    const fleeing = ped.fleeUntil && game.nowMs < ped.fleeUntil;
-    buildFigure(gl, game, B, {
-      x: ped.x, y: ped.y, angle: ped.angle, phase: ped.walkPhase || 0,
-      // Pose wiring (Top-3 rebuild Phase 2): a pose staged on the ped
-      // itself (shots.js sets ped.pose) wins over the sim-derived
-      // default; with no staged pose the mapping is exactly the
-      // standing one — dead → 'stand' (the dead branch draws the
-      // body), fleeing → 'run', otherwise 'walk'.
-      pose: ped.pose || (ped.dead ? 'stand' : fleeing ? 'run' : 'walk'), dead: !!ped.dead,
-      shirt: rgb(ped.shirt), skin: rgb(ped.skin || '#d9b48f'), pants: rgb(ped.pants || '#2e3440'),
-      hair: rgb(ped.hairColor || '#2b2118'), isPlayer: false, gear: false,
-    });
-  }
-  if (game.stagedScooter) {
-    // The staged scooter + its seated rider (chase frame dressing,
-    // set by shots.js; absent in every other frame).
-    const sc = game.stagedScooter, rd = sc.rider || {};
-    buildScooter(gl, game, B, sc);
-    buildFigure(gl, game, B, {
-      x: sc.x, y: sc.y, angle: sc.angle, phase: 0,
-      pose: 'ride', dead: false,
-      shirt: rgb(rd.shirt || '#c94f38'), skin: rgb(rd.skin || '#8a5a34'), pants: rgb(rd.pants || '#2e3440'),
-      hair: rgb(rd.hair || '#17171a'), isPlayer: false, gear: false,
-    });
-  }
-  if (game.crewMate && !game.player.inCar) {
-    const cm = game.crewMate;
-    buildFigure(gl, game, B, {
-      x: cm.x, y: cm.y, angle: cm.angle, phase: cm.walkPhase || 0,
-      pose: cm.pose || 'walk', dead: false,
-      shirt: rgb(cm.color || '#e8c832'), skin: rgb('#d9b48f'), pants: [40, 38, 44],
-      hair: [56, 38, 22], isPlayer: false, gear: true,
-    });
-  }
-  if (!game.player.inCar && !game.debugHidePlayer) {
-    const p = game.player;
-    const aiming = (game.bullets && game.bullets.length > 0) || (game.lastShotAt && game.nowMs - game.lastShotAt < 700);
-    const moving = Math.abs(p.vx || 0) + Math.abs(p.vy || 0) > 4;
-    buildFigure(gl, game, B, {
-      x: p.x, y: p.y, angle: p.angle, phase: p.walkPhase || 0,
-      pose: aiming ? 'aim' : moving ? 'walk' : 'stand', dead: false,
-      shirt: rgb(PALETTE.playerShirt), skin: rgb(PALETTE.playerSkin), pants: [46, 52, 64],
-      hair: [92, 60, 32], isPlayer: true, gear: true,
-    });
-  }
-}
-
 // ------------------------------------------------- vegetation & street props
-// ONE bus-stop builder (Phase 8): shelter (4 posts, flat roof, glass
-// back, bench) + sign pole with a two-sided BUS / AMBER LINE panel.
-// face = unit vector toward the road; the shelter opens toward it.
-function buildBusStop(gl, B, x, y, face) {
+function buildBusStop(R, x, y, face) {
+  const { B } = R;
   const WOOD = lin([122, 94, 66]), IRON = lin([40, 42, 48]);
   const s = [-face[1], face[0]];
   const yaw = Math.atan2(s[1], s[0]);
@@ -2118,14 +578,11 @@ function buildBusStop(gl, B, x, y, face) {
   for (const la of [-4.2, 4.2]) { const lp2 = LP(la, -0.8, 0); box(B.flat, lp2[0], lp2[1], 1.0, 0.45, 0.45, 1.0, yaw, IRON); }
   const poleBase = LP(7.6, 2.2, 0), poleTop = LP(7.6, 2.2, 11.5);
   limb(B.flat, poleBase, poleTop, 0.35, 0.35, IRON, 5);
-  // Sign panel PERPENDICULAR to the kerb (spanning the face axis, normal
-  // along the street) — real stop signs face along-street traffic; a
-  // road-facing panel is edge-on to every chase/board camera. Two quads
-  // back-to-back across the pole, each unmirrored from its own side.
   B.bus.quad(LP(7.48, -1.3, 7.3), LP(7.48, 5.7, 7.3), LP(7.48, 5.7, 12.3), LP(7.48, -1.3, 12.3), WHITE, [1, 0, 0, 1]);
   B.bus.quad(LP(7.72, 5.7, 7.3), LP(7.72, -1.3, 7.3), LP(7.72, -1.3, 12.3), LP(7.72, 5.7, 12.3), WHITE, [1, 0, 0, 1]);
 }
-function buildVegetation(gl, game, B) {
+function buildVegetation(R, game) {
+  const { B } = R;
   const camX = F.cam[0], camY = F.cam[1];
   const inR = (x, y, r) => { const dx = x - camX, dy = y - camY; return dx * dx + dy * dy < r * r; };
   for (const t of game.city.trees || []) {
@@ -2170,10 +627,6 @@ function buildVegetation(gl, game, B) {
     const crown = p0;
     ball(B.flat, crown[0], crown[1], crown[2] + 0.8, 2.4, lin([84, 64, 36]));
     const seed = Math.floor(Math.abs(pm.x) * 3 + Math.abs(pm.y) * 7);
-    // Phase 2 fronds: BENT multi-plane ribbons — each frond is THREE
-    // tapering quads along a drooping spine (rise out of the crown, crest,
-    // then fall past horizontal to the tip), replacing the Phase 1 flat
-    // two-quad tents that read as green stars.
     for (let i = 0; i < 9; i++) {
       const la = (i / 9) * Math.PI * 2 + hash01(seed + i) * 0.45;
       const len = (26 + hash01(seed + i * 3) * 6) * s;
@@ -2200,13 +653,8 @@ function buildVegetation(gl, game, B) {
     if (!inR(l.x, l.y, 700) || inR(l.x, l.y, 80)) continue;
     limb(B.flat, [l.x, l.y, 0], [l.x, l.y, 25], 0.8, 0.8, lin([34, 36, 42]), 5);
     box(B.basic, l.x, l.y, 26, 2.4, 2.4, 1.7, 0, lin([238, 198, 138]));
-    // Phase 3 (D6/D7): the lamp's halo now scales with the grade's
-    // emissive, and in dark grades (dusk / night — emissive > 0.5) each
-    // lamp throws a warm POOL on the street under it: a wide faint disc
-    // and a brighter core. Day (emissive 0.10) and golden (0.38) frames
-    // get no pools at all, so daylight streets stay clean.
     const em = F.gradeEmissive || 0;
-    addGlow(gl, l.x, l.y, 27, 11, lin([255, 190, 110]), 0.08 + em * 0.26);
+    addGlow(l.x, l.y, 27, 11, lin([255, 190, 110]), 0.08 + em * 0.26);
     if (em > 0.5) {
       disc(B.alpha, l.x, l.y, 0.52, 12, [...lin([255, 190, 110]), 0.13]);
       disc(B.alpha, l.x, l.y, 0.54, 6, [...lin([255, 205, 130]), 0.16]);
@@ -2219,17 +667,10 @@ function buildVegetation(gl, game, B) {
     limb(B.flat, [bt.x, bt.y, 3 * s], [bt.x, bt.y, 19 * s], 0.65, 0.65, lin([110, 88, 68]), 5);
     B.flat.quad([bt.x + 1.2 * s, bt.y, 18 * s], [bt.x + 1.2 * s, bt.y, 3.5 * s], [bt.x + 11 * s, bt.y, 3.5 * s], [bt.x + 1.2 * s, bt.y, 18 * s], lin(rgb(bt.sail || '#f2e8d8')));
   }
-  // Street props in rows (Rect 2026-11-20): benches along the sidewalks
-  // and the occasional bus shelter — deterministic per road/block, kept
-  // clear of intersections and of any actor.
   const WOOD = lin([122, 94, 66]), IRON = lin([40, 42, 48]);
-  // Fixed named stops (Phase 8, world dressing like the radio tower —
-  // the same in live play and every frame): Gazette Ave south sidewalk,
-  // Gazette Plaza south sidewalk, Ocean Drive west promenade. Each was
-  // checked clear of the staged actors in the judged frames.
-  if (inR(1330, 1512, 1080)) buildBusStop(gl, B, 1330, 1512, [0, -1]);
-  if (inR(800, 1044, 1080)) buildBusStop(gl, B, 800, 1044, [0, -1]);
-  if (inR(3650, 2620, 1080)) buildBusStop(gl, B, 3650, 2620, [1, 0]);
+  if (inR(1330, 1512, 1080)) buildBusStop(R, 1330, 1512, [0, -1]);
+  if (inR(800, 1044, 1080)) buildBusStop(R, 800, 1044, [0, -1]);
+  if (inR(3650, 2620, 1080)) buildBusStop(R, 3650, 2620, [1, 0]);
   const centers = roadCenters();
   const actorNear = (x, y, r) => {
     const all = [...game.traffic, ...(game.specials || []), ...game.police.cops, game.player];
@@ -2245,10 +686,8 @@ function buildVegetation(gl, game, B) {
           if (!inR(bx, by, 820) || actorNear(bx, by, 26)) continue;
           const h = hash01(c * 1.3 + k * 7.7 + sideSign * 31 + (vert ? 0 : 500));
           if (h < 0.34) {
-            // Bus shelter — the ONE canonical builder, facing the road.
-            buildBusStop(gl, B, bx, by, vert ? [-Math.sign(off), 0] : [0, -Math.sign(off)]);
+            buildBusStop(R, bx, by, vert ? [-Math.sign(off), 0] : [0, -Math.sign(off)]);
           } else if (h < 0.78) {
-            // Bench facing the road.
             box(B.flat, bx, by, 2.3, vert ? 1.6 : 4.6, vert ? 4.6 : 1.6, 0.5, 0, WOOD);
             const rx = vert ? bx + (off > 0 ? 1.5 : -1.5) : bx, ry = vert ? by : by + (off > 0 ? 1.5 : -1.5);
             box(B.flat, rx, ry, 3.8, vert ? 0.45 : 4.6, vert ? 4.6 : 0.45, 0.5, 0, WOOD);
@@ -2264,7 +703,8 @@ function buildVegetation(gl, game, B) {
 }
 
 // --------------------------------------------------------------- particles
-function buildParticles(gl, game, B) {
+function buildParticles(R, game) {
+  const { B } = R;
   for (const p of game.fx.particles || []) {
     const dx = p.x - F.cam[0], dy = p.y - F.cam[1];
     if (dx * dx + dy * dy > 700 * 700) continue;
@@ -2273,28 +713,24 @@ function buildParticles(gl, game, B) {
     const isSmoke = p.color && p.color.indexOf('120,120,125') !== -1;
     if (isSmoke) {
       const baseR = Math.min(11, p.size * 1.5) * (1.25 - ratio * 0.45) * 0.75;
-      addSmoke(gl, p.x, p.y, 8 + (1 - ratio) * 7, baseR, 0.20, 0.45);
-      addSmoke(gl, p.x + 2.5, p.y - 1.5, 12 + (1 - ratio) * 8, baseR * 1.35, 0.12, 0.45);
+      addSmoke(p.x, p.y, 8 + (1 - ratio) * 7, baseR, 0.20, 0.45);
+      addSmoke(p.x + 2.5, p.y - 1.5, 12 + (1 - ratio) * 8, baseR * 1.35, 0.12, 0.45);
     } else {
-      addGlow(gl, p.x, p.y, 10.5, 3.4, lin(col), 0.28);
-      addGlow(gl, p.x, p.y, 10.5, 1.7, lin(col), 0.9);
+      addGlow(p.x, p.y, 10.5, 3.4, lin(col), 0.28);
+      addGlow(p.x, p.y, 10.5, 1.7, lin(col), 0.9);
     }
   }
-  // Bullet tracers: a short bright bar along each bullet's flight line.
   if (game.bullets && game.bullets.length) {
     for (const b of game.bullets) {
       const mx = b.x - Math.cos(b.angle) * 5, my = b.y - Math.sin(b.angle) * 5;
       box(B.basic, mx, my, 11.5, 8, 0.15, 0.15, b.angle, lin([255, 224, 130]));
-      addGlow(gl, b.x, b.y, 11.5, 2.2, lin([255, 240, 190]), 0.55);
+      addGlow(b.x, b.y, 11.5, 2.2, lin([255, 240, 190]), 0.55);
     }
   }
 }
 
 // ------------------------------------------------------------ main render
 function fallback2D(ctx, game) {
-  // No WebGL (stubbed DOM in the smoke harness, or a GL-less machine):
-  // paint the grade's sky + a dark ground band so callers still get a
-  // composed frame and nothing ever throws.
   const grade = GRADES[game.timeGrade] || GRADES.golden;
   const g = ctx.createLinearGradient(0, 0, 0, VIEW_H * 0.78);
   g.addColorStop(0, `rgb(${grade.top[0]},${grade.top[1]},${grade.top[2]})`);
@@ -2311,9 +747,6 @@ export function renderView3D(ctx, game) {
   const gl = ensureGL();
   if (!gl) { fallback2D(ctx, game); return; }
   try {
-    // Frozen staging (screenshot captures) re-renders the identical state
-    // on every animation tick: the WebGL canvas already holds that exact
-    // frame, so recompositing it is a pure win and stays byte-identical.
     const cacheKey = game.frozen
       ? [game.shotName || '', game.time || 0, game.screen || '', game.idRender ? 1 : 0, game.wheelOpen ? 1 : 0, game.timeGrade || ''].join('|')
       : null;
@@ -2329,8 +762,6 @@ export function renderView3D(ctx, game) {
     fallback2D(ctx, game);
   }
 }
-// Draw the WebGL canvas into the game canvas + the grade's 2D finish
-// (sunset wash + vignette). HUD overlays drawn afterwards land on top.
 function composite(ctx, gl, grade, idMode) {
   ctx.drawImage(gl.glCanvas, 0, 0, VIEW_W, VIEW_H);
   if (idMode) return;
@@ -2347,13 +778,14 @@ function composite(ctx, gl, grade, idMode) {
 }
 function renderGL(gl, ctx, game) {
   const p = game.player;
-  const grade = GRADES[game.timeGrade] || GRADES.golden;
-  IDMODE = !!game.idRender;
+  const gradeName = game.timeGrade || 'golden';
+  const grade = GRADES[gradeName] || GRADES.golden;
+  gl.setIDMode(!!game.idRender);
   const fr = frameCamera(game);
   const isDrive = fr.isDrive;
   const anchor = isDrive ? p.car : p;
   F = {
-    cam: fr.cam, right: [1, 0], gradeName: game.timeGrade || 'golden', gradeEmissive: grade.emissive,
+    cam: fr.cam, right: [1, 0], gradeName, gradeEmissive: grade.emissive,
     time: game.time || 0, screen: game.screen || 'play',
     heroCar: isDrive ? p.car : (game.shotHeroCar || null),
   };
@@ -2364,34 +796,12 @@ function renderGL(gl, ctx, game) {
   lastCam = cam;
   const el = cam.matrixWorld.elements;
   F.right = [el[0], el[2]];
-  gl.sky.position.copy(cam.position);
-  // Grade: fog, sky, sun and window glow all follow game.timeGrade.
-  // Phase 3: fog range and the sun direction itself now ride on the
-  // grade (a grade without sunDir keeps the shared western SUN_DIR, so
-  // golden/dusk lighting is exactly the standing one).
-  const sDir = grade.sunDir || SUN_DIR;
-  gl.scene.fog.color.copy(linColor(grade.fog));
-  gl.scene.fog.near = grade.fogNear;
-  gl.scene.fog.far = grade.fogFar;
-  gl.skyMat.uniforms.top.value.copy(linColor(grade.top));
-  gl.skyMat.uniforms.mid.value.copy(linColor(grade.mid));
-  gl.skyMat.uniforms.hor.value.copy(linColor(grade.hor));
-  gl.skyMat.uniforms.sunCol.value.copy(linColor(grade.sun));
-  gl.skyMat.uniforms.sunDir.value.set(sDir[0], sDir[2], sDir[1]);
-  gl.skyMat.uniforms.haze.value.copy(linColor(grade.fog));
-  gl.hemi.intensity = 1.02 * grade.light;
-  gl.sun.intensity = 1.85 * grade.light;
-  gl.sun.color.copy(linColor(grade.sun));
+  gl.applyGrade(gradeName, grade, anchor);
   gl.mats.fwarm.emissiveIntensity = grade.emissive;
   gl.mats.fcool.emissiveIntensity = grade.emissive;
   gl.mats.foffice.emissiveIntensity = grade.emissive;
   gl.mats.glass.emissiveIntensity = grade.emissive * 0.8;
   gl.mats.shop.emissiveIntensity = grade.emissive * 0.75;
-  // Sun: low in the west, shadow frustum fitted to the camera focus.
-  gl.sun.position.set(anchor.x + sDir[0] * 950, sDir[2] * 950, anchor.y + sDir[1] * 950);
-  gl.sun.target.position.set(anchor.x, 0, anchor.y);
-  gl.sun.target.updateMatrixWorld();
-  // Rebuild the world batches from state.
   spriteN = 0;
   for (const sp of gl.sprites) sp.visible = false;
   const B = {
@@ -2399,25 +809,25 @@ function renderGL(gl, ctx, game) {
     asphalt: new Batch(true), concrete: new Batch(true), sandgrass: new Batch(true),
     roof: new Batch(true), fwarm: new Batch(true), fcool: new Batch(true),
     glass: new Batch(true), shop: new Batch(true), sign: new Batch(true), plate: new Batch(true), bus: new Batch(true), foffice: new Batch(true),
-    paint: new Batch(), glasspaint: new Batch(),
+    paint: new Batch(), glasspaint: new Batch(), chrome: new Batch(), tyre: new Batch(),
   };
-  buildGround(gl, game, B);
-  buildSkyline(gl, game, B);
-  buildBuildings(gl, game, B);
-  buildVegetation(gl, game, B);
-  buildVehicles(gl, game, B);
-  if (game.stagedHeli) buildHeli(gl, game, B, game.stagedHeli);
-  buildFigures(gl, game, B);
-  buildParticles(gl, game, B);
-  // Assemble: one mesh per batch, disposed after the render.
+  const R = { B, game, F, gl, addGlow, addSmoke, ensurePlate };
+  buildGround(R, game);
+  buildSkyline(R, game);
+  buildBuildings(R, game);
+  buildVegetation(R, game);
+  buildVehicles(R, game);
+  if (game.stagedHeli) buildHeli(R, game.stagedHeli);
+  buildFigures(R, game);
+  buildParticles(R, game);
   for (const m of gl.dyn) { gl.scene.remove(m); m.geometry.dispose(); }
   gl.dyn = [];
   const M = gl.mats;
   const addMesh = (batch, mat, idMat, cast = true, receive = true) => {
-    const mesh = batch.build(IDMODE ? idMat : mat);
+    const mesh = batch.build(idState.mode ? idMat : mat);
     if (!mesh) return;
-    mesh.castShadow = cast && !IDMODE;
-    mesh.receiveShadow = receive && !IDMODE;
+    mesh.castShadow = cast && !idState.mode;
+    mesh.receiveShadow = receive && !idState.mode;
     mesh.frustumCulled = false;
     gl.scene.add(mesh);
     gl.dyn.push(mesh);
@@ -2428,6 +838,8 @@ function renderGL(gl, ctx, game) {
   addMesh(B.flat, M.flat, M.idFlat, true, true);
   addMesh(B.paint, M.paint, M.idFlat, true, true);
   addMesh(B.glasspaint, M.glasspaint, M.idFlat, true, true);
+  addMesh(B.chrome, M.chrome, M.idFlat, true, true);
+  addMesh(B.tyre, M.tyre, M.idFlat, true, true);
   addMesh(B.roof, M.roof, M.idBlack, true, true);
   addMesh(B.fwarm, M.fwarm, M.idBlack, true, true);
   addMesh(B.fcool, M.fcool, M.idBlack, true, true);
@@ -2438,9 +850,9 @@ function renderGL(gl, ctx, game) {
   addMesh(B.sign, M.sign, M.idBlack, false, false);
   addMesh(B.plate, M.plate, M.idBlack, false, false);
   addMesh(B.bus, M.bus, M.idBlack, false, false);
-  if (!IDMODE) addMesh(B.alpha, M.alpha, M.idBlack, false, false);
+  if (!idState.mode) addMesh(B.alpha, M.alpha, M.idBlack, false, false);
   gl.renderer.render(gl.scene, cam);
-  composite(ctx, gl, grade, IDMODE);
+  composite(ctx, gl, grade, idState.mode);
   F = null;
-  curCat = null;
+  idState.cat = null;
 }
