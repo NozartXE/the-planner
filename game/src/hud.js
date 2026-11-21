@@ -963,6 +963,18 @@ export function drawMapScreen(ctx, game) {
     ctx.fillText(v, colX + colW, ry);
   });
   ctx.textAlign = 'left';
+  // LAST JOB payoff (Phase 2): one compact line under the career grid —
+  // the most recent settlement the game's own ledger recorded, title +
+  // net, no invented numbers. Live play keeps it in game.lastLedger;
+  // the chain ledger's tail is the same settlement while a chain runs.
+  const lastLed = game.lastLedger || (game.chainLedger && game.chainLedger.length ? game.chainLedger[game.chainLedger.length - 1] : null);
+  if (lastLed) {
+    ctx.fillStyle = PALETTE.hudMuted; ctx.font = '600 13px system-ui, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('LAST JOB — ' + String(lastLed.title).toUpperCase(), rx + 16, 284);
+    ctx.fillStyle = PALETTE.money; ctx.font = '700 13px system-ui, sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText('NET +' + formatMoney(lastLed.net), rx + rw - 16, 284);
+    ctx.textAlign = 'left';
+  }
   // STORY — the five real jobs, state from the chain position.
   panelSolid(ctx, rx, 314, rw, 218);
   ctx.fillStyle = '#f0d9a0'; ctx.font = '700 14px system-ui, sans-serif';
