@@ -327,15 +327,15 @@ export function buildMaterials() {
   const mats = {
     // World flat batch (props, vegetation, markings' geometry, figures'
     // world dressing): matte, low env response so streets stay grounded.
-    flat: std({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.92, metalness: 0.0, envMapIntensity: 0.35 }),
+    flat: std({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.92, metalness: 0.0, envMapIntensity: 0.25 }),
     // Car paint: low roughness, strong env reflection — the sun glint and
     // sky sheen the rebuild exists for. Colour rides the vertex colours.
-    paint: std({ vertexColors: true, roughness: 0.34, metalness: 0.12, envMapIntensity: 1.15 }),
+    paint: std({ vertexColors: true, roughness: 0.34, metalness: 0.12, envMapIntensity: 0.5 }),
     // Glossy dark glass (car glasshouses): near-mirror env response over
     // dark blue-grey vertex tints.
-    glasspaint: std({ vertexColors: true, roughness: 0.07, metalness: 0.25, envMapIntensity: 1.6 }),
+    glasspaint: std({ vertexColors: true, roughness: 0.07, metalness: 0.25, envMapIntensity: 1.25 }),
     // Chrome / bright metal trim and wheel spokes.
-    chrome: std({ vertexColors: true, roughness: 0.32, metalness: 0.85, envMapIntensity: 1.2 }),
+    chrome: std({ vertexColors: true, roughness: 0.32, metalness: 0.85, envMapIntensity: 0.8 }),
     // Tyre rubber: near-black, rough, no env sheen.
     tyre: std({ vertexColors: true, roughness: 0.96, metalness: 0.0, envMapIntensity: 0.15 }),
     basic: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }),

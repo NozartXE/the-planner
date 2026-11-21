@@ -268,7 +268,7 @@ export function createCore(VIEW_W, VIEW_H, VFOV) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.12;
+  renderer.toneMappingExposure = 1.0;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const scene = new THREE.Scene();
@@ -329,9 +329,9 @@ export function createCore(VIEW_W, VIEW_H, VFOV) {
       scene.fog.near = grade.fogNear;
       scene.fog.far = grade.fogFar;
       refreshEnv(gradeName, grade, sDir);
-      hemi.intensity = 1.05 * grade.light;
+      hemi.intensity = 0.45 * grade.light;
       hemi.color.copy(linColor(grade.sun).lerp(linColor([255, 255, 255]), 0.35));
-      sun.intensity = 2.6 * grade.light;
+      sun.intensity = 1.5 * grade.light;
       sun.color.copy(linColor(grade.sun));
       sun.position.set(anchor.x + sDir[0] * 950, sDir[2] * 950, anchor.y + sDir[1] * 950);
       sun.target.position.set(anchor.x, 0, anchor.y);

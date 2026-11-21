@@ -142,7 +142,7 @@ export function buildCar(R, car) {
     : ['sedan', 'coupe', 'hatch'][Math.floor(hash01((car.id || 1) * 3.13) * 3) % 3];
   const W = isVan ? (car.wid || 21) : variant === 'suv' ? 18.6 : 17.5;
   const body = car.dead ? lin([44, 44, 48]) : lin(rgb(car.color));
-  const bodyTop = car.dead ? body : lin(rgb(car.color).map((v) => Math.min(255, v * 1.2)));
+  const bodyTop = car.dead ? body : lin(rgb(car.color).map((v) => Math.min(255, v * 1.12)));
   const bodyDark = car.dead ? body : lin(rgb(car.color).map((v) => v * 0.85));
   const bodyTopZ = isVan ? 10.2 : variant === 'suv' ? 9.3 : 8.2;
   const roofZ = isVan ? 11.6 : CAR_ROOF;
