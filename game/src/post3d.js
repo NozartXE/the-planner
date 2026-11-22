@@ -12,6 +12,11 @@
 // vignette. The frame must glow at its emissives, never wash out:
 // the threshold sits above ordinary sunlit surfaces and the bloom
 // strength is capped, so only signals bloom.
+// AIM-REPAIR retune (2026-11-22): threshold 0.72 → 0.90, strength
+// 0.55 → 0.35. The Phase 2 values bloomed the heli spotlight cone and
+// every tracer glow into one diffuse mass ~3x too wide, and the
+// mission frame's shot read as ending at the target sedan's rear
+// corner instead of the reticle (panel §7(b) fail, ~108–186 px).
 //
 // Fully deterministic: fixed kernels, fixed iteration counts, no
 // clocks, no randomness — frozen captures stay byte-identical.
@@ -114,14 +119,14 @@ export function createPost(renderer, w, h) {
     depthTest: false, depthWrite: false,
   });
   const brightMat = mat(BRIGHT_FS, {
-    tSrc: { value: sceneRT.texture }, uThreshold: { value: 0.72 }, uKnee: { value: 0.35 },
+    tSrc: { value: sceneRT.texture }, uThreshold: { value: 0.90 }, uKnee: { value: 0.35 },
   });
   const blurMat = mat(BLUR_FS, {
     tSrc: { value: null }, uTexel: { value: new THREE.Vector2(1 / bw, 1 / bh) }, uDir: { value: new THREE.Vector2(1, 0) },
   });
   const compMat = mat(COMPOSITE_FS, {
     tScene: { value: sceneRT.texture }, tBloom: { value: null },
-    uStrength: { value: 0.55 }, uVignette: { value: 0.34 },
+    uStrength: { value: 0.35 }, uVignette: { value: 0.34 },
   });
 
   function pass(material, target) {

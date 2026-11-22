@@ -696,13 +696,20 @@ export function applyShot(game, name, step) {
     // ±1.8 units of the contact point (offsets sum to zero, so the
     // measure's centroid is the contact point itself) — their fixed-
     // radius glows overlap into one bright core on the cross instead of
-    // three isolated dots. Palette unchanged.
+    // three isolated dots.
+    // AIM-REPAIR (2026-11-22): palette heated — the pale yellows
+    // (#f2c14e/#ffd76a/#fff3c4) washed out against the ACES grade and
+    // the spotlight pool, so readers anchored the shot's end at the
+    // sedan's rear corner instead of the reticle. The ring is now
+    // saturated orange and the centre spark (offset [0,0], index 6)
+    // white-hot, so the impact reads as a hot contrast event exactly
+    // on the cross. Positions unchanged.
     const sparkOff = [[1.2, 0.6], [-1.2, -0.6], [0.6, -1.2], [-0.6, 1.2], [1.8, 1.4], [-1.8, -1.4], [0, 0], [-1.5, 1.0], [1.5, -1.0]];
-    const sparkCols = ['#f2c14e', '#ffd76a', '#fff3c4'];
+    const sparkCols = ['#ff9e36', '#ff7a1a', '#ffb03a', '#ff9e36', '#ff7a1a', '#ffb03a', '#ffffff', '#ff9e36', '#ff7a1a'];
     const sparkLife = [0.4, 0.32, 0.45, 0.38, 0.42, 0.34, 0.44, 0.36, 0.41];
     const sparks = sparkOff.map((o, i) => ({
       x: impact.x + o[0], y: impact.y + o[1], vx: 0, vy: 0,
-      life: sparkLife[i], maxLife: sparkLife[i], color: sparkCols[i % 3], size: 2.8 + (i % 4) * 0.5, drag: 0,
+      life: sparkLife[i], maxLife: sparkLife[i], color: sparkCols[i], size: 2.8 + (i % 4) * 0.5, drag: 0,
     }));
     const mx = game.player.x + Math.cos(a) * 16, my = game.player.y + Math.sin(a) * 16;
     game.fx.particles = [

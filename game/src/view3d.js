@@ -386,7 +386,7 @@ function buildParticles(R, game) {
     for (const b of game.bullets) {
       const mx = b.x - Math.cos(b.angle) * 5, my = b.y - Math.sin(b.angle) * 5;
       box(B.basic, mx, my, 11.5, 8, 0.15, 0.15, b.angle, lin([255, 224, 130]));
-      addGlow(b.x, b.y, 11.5, 2.2, lin([255, 240, 190]), 0.55);
+      addGlow(b.x, b.y, 11.5, 0.9, lin([255, 240, 190]), 0.32);
     }
   }
 }

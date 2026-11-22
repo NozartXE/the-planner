@@ -413,14 +413,14 @@ export function buildHeli(R, heli) {
     dir.normalize();
     const mid = from.clone().add(to).multiplyScalar(0.5);
     const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-    for (const [rad, al] of [[15, 0.10], [8, 0.09]]) {
+    for (const [rad, al] of [[15, 0.07], [8, 0.06]]) {
       const cone = new THREE.ConeGeometry(rad, 1, 18, 1, true);
       B.alpha.push(cone, new THREE.Matrix4().compose(mid, quat, new THREE.Vector3(1, len, 1)), [...lin([255, 238, 196]), al]);
       cone.dispose();
     }
     disc(B.alpha, heli.spotX, heli.spotY, 0.58, 16, [...lin([255, 238, 196]), 0.30]);
     disc(B.alpha, heli.spotX, heli.spotY, 0.60, 8, [...lin([255, 246, 214]), 0.38]);
-    R.addGlow(heli.spotX, heli.spotY, 5, 17, lin([255, 238, 196]), 0.45);
+    R.addGlow(heli.spotX, heli.spotY, 5, 12, lin([255, 238, 196]), 0.30);
   }
   idState.cat = null;
 }
